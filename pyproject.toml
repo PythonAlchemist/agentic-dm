@@ -2,13 +2,10 @@
 name = "agentic-dm"
 version = "0.1.0"
 dependencies = [
-    "faiss-cpu",
+    "openai",
     "numpy",
-    "sentence-transformers",
     "pymupdf4llm",
-    "transformers",
     "pandas>=2.3.1",
-    "colorama>=0.4.6",
     "termcolor>=3.1.0",
 ]
 

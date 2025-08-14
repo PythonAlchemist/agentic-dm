@@ -2,3 +2,6 @@ data/*
 .ai-dm
 *.egg-info
 __pycache__
+.env
+.vscode/
+indices/
