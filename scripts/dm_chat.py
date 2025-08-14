@@ -57,6 +57,30 @@ def initialize_dm_chat(
     return rag
 
 
+def show_question_type_info(rag, query: str):
+    """Show the detected question type and response style."""
+    try:
+        # Use the internal method to detect question type
+        question_type = rag._detect_question_type(query)
+
+        # Map question types to response styles
+        style_descriptions = {
+            "factual": "📊 Tables, lists, dense information",
+            "narrative": "📖 Story-like, descriptive responses",
+            "procedural": "⚙️ Step-by-step, actionable guidance",
+            "creative": "🎨 Imaginative, flexible suggestions",
+        }
+
+        style = style_descriptions.get(question_type, "📝 Standard response")
+
+        print(f"🔍 Question Type: {question_type.title()}")
+        print(f"💡 Response Style: {style}")
+
+    except Exception:
+        # If we can't detect the type, don't show anything
+        pass
+
+
 def dm_chat_loop(rag: OpenAIRAGSystem):
     """
     Starts an interactive chat loop for the Dungeon Master chatbot.
@@ -135,6 +159,9 @@ def dm_chat_loop(rag: OpenAIRAGSystem):
             # Show the context being used
             print("\n📖 Relevant context found:")
             cprint(context, "cyan")
+
+            # Show question type detection
+            show_question_type_info(rag, query)
 
             # Use OpenAI to generate a response with conversation history
             print("\n🤖 Generating response with OpenAI...")

@@ -293,7 +293,7 @@ class OpenAIRAGSystem:
     def search(
         self, query: str, top_k: int = 5, content_type_filter: Optional[str] = None
     ) -> List[Tuple[OpenAIChunkMetadata, float]]:
-        """Search for relevant chunks using cosine similarity."""
+        """Search for relevant chunks using cosine similarity with diversity."""
         if not self.embeddings:
             return []
 
@@ -316,9 +316,55 @@ class OpenAIRAGSystem:
 
             similarities.append((chunk, similarity))
 
-        # Sort by similarity and return top_k
+        # Sort by similarity
         similarities.sort(key=lambda x: x[1], reverse=True)
-        return similarities[:top_k]
+
+        # Apply diversity selection to avoid clustering similar chunks
+        diverse_results = self._select_diverse_chunks(similarities, top_k)
+
+        return diverse_results
+
+    def _select_diverse_chunks(
+        self, similarities: List[Tuple[OpenAIChunkMetadata, float]], top_k: int
+    ) -> List[Tuple[OpenAIChunkMetadata, float]]:
+        """Select diverse chunks to avoid clustering similar content."""
+        if len(similarities) <= top_k:
+            return similarities
+
+        selected = []
+        remaining = similarities.copy()
+
+        # Always include the top result
+        if remaining:
+            selected.append(remaining.pop(0))
+
+        # Select diverse chunks from different sections
+        while len(selected) < top_k and remaining:
+            # Find chunk from a different section than what we already have
+            best_diverse = None
+            best_score = -1
+
+            for chunk, score in remaining:
+                # Check if this chunk is from a different section
+                chunk_section = chunk.section
+                existing_sections = {chunk.section for chunk, _ in selected}
+
+                # Prefer chunks from different sections
+                diversity_bonus = 0.1 if chunk_section not in existing_sections else 0
+                adjusted_score = score + diversity_bonus
+
+                if adjusted_score > best_score:
+                    best_score = adjusted_score
+                    best_diverse = (chunk, score)
+
+            if best_diverse:
+                selected.append(best_diverse)
+                remaining.remove(best_diverse)
+            else:
+                # If no diverse option, just take the next best
+                selected.append(remaining.pop(0))
+
+        return selected
 
     def get_context_for_query(
         self,
@@ -328,7 +374,14 @@ class OpenAIRAGSystem:
         max_context_length: int = 4000,
     ) -> str:
         """Get relevant context for a query."""
-        results = self.search(query, top_k=top_k)
+        # For NPC questions, use broader search but prioritize relevant content
+        if any(word in query.lower() for word in ["npc", "character", "who", "people"]):
+            # Search more broadly for NPC content
+            results = self.search(
+                query, top_k=top_k * 2
+            )  # Get more results to filter from
+        else:
+            results = self.search(query, top_k=top_k)
 
         if not results:
             return "No relevant information found for your query."
@@ -370,36 +423,269 @@ class OpenAIRAGSystem:
 
         return context
 
+    def _detect_question_type(self, question: str) -> str:
+        """
+        Detect the type of question to determine response style.
+
+        Args:
+            question: The user's question
+
+        Returns:
+            Question type: 'factual', 'narrative', 'procedural', or 'creative'
+        """
+        question_lower = question.lower()
+
+        # Factual questions - want tables, lists, dense info
+        factual_keywords = [
+            "list",
+            "what",
+            "how many",
+            "stat",
+            "stats",
+            "statistics",
+            "table",
+            "chart",
+            "numbers",
+            "count",
+            "total",
+            "all",
+            "monsters",
+            "npcs",
+            "locations",
+            "treasure",
+            "items",
+            "rules",
+            "mechanics",
+            "damage",
+            "hp",
+            "ac",
+            "dc",
+            "cost",
+            "price",
+            "gold",
+            "silver",
+            "copper",
+        ]
+
+        # Narrative questions - want story-like, descriptive responses
+        narrative_keywords = [
+            "story",
+            "narrative",
+            "describe",
+            "tell me about",
+            "background",
+            "lore",
+            "history",
+            "what happens",
+            "how does",
+            "why",
+            "explain",
+            "elaborate",
+            "atmosphere",
+            "mood",
+            "feeling",
+            "experience",
+        ]
+
+        # Procedural questions - want step-by-step, actionable info
+        procedural_keywords = [
+            "how to",
+            "steps",
+            "procedure",
+            "process",
+            "run",
+            "manage",
+            "handle",
+            "deal with",
+            "approach",
+            "tips",
+            "advice",
+            "guidance",
+            "strategy",
+        ]
+
+        # Creative questions - want imaginative, flexible responses
+        creative_keywords = [
+            "imagine",
+            "creative",
+            "ideas",
+            "suggestions",
+            "alternatives",
+            "variations",
+            "what if",
+            "possibilities",
+            "inspiration",
+            "concepts",
+            "themes",
+        ]
+
+        # Count keyword matches
+        factual_score = sum(
+            1 for keyword in factual_keywords if keyword in question_lower
+        )
+        narrative_score = sum(
+            1 for keyword in narrative_keywords if keyword in question_lower
+        )
+        procedural_score = sum(
+            1 for keyword in procedural_keywords if keyword in question_lower
+        )
+        creative_score = sum(
+            1 for keyword in creative_keywords if keyword in question_lower
+        )
+
+        # Determine primary type
+        scores = {
+            "factual": factual_score,
+            "narrative": narrative_score,
+            "procedural": procedural_score,
+            "creative": creative_score,
+        }
+
+        primary_type = max(scores, key=scores.get)
+
+        # Default to factual if no clear pattern
+        if max(scores.values()) == 0:
+            primary_type = "factual"
+
+        return primary_type
+
     def ask_question(self, question: str, context: str) -> str:
         """
-        Ask a question using OpenAI's chat completions API.
+        Ask a question using OpenAI's chat completions API with intelligent formatting.
 
         Args:
             question: The question to ask
             context: The context from the RAG system
 
         Returns:
-            The AI-generated response
+            The AI-generated response with appropriate formatting
         """
         try:
-            # Enhanced system prompt for better DM assistance
-            system_prompt = """You are a concise, factual Dungeon Master assistant. Your responses must be:
+            # Detect question type
+            question_type = self._detect_question_type(question)
 
-**CONCISE**: No fluff, no "according to context" phrases, no unnecessary explanations
-**FACTUALLY DENSE**: Pack maximum useful information into minimal words
-**WELL-FORMATTED**: Use tables for lists, bullet points for details, clear structure
-**ACTIONABLE**: Provide practical information DMs can use immediately
-**DIRECT**: Answer the question directly without preamble
+            # Create type-specific system prompts
+            if question_type == "factual":
+                system_prompt = """You are a comprehensive, factual Dungeon Master assistant. For factual questions, provide:
 
-When creating lists or comparing items, use tables. When describing locations or NPCs, use structured formats. Be brief but comprehensive. Every word should add value."""
+**COMPLETE INFORMATION**: Find and present ALL relevant information from the context
+**DENSE INFORMATION**: Pack maximum useful data into minimal words
+**TABLES & LISTS**: Use tables for comparisons, bullet points for details
+**STRUCTURED FORMAT**: Clear organization with headers and sections
+**NUMBERS & STATS**: Include all relevant numerical information
+**NO FLUFF**: Every word must add value, no unnecessary explanations
 
-            # User prompt with context
-            user_prompt = f"""Question: {question}
+**CRITICAL REQUIREMENTS:**
+- NEVER use generic column headers like "Role", "Importance", "Type", "Category"
+- ALWAYS use specific, descriptive column headers that provide actionable information
+- For NPCs: use columns like "Function", "Personality", "Location", "Motivation", "Quests Given"
+- For monsters: use columns like "CR", "HP", "AC", "Special Abilities", "Behavior", "Habitat"
+- For locations: use columns like "Features", "Atmosphere", "Purpose", "Connections", "Dangers"
+- For items: use columns like "Properties", "Effects", "Rarity", "Usage", "Value"
+
+**NPC SEARCH REQUIREMENTS:**
+- Search through ALL available context for NPC information
+- Include NPCs from different locations, not just the main ones
+- Look for both major and minor characters
+- Include NPCs mentioned in different sections of the document
+- Don't limit yourself to just the most obvious characters
+
+**NPC TABLE FORMAT - ESSENTIAL COLUMNS:**
+- **Name**: Character's full name
+- **Function**: What they do (Village Elder, Merchant, Priest, etc.)
+- **Location**: Where to find them (Town Hall, Market Square, Temple, etc.)
+- **Attitude**: How they feel about the party/strangers (Friendly, Suspicious, Hostile, etc.)
+- **Quests**: What quests or tasks they can give
+- **Physical Description**: Key physical traits (age, appearance, distinguishing features)
+
+**LOCATION GUIDELINES:**
+- **Be specific**: "Town Hall" not "Shadowgrange"
+- **Be actionable**: Where players can actually go to find them
+- **Include landmarks**: "Near the fountain", "Behind the tavern"
+- **Avoid generic regions**: Don't just list the main setting name
+- **Think like a player**: Where would I look for this person?
+
+**NPC RESPONSE FORMAT:**
+For NPC questions, use descriptive paragraphs instead of tables. Each NPC should have:
+
+**Name** - Brief description of their role and importance
+- **Function**: What they do in the village/world
+- **Location**: Where players can find them
+- **Attitude**: How they treat strangers and the party
+- **Quests**: What they can offer players
+- **Physical Description**: Key appearance details for roleplay
+
+**EXAMPLE GOOD NPC FORMAT:**
+### Main NPCs in Shadowgrange
+
+**Eckhardt Sheck** - The stern but respected village elder who runs Shadowgrange from the Town Hall. He's an elderly man with a weathered face who carries a staff and treats strangers with cautious respect. Eckhardt provides the main quest hook and handles village politics.
+
+**Magda Botler** - A friendly merchant who runs the market stall in Market Square. She's a middle-aged woman with a warm smile who wears colorful clothes and knows everyone in the village. Magda is the best source for supplies and local information, offering various supply quests.
+
+**Carsten** - A mysterious priest who serves at the Temple. He's a thin man in dark robes with intense eyes who speaks in riddles and knows hidden knowledge. Carsten provides religious guidance and can reveal secrets about the village's dark past.
+
+**Priestess Flora** - A determined young woman in simple robes who gives urgent quests from the Temple. She's focused on her mission and treats the party with urgency, offering the main quest to travel to Mauer and recover an artifact.
+
+**CRITICAL FORMATTING RULES:**
+- **CONSOLIDATE INTO TABLES**: Put ALL information in tables whenever possible
+- **NO REDUNDANT LISTS**: Don't repeat table information in bullet points below
+- **COMPREHENSIVE TABLES**: Include all relevant details in the table cells
+- **EFFICIENT LAYOUT**: Use as few tables as needed to present all information
+- **NO DUPLICATION**: Each piece of information should appear only once
+
+**EXAMPLE EFFICIENT FORMAT:**
+### All NPCs in Shadowgrange
+
+| Name | Function | Location | Attitude | Quests | Physical Description |
+|------|----------|----------|----------|--------|---------------------|
+| Eckhardt Sheck | Village Elder, handles politics | Town Hall (main building, center of village) | Stern but fair, cautious with strangers | Main quest hook, village politics | Elderly man, weathered face, carries staff |
+| Magda Botler | Merchant, information broker | Market Square (north side, colorful stall) | Friendly, helpful, knows everyone | Supply quests, local information | Middle-aged woman, warm smile, colorful clothes |
+| Carsten | Priest, keeper of secrets | Temple (stone building, east edge of village) | Mysterious, secretive, speaks in riddles | Religious guidance, hidden knowledge | Thin man, dark robes, intense eyes |
+| Priestess Flora | Quest giver, urgent mission | Temple (inner sanctum, behind main altar) | Determined, focused, urgent | Travel to Mauer, artifact recovery | Young woman, determined expression, simple robes |
+
+Format responses with comprehensive tables that contain ALL information. Avoid redundant lists or bullet points that repeat table content."""
+
+            elif question_type == "narrative":
+                system_prompt = """You are a narrative-focused Dungeon Master assistant. For story questions, provide:
+
+**DESCRIPTIVE LANGUAGE**: Rich, atmospheric descriptions that bring the world to life
+**STORYTELLING**: Engaging narrative that helps DMs understand the setting
+**EMOTIONAL CONTEXT**: Convey mood, atmosphere, and character motivations
+**LORE & BACKGROUND**: Deep dive into the world's history and culture
+**IMMERSIVE EXPERIENCE**: Help DMs feel like they're in the world
+
+Be descriptive and engaging while staying true to the source material."""
+
+            elif question_type == "procedural":
+                system_prompt = """You are a practical Dungeon Master assistant. For procedural questions, provide:
+
+**STEP-BY-STEP**: Clear, numbered instructions for running encounters/events
+**ACTIONABLE ADVICE**: Specific tips and techniques DMs can use immediately
+**BEST PRACTICES**: Proven methods and strategies for smooth gameplay
+**TROUBLESHOOTING**: Common issues and how to handle them
+**PRACTICAL EXAMPLES**: Concrete examples of how to implement suggestions
+
+Focus on practical, actionable guidance for running the game."""
+
+            else:  # creative
+                system_prompt = """You are a creative Dungeon Master assistant. For creative questions, provide:
+
+**INNOVATIVE IDEAS**: Fresh perspectives and creative approaches
+**FLEXIBLE SOLUTIONS**: Multiple options and alternatives to consider
+**INSPIRATION**: Creative prompts and concepts to spark imagination
+**ADAPTABILITY**: Ways to modify and customize the existing material
+**CREATIVE FREEDOM**: Encouragement to make the campaign your own
+
+Provide creative inspiration while respecting the source material."""
+
+            # User prompt with context and question type
+            user_prompt = f"""Question Type: {question_type.title()}
+Question: {question}
 
 Context from campaign module:
 {context}
 
-Provide a direct, factual answer with good formatting."""
+Provide a response appropriate for this type of question."""
 
             response = self.client.chat.completions.create(
                 model=self.model,
