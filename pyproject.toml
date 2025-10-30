@@ -1,16 +1,7 @@
 [project]
 name = "agentic-dm"
 version = "0.1.0"
-dependencies = [
-    "openai",
-    "numpy",
-    "pymupdf4llm",
-    "pandas>=2.3.1",
-    "termcolor>=3.1.0",
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "watchdog>=3.0.0",
-]
+dependencies = []
 
 [tool.setuptools.packages]
 find = { include = ["backend", "data", "database", "frontend"] }
