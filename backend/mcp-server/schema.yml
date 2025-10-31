@@ -1,0 +1,33 @@
+# schema.yml — minimal, no visibility/flags
+entity_label: Entity
+entity_types:
+  - Location
+  - NPC
+  - Quest
+  - Encounter
+  - Item
+  - Lore
+  - Event
+  - PC
+  - Monster
+
+node_properties:
+  - id
+  - name
+  - details
+
+nav_relationships:
+  - connected_to
+  - resides_in
+  - located_in
+  - often_travels_to
+  - triggers
+  - gives_quest
+  - starts_at
+  - occurs_at
+  - objective_at
+  - contains_enemy
+  - owner_of
+
+searchable_node_properties:
+  - name

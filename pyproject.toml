@@ -1,7 +1,14 @@
 [project]
 name = "agentic-dm"
 version = "0.1.0"
-dependencies = []
+dependencies = [
+    "mcp>=1.19.0",
+    "neo4j>=6.0.2",
+    "openai>=2.6.1",
+    "pydantic>=2.12.3",
+    "python-dotenv>=1.2.1",
+    "pyyaml>=6.0.3",
+]
 
 [tool.setuptools.packages]
 find = { include = ["backend", "data", "database", "frontend"] }
