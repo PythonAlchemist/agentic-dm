@@ -1,14 +1,58 @@
 [project]
 name = "agentic-dm"
 version = "0.1.0"
+description = "AI-powered D&D Dungeon Master Assistant"
+requires-python = ">=3.12"
 dependencies = [
-    "mcp>=1.19.0",
-    "neo4j>=6.0.2",
-    "openai>=2.6.1",
+    # Core
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
     "pydantic>=2.12.3",
+    "pydantic-settings>=2.6.0",
     "python-dotenv>=1.2.1",
+
+    # LLM & Embeddings
+    "openai>=2.6.1",
+    "tiktoken>=0.8.0",
+
+    # Vector Database
+    "chromadb>=0.5.0",
+
+    # Graph Database
+    "neo4j>=6.0.2",
+
+    # PDF Processing
+    "pymupdf>=1.25.0",
+
+    # NER & NLP (Phase 2, but install now)
+    "spacy>=3.8.0",
+
+    # Agent Protocol
+    "mcp>=1.19.0",
+
+    # Utilities
     "pyyaml>=6.0.3",
+    "httpx>=0.28.0",
+    "tenacity>=9.0.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+ingest-pdf = "backend.scripts.ingest_pdf:main"
+process-transcript = "backend.scripts.process_transcript:main"
+
 [tool.setuptools.packages]
-find = { include = ["backend", "data", "database", "frontend"] }
+find = { where = ["."], include = ["backend*"] }
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
