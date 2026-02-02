@@ -1,7 +1,41 @@
+# Data directories
 data/*
-.ai-dm
-*.egg-info
-__pycache__
-.env
-.vscode/
+!data/.gitkeep
 indices/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Project specific
+.ai-dm
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Misc
+*.log
+.DS_Store
