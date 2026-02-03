@@ -385,3 +385,68 @@ class CampaignGraphOps:
             "total_entities": sum(type_counts.values()),
             "total_relationships": sum(rel_counts.values()),
         }
+
+    def get_full_graph(
+        self,
+        entity_types: Optional[list[str]] = None,
+        limit: int = 200,
+    ) -> dict:
+        """Get the full graph data for visualization.
+
+        Args:
+            entity_types: Optional filter by entity types.
+            limit: Maximum number of nodes.
+
+        Returns:
+            Dict with nodes and links for graph visualization.
+        """
+        # Get all nodes
+        if entity_types:
+            node_query = """
+            MATCH (e:Entity)
+            WHERE e.entity_type IN $types
+            RETURN e
+            LIMIT $limit
+            """
+            params = {"types": entity_types, "limit": limit}
+        else:
+            node_query = """
+            MATCH (e:Entity)
+            RETURN e
+            LIMIT $limit
+            """
+            params = {"limit": limit}
+
+        with neo4j_session() as session:
+            result = session.run(node_query, **params)
+            nodes = [dict(record["e"]) for record in result]
+
+        # Get node IDs for filtering relationships
+        node_ids = {n["id"] for n in nodes}
+
+        # Get all relationships between these nodes
+        link_query = """
+        MATCH (source:Entity)-[r]->(target:Entity)
+        WHERE source.id IN $node_ids AND target.id IN $node_ids
+        RETURN source.id as source, target.id as target, type(r) as type,
+               properties(r) as properties
+        """
+
+        with neo4j_session() as session:
+            result = session.run(link_query, node_ids=list(node_ids))
+            links = [
+                {
+                    "source": record["source"],
+                    "target": record["target"],
+                    "type": record["type"],
+                    "properties": record["properties"],
+                }
+                for record in result
+            ]
+
+        return {
+            "nodes": nodes,
+            "links": links,
+            "node_count": len(nodes),
+            "link_count": len(links),
+        }

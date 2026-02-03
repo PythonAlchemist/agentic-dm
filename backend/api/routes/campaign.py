@@ -147,3 +147,20 @@ async def search_graph(
         return {"query": q, "results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph")
+async def get_full_graph(
+    entity_types: Optional[str] = Query(None, description="Comma-separated entity types"),
+    limit: int = Query(200, ge=1, le=500),
+) -> dict:
+    """Get the full graph for visualization.
+
+    Returns nodes and links in a format suitable for force-directed graphs.
+    """
+    try:
+        ops = get_graph_ops()
+        types = entity_types.split(",") if entity_types else None
+        return ops.get_full_graph(entity_types=types, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
