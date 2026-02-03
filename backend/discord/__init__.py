@@ -26,6 +26,13 @@ from backend.discord.combat_controller import (
     NPCCombatController,
     get_combat_controller,
 )
+from backend.discord.combat_manager import (
+    CombatManager,
+    CombatConfig,
+    TurnResult,
+    TurnType,
+    get_combat_manager,
+)
 
 __all__ = [
     # Models
@@ -52,4 +59,10 @@ __all__ = [
     # Combat controller
     "NPCCombatController",
     "get_combat_controller",
+    # Combat manager
+    "CombatManager",
+    "CombatConfig",
+    "TurnResult",
+    "TurnType",
+    "get_combat_manager",
 ]
