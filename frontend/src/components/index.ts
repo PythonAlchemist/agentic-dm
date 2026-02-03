@@ -5,3 +5,5 @@ export { Sidebar } from './Sidebar';
 export { CampaignDashboard } from './CampaignDashboard';
 export { EntityDetail } from './EntityDetail';
 export { KnowledgeGraph } from './KnowledgeGraph';
+export { PlayerManager } from './PlayerManager';
+export { CombatTracker } from './CombatTracker';

@@ -332,42 +332,127 @@ class TranscriptProcessor:
         speakers: list,
         session_id: str,
     ) -> None:
-        """Create speaker entities (PCs for players).
+        """Create speaker entities (Players and PCs).
+
+        Creates Player entities, their PC entities, and establishes relationships:
+        - Player PLAYS_AS PC
+        - Player ATTENDED Session
+        - PC PARTICIPATED_IN Session
 
         Args:
             speakers: List of speakers from transcript.
             session_id: Session ID.
         """
+        player_ids = []
+
         for speaker in speakers:
-            if speaker.role == SpeakerRole.PLAYER and speaker.character_name:
-                # Create PC entity
+            if speaker.role == SpeakerRole.PLAYER:
                 try:
-                    existing = self.graph_ops.search(
-                        speaker.character_name,
-                        entity_types=[EntityType.PC.value],
-                        limit=1,
-                    )
+                    # Find or create Player entity
+                    player = self._find_or_create_player(speaker.name)
+                    if player:
+                        player_ids.append(player["id"])
 
-                    if not existing:
-                        node = self.graph_ops.create_entity(
-                            name=speaker.character_name,
-                            entity_type=EntityType.PC,
-                            properties={
-                                "player_name": speaker.name,
-                                "aliases": speaker.aliases,
-                                "first_session": session_id,
-                            },
-                        )
-
-                        if node:
-                            # Link to session
-                            self.graph_ops.create_relationship(
-                                source_id=node["id"],
-                                target_id=session_id,
-                                relationship_type=RelationshipType.PARTICIPATED_IN,
+                        # Create PC if character name is provided
+                        if speaker.character_name:
+                            pc = self._find_or_create_pc(
+                                character_name=speaker.character_name,
+                                player_id=player["id"],
+                                player_name=speaker.name,
+                                session_id=session_id,
+                                aliases=speaker.aliases,
                             )
+
+                            if pc:
+                                # Ensure PLAYS_AS relationship exists
+                                self.graph_ops.link_player_character(
+                                    player["id"], pc["id"]
+                                )
+
+                                # Link PC to session
+                                self.graph_ops.create_relationship(
+                                    source_id=pc["id"],
+                                    target_id=session_id,
+                                    relationship_type=RelationshipType.PARTICIPATED_IN,
+                                )
                 except Exception:
                     pass
+
+        # Record session attendance for all players
+        if player_ids:
+            try:
+                self.graph_ops.record_session_attendance(
+                    session_id=session_id,
+                    player_ids=player_ids,
+                )
+            except Exception:
+                pass
+
+    def _find_or_create_player(self, name: str) -> Optional[dict]:
+        """Find an existing player by name or create a new one.
+
+        Args:
+            name: Player name.
+
+        Returns:
+            Player entity dict or None.
+        """
+        # Search for existing player
+        existing = self.graph_ops.search(
+            name,
+            entity_types=[EntityType.PLAYER.value],
+            limit=1,
+        )
+
+        if existing and existing[0].get("name", "").lower() == name.lower():
+            return existing[0]
+
+        # Create new player
+        return self.graph_ops.create_player(name=name)
+
+    def _find_or_create_pc(
+        self,
+        character_name: str,
+        player_id: str,
+        player_name: str,
+        session_id: str,
+        aliases: Optional[list] = None,
+    ) -> Optional[dict]:
+        """Find an existing PC by name or create a new one.
+
+        Args:
+            character_name: Character name.
+            player_id: Player ID to link to.
+            player_name: Player name for denormalization.
+            session_id: Session ID for tracking.
+            aliases: Optional character aliases.
+
+        Returns:
+            PC entity dict or None.
+        """
+        # Search for existing PC
+        existing = self.graph_ops.search(
+            character_name,
+            entity_types=[EntityType.PC.value],
+            limit=1,
+        )
+
+        if existing and existing[0].get("name", "").lower() == character_name.lower():
+            return existing[0]
+
+        # Create new PC
+        node = self.graph_ops.create_entity(
+            name=character_name,
+            entity_type=EntityType.PC,
+            properties={
+                "player_id": player_id,
+                "player_name": player_name,
+                "aliases": aliases or [],
+                "first_session": session_id,
+            },
+        )
+
+        return node
 
     def process_sync(
         self,

@@ -450,3 +450,392 @@ class CampaignGraphOps:
             "node_count": len(nodes),
             "link_count": len(links),
         }
+
+    # ===================
+    # Player Operations
+    # ===================
+
+    def create_player(
+        self,
+        name: str,
+        email: Optional[str] = None,
+        discord_id: Optional[str] = None,
+        player_id: Optional[str] = None,
+    ) -> dict:
+        """Create a new player entity.
+
+        Args:
+            name: Player's name.
+            email: Optional email address.
+            discord_id: Optional Discord ID.
+            player_id: Optional custom ID.
+
+        Returns:
+            Created player entity.
+        """
+        return self.create_entity(
+            name=name,
+            entity_type=EntityType.PLAYER,
+            entity_id=player_id or f"player_{name.lower().replace(' ', '_')}",
+            properties={
+                "email": email,
+                "discord_id": discord_id,
+                "joined_at": datetime.utcnow().isoformat(),
+            },
+        )
+
+    def get_player(self, player_id: str) -> Optional[dict]:
+        """Get a player by ID with their characters.
+
+        Args:
+            player_id: Player's ID.
+
+        Returns:
+            Player entity with characters, or None.
+        """
+        player = self.get_entity(player_id)
+        if not player:
+            return None
+
+        # Get player's characters
+        characters = self.get_player_characters(player_id)
+        player["characters"] = characters
+
+        # Get active PC if set
+        active_pc_id = player.get("active_pc_id")
+        if active_pc_id:
+            player["active_pc"] = next(
+                (c for c in characters if c["id"] == active_pc_id), None
+            )
+        else:
+            player["active_pc"] = characters[0] if characters else None
+
+        return player
+
+    def list_players(self, campaign_id: Optional[str] = None) -> list[dict]:
+        """List all players, optionally filtered by campaign.
+
+        Args:
+            campaign_id: Optional campaign to filter by.
+
+        Returns:
+            List of player entities.
+        """
+        if campaign_id:
+            query = """
+            MATCH (p:Entity {entity_type: 'PLAYER'})-[:BELONGS_TO]->(c:Entity {id: $campaign_id})
+            RETURN p
+            ORDER BY p.name
+            """
+            with neo4j_session() as session:
+                result = session.run(query, campaign_id=campaign_id)
+                return [dict(record["p"]) for record in result]
+        else:
+            return self.list_entities(entity_type="PLAYER")
+
+    def add_player_to_campaign(self, player_id: str, campaign_id: str) -> dict:
+        """Add a player to a campaign.
+
+        Args:
+            player_id: Player's ID.
+            campaign_id: Campaign's ID.
+
+        Returns:
+            Relationship info.
+        """
+        return self.create_relationship(
+            source_id=player_id,
+            target_id=campaign_id,
+            relationship_type=RelationshipType.BELONGS_TO,
+        )
+
+    def get_campaign_players(self, campaign_id: str) -> list[dict]:
+        """Get all players in a campaign with their active characters.
+
+        Args:
+            campaign_id: Campaign's ID.
+
+        Returns:
+            List of players with character info.
+        """
+        query = """
+        MATCH (p:Entity {entity_type: 'PLAYER'})-[:BELONGS_TO]->(c:Entity {id: $campaign_id})
+        OPTIONAL MATCH (p)-[:PLAYS_AS]->(pc:Entity {entity_type: 'PC'})
+        RETURN p, collect(pc) as characters
+        ORDER BY p.name
+        """
+        with neo4j_session() as session:
+            result = session.run(query, campaign_id=campaign_id)
+            players = []
+            for record in result:
+                player = dict(record["p"])
+                characters = [dict(c) for c in record["characters"] if c]
+                player["characters"] = characters
+                # Set active PC
+                active_pc_id = player.get("active_pc_id")
+                if active_pc_id:
+                    player["active_pc"] = next(
+                        (c for c in characters if c["id"] == active_pc_id), None
+                    )
+                else:
+                    player["active_pc"] = characters[0] if characters else None
+                players.append(player)
+            return players
+
+    def link_player_character(self, player_id: str, pc_id: str) -> dict:
+        """Link a player to a character (PC).
+
+        Args:
+            player_id: Player's ID.
+            pc_id: Character's ID.
+
+        Returns:
+            Relationship info.
+        """
+        # Create PLAYS_AS relationship
+        rel = self.create_relationship(
+            source_id=player_id,
+            target_id=pc_id,
+            relationship_type=RelationshipType.PLAYS_AS,
+        )
+
+        # Update PC with player reference
+        self.update_entity(pc_id, {"player_id": player_id})
+
+        return rel
+
+    def get_player_characters(self, player_id: str) -> list[dict]:
+        """Get all characters (PCs) for a player.
+
+        Args:
+            player_id: Player's ID.
+
+        Returns:
+            List of PC entities.
+        """
+        query = """
+        MATCH (p:Entity {id: $player_id})-[:PLAYS_AS]->(pc:Entity {entity_type: 'PC'})
+        RETURN pc
+        ORDER BY pc.name
+        """
+        with neo4j_session() as session:
+            result = session.run(query, player_id=player_id)
+            return [dict(record["pc"]) for record in result]
+
+    def set_active_character(self, player_id: str, pc_id: str) -> dict:
+        """Set the active character for a player.
+
+        Args:
+            player_id: Player's ID.
+            pc_id: Character's ID to set as active.
+
+        Returns:
+            Updated player entity.
+        """
+        self.update_entity(player_id, {"active_pc_id": pc_id})
+        return self.get_player(player_id)
+
+    def create_player_character(
+        self,
+        player_id: str,
+        name: str,
+        character_class: str,
+        level: int = 1,
+        race: Optional[str] = None,
+        hp: Optional[int] = None,
+        max_hp: Optional[int] = None,
+        initiative_bonus: int = 0,
+        description: Optional[str] = None,
+    ) -> dict:
+        """Create a new character for a player.
+
+        Args:
+            player_id: Player's ID.
+            name: Character name.
+            character_class: D&D class.
+            level: Character level.
+            race: Character race.
+            hp: Current HP.
+            max_hp: Maximum HP.
+            initiative_bonus: Initiative modifier.
+            description: Character description.
+
+        Returns:
+            Created PC entity.
+        """
+        # Get player name for denormalization
+        player = self.get_entity(player_id)
+        player_name = player["name"] if player else None
+
+        pc = self.create_entity(
+            name=name,
+            entity_type=EntityType.PC,
+            description=description,
+            properties={
+                "player_id": player_id,
+                "player_name": player_name,
+                "class": character_class,
+                "level": level,
+                "race": race,
+                "hp": hp or (level * 8),  # Default HP calculation
+                "max_hp": max_hp or (level * 8),
+                "initiative_bonus": initiative_bonus,
+                "status": "alive",
+            },
+        )
+
+        # Link player to character
+        self.link_player_character(player_id, pc["id"])
+
+        # Set as active if first character
+        existing_chars = self.get_player_characters(player_id)
+        if len(existing_chars) == 1:
+            self.set_active_character(player_id, pc["id"])
+
+        return pc
+
+    # ===================
+    # Session Operations
+    # ===================
+
+    def record_session_attendance(
+        self,
+        session_id: str,
+        player_ids: list[str],
+        character_ids: Optional[list[str]] = None,
+    ) -> dict:
+        """Record which players attended a session.
+
+        Args:
+            session_id: Session's ID.
+            player_ids: List of player IDs who attended.
+            character_ids: Optional list of which character each player used.
+
+        Returns:
+            Summary of attendance recorded.
+        """
+        recorded = []
+        for i, player_id in enumerate(player_ids):
+            # Create attendance relationship
+            self.create_relationship(
+                source_id=player_id,
+                target_id=session_id,
+                relationship_type=RelationshipType.ATTENDED,
+            )
+
+            # If character specified, record participation
+            if character_ids and i < len(character_ids) and character_ids[i]:
+                self.create_relationship(
+                    source_id=character_ids[i],
+                    target_id=session_id,
+                    relationship_type=RelationshipType.PARTICIPATED_IN,
+                )
+
+            recorded.append(player_id)
+
+        return {
+            "session_id": session_id,
+            "players_recorded": len(recorded),
+            "player_ids": recorded,
+        }
+
+    def get_session_attendees(self, session_id: str) -> list[dict]:
+        """Get all players who attended a session with their characters.
+
+        Args:
+            session_id: Session's ID.
+
+        Returns:
+            List of players with the character they used.
+        """
+        query = """
+        MATCH (p:Entity {entity_type: 'PLAYER'})-[:ATTENDED]->(s:Entity {id: $session_id})
+        OPTIONAL MATCH (pc:Entity {entity_type: 'PC'})-[:PARTICIPATED_IN]->(s)
+        WHERE (p)-[:PLAYS_AS]->(pc)
+        RETURN p, pc
+        ORDER BY p.name
+        """
+        with neo4j_session() as session:
+            result = session.run(query, session_id=session_id)
+            attendees = []
+            for record in result:
+                player = dict(record["p"])
+                if record["pc"]:
+                    player["character_used"] = dict(record["pc"])
+                else:
+                    # Fall back to active character
+                    player["character_used"] = None
+                attendees.append(player)
+            return attendees
+
+    def create_campaign(
+        self,
+        name: str,
+        setting: Optional[str] = None,
+        description: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+    ) -> dict:
+        """Create a new campaign.
+
+        Args:
+            name: Campaign name.
+            setting: Campaign setting (e.g., "Forgotten Realms").
+            description: Campaign description.
+            campaign_id: Optional custom ID.
+
+        Returns:
+            Created campaign entity.
+        """
+        return self.create_entity(
+            name=name,
+            entity_type=EntityType.CAMPAIGN,
+            description=description,
+            entity_id=campaign_id or f"campaign_{name.lower().replace(' ', '_')}",
+            properties={
+                "setting": setting,
+                "start_date": datetime.utcnow().isoformat(),
+                "status": "active",
+            },
+        )
+
+    def create_session(
+        self,
+        campaign_id: str,
+        session_number: int,
+        name: Optional[str] = None,
+        date: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> dict:
+        """Create a new session for a campaign.
+
+        Args:
+            campaign_id: Campaign's ID.
+            session_number: Session number.
+            name: Optional session name/title.
+            date: Session date.
+            summary: Session summary.
+
+        Returns:
+            Created session entity.
+        """
+        session_name = name or f"Session {session_number}"
+        session = self.create_entity(
+            name=session_name,
+            entity_type=EntityType.SESSION,
+            description=summary,
+            entity_id=f"{campaign_id}_session_{session_number}",
+            properties={
+                "campaign_id": campaign_id,
+                "session_number": session_number,
+                "date": date or datetime.utcnow().isoformat(),
+            },
+        )
+
+        # Link session to campaign
+        self.create_relationship(
+            source_id=session["id"],
+            target_id=campaign_id,
+            relationship_type=RelationshipType.BELONGS_TO,
+        )
+
+        return session

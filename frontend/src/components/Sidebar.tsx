@@ -7,6 +7,8 @@ interface Props {
   onNewSession: () => void;
   onClearHistory: () => void;
   onOpenCampaign: () => void;
+  onOpenPlayers: () => void;
+  onOpenCombat: () => void;
 }
 
 export function Sidebar({
@@ -16,6 +18,8 @@ export function Sidebar({
   onNewSession,
   onClearHistory,
   onOpenCampaign,
+  onOpenPlayers,
+  onOpenCombat,
 }: Props) {
   return (
     <aside className="w-64 bg-gray-900 border-r border-gray-700 flex flex-col">
@@ -96,14 +100,29 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Campaign */}
-      <div className="p-4 border-b border-gray-700">
+      {/* Campaign & Tools */}
+      <div className="p-4 border-b border-gray-700 space-y-2">
+        <label className="text-sm text-gray-400 block mb-2">Campaign Tools</label>
         <button
           onClick={onOpenCampaign}
           className="w-full py-2 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
         >
           <span>🗺️</span>
-          <span>View Campaign</span>
+          <span>Knowledge Graph</span>
+        </button>
+        <button
+          onClick={onOpenPlayers}
+          className="w-full py-2 px-4 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+        >
+          <span>👥</span>
+          <span>Manage Players</span>
+        </button>
+        <button
+          onClick={onOpenCombat}
+          className="w-full py-2 px-4 bg-red-600/80 hover:bg-red-600 rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
+        >
+          <span>⚔️</span>
+          <span>Combat Tracker</span>
         </button>
       </div>
 

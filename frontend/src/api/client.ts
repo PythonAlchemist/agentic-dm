@@ -7,6 +7,16 @@ import type {
   EncounterResult,
   Entity,
   EntityCreate,
+  Player,
+  PlayerCreate,
+  PlayerUpdate,
+  PC,
+  PCCreate,
+  Campaign,
+  CampaignCreate,
+  Session,
+  SessionCreate,
+  SessionAttendance,
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -147,6 +157,86 @@ export const campaignAPI = {
     if (entityTypes?.length) params.set('entity_types', entityTypes.join(','));
     return fetchAPI(`/campaign/graph?${params}`);
   },
+};
+
+// Player API
+export const playerAPI = {
+  list: (campaignId?: string): Promise<Player[]> => {
+    const params = campaignId ? `?campaign_id=${campaignId}` : '';
+    return fetchAPI(`/players${params}`);
+  },
+
+  get: (playerId: string): Promise<Player> =>
+    fetchAPI(`/players/${playerId}`),
+
+  create: (data: PlayerCreate): Promise<Player> =>
+    fetchAPI('/players', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (playerId: string, data: PlayerUpdate): Promise<Player> =>
+    fetchAPI(`/players/${playerId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (playerId: string): Promise<{ success: boolean }> =>
+    fetchAPI(`/players/${playerId}`, { method: 'DELETE' }),
+
+  getCharacters: (playerId: string): Promise<PC[]> =>
+    fetchAPI(`/players/${playerId}/characters`),
+
+  createCharacter: (playerId: string, data: PCCreate): Promise<PC> =>
+    fetchAPI(`/players/${playerId}/characters`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  setActiveCharacter: (playerId: string, pcId: string): Promise<Player> =>
+    fetchAPI(`/players/${playerId}/active-character`, {
+      method: 'PUT',
+      body: JSON.stringify({ pc_id: pcId }),
+    }),
+};
+
+// Campaign management API (extends existing campaignAPI)
+export const campaignManagementAPI = {
+  create: (data: CampaignCreate): Promise<Campaign> =>
+    fetchAPI('/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  getPlayers: (campaignId: string): Promise<Player[]> =>
+    fetchAPI(`/campaigns/${campaignId}/players`),
+
+  addPlayer: (campaignId: string, playerId: string): Promise<{ success: boolean }> =>
+    fetchAPI(`/campaigns/${campaignId}/players`, {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    }),
+
+  removePlayer: (campaignId: string, playerId: string): Promise<{ success: boolean }> =>
+    fetchAPI(`/campaigns/${campaignId}/players/${playerId}`, { method: 'DELETE' }),
+
+  createSession: (campaignId: string, data: SessionCreate): Promise<Session> =>
+    fetchAPI(`/campaigns/${campaignId}/sessions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// Session API
+export const sessionAPI = {
+  recordAttendance: (sessionId: string, attendance: SessionAttendance): Promise<{ success: boolean }> =>
+    fetchAPI(`/sessions/${sessionId}/attendance`, {
+      method: 'POST',
+      body: JSON.stringify(attendance),
+    }),
+
+  getAttendees: (sessionId: string): Promise<Player[]> =>
+    fetchAPI(`/sessions/${sessionId}/attendance`),
 };
 
 // Health check
