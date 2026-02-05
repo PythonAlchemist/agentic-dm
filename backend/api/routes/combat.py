@@ -12,9 +12,21 @@ from backend.discord.combat_manager import (
     TurnResult,
     get_combat_manager,
 )
+from backend.discord.npc_registry import NPCRegistry
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Registry for NPC lookups
+_npc_registry: Optional[NPCRegistry] = None
+
+
+def get_npc_registry() -> NPCRegistry:
+    """Get NPC registry singleton."""
+    global _npc_registry
+    if _npc_registry is None:
+        _npc_registry = NPCRegistry()
+    return _npc_registry
 
 
 # ===================
@@ -44,6 +56,7 @@ class NPCCombatant(BaseModel):
     hp: Optional[int] = Field(None, description="Override HP")
     max_hp: Optional[int] = Field(None, description="Override max HP")
     ac: Optional[int] = Field(None, description="Override AC")
+    is_friendly: bool = Field(False, description="True if NPC fights alongside players")
 
 
 class MonsterCombatant(BaseModel):
@@ -86,6 +99,16 @@ class ConditionRequest(BaseModel):
     condition: str = Field(..., description="Condition name")
 
 
+class NPCTurnResultItem(BaseModel):
+    """Individual NPC turn result."""
+
+    combatant_name: str
+    turn_type: str
+    round: int
+    narration: str
+    npc_action: Optional[dict] = None
+
+
 class TurnResultResponse(BaseModel):
     """Turn result response."""
 
@@ -97,6 +120,111 @@ class TurnResultResponse(BaseModel):
     combat_ended_reason: Optional[str] = None
     narration: str
     npc_action: Optional[dict] = None
+    npc_turn_results: list[NPCTurnResultItem] = Field(default_factory=list)
+
+
+# ===================
+# NPC Lookup Endpoints
+# ===================
+
+
+class NPCSearchResult(BaseModel):
+    """NPC available for combat."""
+
+    entity_id: str
+    name: str
+    race: str
+    role: str
+    hp: int
+    max_hp: int
+    ac: int
+    initiative_bonus: int
+    challenge_rating: float
+    description: Optional[str] = None
+
+
+@router.get("/combat/npcs")
+async def search_npcs(
+    query: Optional[str] = None,
+    hostile_only: bool = False,
+    limit: int = 20,
+) -> list[NPCSearchResult]:
+    """Search for available NPCs to add to combat.
+
+    Args:
+        query: Optional search string for name/description.
+        hostile_only: Only return hostile NPCs.
+        limit: Maximum number of results.
+
+    Returns:
+        List of NPCs with combat stats.
+    """
+    try:
+        registry = get_npc_registry()
+        npcs = registry.search_npcs(
+            query=query,
+            hostile_only=hostile_only,
+            has_stat_block=True,
+            limit=limit,
+        )
+
+        results = []
+        for npc in npcs:
+            results.append(NPCSearchResult(
+                entity_id=npc.entity_id,
+                name=npc.name,
+                race=npc.race,
+                role=npc.role,
+                hp=npc.stat_block.hit_points,
+                max_hp=npc.stat_block.max_hit_points,
+                ac=npc.stat_block.armor_class,
+                initiative_bonus=npc.stat_block.initiative_bonus,
+                challenge_rating=npc.stat_block.challenge_rating,
+                description=npc.description,
+            ))
+
+        return results
+
+    except Exception as e:
+        logger.error(f"Failed to search NPCs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/combat/npcs/{npc_id}")
+async def get_npc_for_combat(npc_id: str) -> NPCSearchResult:
+    """Get a specific NPC for combat by ID.
+
+    Args:
+        npc_id: The NPC entity ID.
+
+    Returns:
+        NPC combat info.
+    """
+    try:
+        registry = get_npc_registry()
+        npc = registry.get_npc(npc_id)
+
+        if not npc:
+            raise HTTPException(status_code=404, detail="NPC not found")
+
+        return NPCSearchResult(
+            entity_id=npc.entity_id,
+            name=npc.name,
+            race=npc.race,
+            role=npc.role,
+            hp=npc.stat_block.hit_points,
+            max_hp=npc.stat_block.max_hit_points,
+            ac=npc.stat_block.armor_class,
+            initiative_bonus=npc.stat_block.initiative_bonus,
+            challenge_rating=npc.stat_block.challenge_rating,
+            description=npc.description,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get NPC: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ===================
@@ -117,8 +245,9 @@ async def start_combat(request: StartCombatRequest) -> dict:
         manager.config.auto_npc_turns = request.auto_npc_turns
 
         # Convert to dicts
+        # Use exclude_unset=True for npcs so default is_friendly=False doesn't override profile default_faction
         players = [p.model_dump() for p in request.players]
-        npcs = [n.model_dump() for n in request.npcs]
+        npcs = [n.model_dump(exclude_unset=True) for n in request.npcs]
         monsters = [m.model_dump() for m in request.monsters] if request.monsters else None
 
         result = await manager.start_combat(
@@ -214,6 +343,17 @@ async def end_current_turn() -> TurnResultResponse:
         if not result:
             raise HTTPException(status_code=400, detail="No combat active")
 
+        # Convert NPC turn results
+        npc_results = []
+        for npc_turn in result.npc_turn_results:
+            npc_results.append(NPCTurnResultItem(
+                combatant_name=npc_turn.combatant_name,
+                turn_type=npc_turn.turn_type.value,
+                round=npc_turn.round,
+                narration=npc_turn.narration,
+                npc_action=npc_turn.npc_result.model_dump() if npc_turn.npc_result else None,
+            ))
+
         return TurnResultResponse(
             combatant_name=result.combatant_name,
             turn_type=result.turn_type.value,
@@ -223,6 +363,7 @@ async def end_current_turn() -> TurnResultResponse:
             combat_ended_reason=result.combat_ended_reason,
             narration=result.narration,
             npc_action=result.npc_result.model_dump() if result.npc_result else None,
+            npc_turn_results=npc_results,
         )
 
     except HTTPException:
@@ -354,4 +495,127 @@ async def end_combat() -> dict:
 
     except Exception as e:
         logger.error(f"Failed to end combat: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===================
+# Grid / Position Endpoints
+# ===================
+
+
+class MoveRequest(BaseModel):
+    """Request to move a combatant."""
+
+    name: str = Field(..., description="Combatant name")
+    x: int = Field(..., description="Target column")
+    y: int = Field(..., description="Target row")
+
+
+class AddMidCombatRequest(BaseModel):
+    """Request to add a combatant mid-combat."""
+
+    name: str = Field(..., description="Combatant name")
+    initiative_bonus: int = Field(0, description="Initiative modifier")
+    hp: int = Field(10, description="Hit points")
+    max_hp: Optional[int] = Field(None, description="Max hit points")
+    ac: int = Field(12, description="Armor class")
+    is_player: bool = Field(False)
+    is_npc: bool = Field(False)
+    is_friendly: bool = Field(False)
+    npc_id: Optional[str] = Field(None)
+    x: Optional[int] = Field(None, description="Grid column")
+    y: Optional[int] = Field(None, description="Grid row")
+
+
+class RemoveMidCombatRequest(BaseModel):
+    """Request to remove a combatant mid-combat."""
+
+    name: str = Field(..., description="Combatant name")
+
+
+class GridSizeRequest(BaseModel):
+    """Request to set grid dimensions."""
+
+    width: int = Field(20, ge=5, le=50)
+    height: int = Field(15, ge=5, le=50)
+
+
+@router.post("/combat/move")
+async def move_combatant(request: MoveRequest) -> dict:
+    """Move a combatant to a new grid position."""
+    try:
+        manager = get_combat_manager()
+        result = manager.dm_tools.move_combatant(request.name, request.x, request.y)
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to move combatant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/combat/combatant/add")
+async def add_combatant_mid_combat(request: AddMidCombatRequest) -> dict:
+    """Add a combatant to active combat with initiative roll."""
+    try:
+        manager = get_combat_manager()
+        combatant_dict = request.model_dump()
+        if combatant_dict["max_hp"] is None:
+            combatant_dict["max_hp"] = combatant_dict["hp"]
+
+        result = manager.dm_tools.add_combatant_mid_combat(combatant_dict)
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to add combatant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/combat/combatant/remove")
+async def remove_combatant_mid_combat(request: RemoveMidCombatRequest) -> dict:
+    """Remove a combatant from active combat."""
+    try:
+        manager = get_combat_manager()
+        result = manager.dm_tools.remove_combatant_mid_combat(request.name)
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove combatant: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/combat/grid")
+async def set_grid_size(request: GridSizeRequest) -> dict:
+    """Set the combat grid dimensions."""
+    try:
+        manager = get_combat_manager()
+        if not manager.dm_tools.combat_state:
+            raise HTTPException(status_code=400, detail="No combat active")
+
+        manager.dm_tools.combat_state.grid_width = request.width
+        manager.dm_tools.combat_state.grid_height = request.height
+
+        return {"grid_width": request.width, "grid_height": request.height}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to set grid size: {e}")
         raise HTTPException(status_code=500, detail=str(e))

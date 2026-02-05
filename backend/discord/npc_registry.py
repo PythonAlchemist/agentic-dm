@@ -5,6 +5,7 @@ from typing import Optional
 
 from backend.discord.models import (
     NPCDiscordConfig,
+    NPCFaction,
     NPCFullProfile,
     NPCPersonality,
     NPCStatBlock,
@@ -41,6 +42,90 @@ class NPCRegistry:
         profile = self._entity_to_profile(entity)
         self._profile_cache[npc_id] = profile
         return profile
+
+    def get_npc_by_name(self, name: str) -> Optional[NPCFullProfile]:
+        """Get an NPC profile by name (case-insensitive).
+
+        Args:
+            name: The NPC name.
+
+        Returns:
+            NPCFullProfile or None if not found.
+        """
+        from backend.core.database import neo4j_session
+
+        query = """
+        MATCH (n:Entity {entity_type: 'NPC'})
+        WHERE toLower(n.name) = toLower($name)
+        RETURN n
+        LIMIT 1
+        """
+
+        try:
+            with neo4j_session() as session:
+                result = session.run(query, name=name)
+                record = result.single()
+                if record:
+                    entity = dict(record["n"])
+                    profile = self._entity_to_profile(entity)
+                    self._profile_cache[entity["id"]] = profile
+                    return profile
+        except Exception:
+            pass
+
+        return None
+
+    def search_npcs(
+        self,
+        query: Optional[str] = None,
+        hostile_only: bool = False,
+        has_stat_block: bool = False,
+        limit: int = 20,
+    ) -> list[NPCFullProfile]:
+        """Search for NPCs matching criteria.
+
+        Args:
+            query: Optional name/description search.
+            hostile_only: Only return hostile NPCs.
+            has_stat_block: Only return NPCs with combat stats.
+            limit: Maximum results.
+
+        Returns:
+            List of matching NPCFullProfiles.
+        """
+        from backend.core.database import neo4j_session
+
+        cypher = """
+        MATCH (n:Entity {entity_type: 'NPC'})
+        WHERE 1=1
+        """
+
+        params = {"limit": limit}
+
+        if query:
+            cypher += " AND (toLower(n.name) CONTAINS toLower($query) OR toLower(n.description) CONTAINS toLower($query))"
+            params["query"] = query
+
+        if hostile_only:
+            cypher += " AND n.disposition = 'hostile'"
+
+        if has_stat_block:
+            cypher += " AND n.stat_block IS NOT NULL"
+
+        cypher += " RETURN n LIMIT $limit"
+
+        results = []
+        try:
+            with neo4j_session() as session:
+                result = session.run(cypher, **params)
+                for record in result:
+                    entity = dict(record["n"])
+                    profile = self._entity_to_profile(entity)
+                    results.append(profile)
+        except Exception:
+            pass
+
+        return results
 
     def get_npc_with_discord(self, npc_id: str) -> Optional[NPCFullProfile]:
         """Get NPC profile only if Discord is configured.
@@ -320,6 +405,15 @@ class NPCRegistry:
         except Exception:
             pass
 
+        # Parse default faction
+        default_faction = NPCFaction.HOSTILE
+        faction_str = entity.get("default_faction")
+        if faction_str:
+            try:
+                default_faction = NPCFaction(faction_str)
+            except ValueError:
+                pass
+
         return NPCFullProfile(
             entity_id=entity["id"],
             name=entity["name"],
@@ -329,6 +423,7 @@ class NPCRegistry:
             discord_config=discord_config,
             stat_block=stat_block,
             personality=personality,
+            default_faction=default_faction,
             current_location_id=entity.get("current_location_id"),
             current_hp=entity.get("current_hp"),
             conditions=entity.get("current_conditions", []),
@@ -346,6 +441,7 @@ class NPCRegistry:
         stat_block: Optional[NPCStatBlock] = None,
         personality: Optional[NPCPersonality] = None,
         discord_config: Optional[NPCDiscordConfig] = None,
+        default_faction: NPCFaction = NPCFaction.HOSTILE,
     ) -> NPCFullProfile:
         """Create a new NPC with full configuration.
 
@@ -357,6 +453,7 @@ class NPCRegistry:
             stat_block: Combat stats.
             personality: Personality config.
             discord_config: Discord bot config.
+            default_faction: Default faction (hostile, friendly, neutral).
 
         Returns:
             Created NPCFullProfile.
@@ -367,6 +464,7 @@ class NPCRegistry:
             "role": role,
             "disposition": "neutral",
             "importance": "minor",
+            "default_faction": default_faction.value,
         }
 
         if stat_block:

@@ -73,6 +73,13 @@ class NPCStatBlock(BaseModel):
     # Spells: {"slots": {1: 4, 2: 3}, "known": ["fireball", "shield"]}
     spells: Optional[dict] = None
 
+    # Detailed spellcasting (for proper caster NPCs)
+    spell_save_dc: int = 0
+    spell_attack_bonus: int = 0
+    cantrips: list[dict] = Field(default_factory=list)  # At-will spells
+    spell_slots: dict = Field(default_factory=dict)  # {"1st": 4, "2nd": 2}
+    spells_known: list[dict] = Field(default_factory=list)  # Full spell details
+
     # Conditions
     resistances: list[str] = Field(default_factory=list)
     immunities: list[str] = Field(default_factory=list)
@@ -113,6 +120,14 @@ class NPCPersonality(BaseModel):
     knowledge_domains: list[str] = Field(default_factory=list)
 
 
+class NPCFaction(str, Enum):
+    """Default faction for an NPC in combat."""
+
+    HOSTILE = "hostile"  # Fights against players (default)
+    FRIENDLY = "friendly"  # Fights alongside players
+    NEUTRAL = "neutral"  # Won't attack unless provoked
+
+
 class NPCFullProfile(BaseModel):
     """Complete NPC profile combining all aspects."""
 
@@ -132,6 +147,12 @@ class NPCFullProfile(BaseModel):
 
     # Personality
     personality: NPCPersonality = Field(default_factory=NPCPersonality)
+
+    # Combat Faction
+    default_faction: NPCFaction = Field(
+        default=NPCFaction.HOSTILE,
+        description="Default faction when added to combat without explicit is_friendly"
+    )
 
     # State
     current_location_id: Optional[str] = None

@@ -8,12 +8,15 @@ from typing import Optional
 from backend.discord.models import NPCFullProfile
 from backend.discord.combat_models import (
     CombatActionType,
+    CombatMemory,
     NPCCombatDecision,
     NPCCombatResult,
 )
+from backend.discord.context_builder import NPCContextBuilder
 from backend.discord.npc_agent import NPCAgent
 from backend.discord.npc_registry import NPCRegistry
 from backend.discord.bot_manager import get_bot_manager, NPCBotManager
+from backend.discord.srd_weapons import grid_distance_ft, get_attack_range, parse_spell_range
 from backend.agents.tools import DMTools, CombatState
 
 logger = logging.getLogger(__name__)
@@ -41,21 +44,95 @@ class NPCCombatController:
         self.bot_manager = bot_manager or get_bot_manager()
         self.registry = NPCRegistry()
         self.agent = NPCAgent()
+        self.context_builder = NPCContextBuilder()
 
         # NPC name -> entity ID mapping for active combat
         self._npc_combatant_map: dict[str, str] = {}
 
+        # NPC name -> is_friendly mapping
+        self._npc_friendly_map: dict[str, bool] = {}
+
+        # Combat memories per NPC (entity_id -> CombatMemory)
+        self._combat_memories: dict[str, CombatMemory] = {}
+
         # Channel to broadcast combat to
         self._combat_channel_id: Optional[int] = None
 
-    def register_npc_combatant(self, name: str, npc_id: str) -> None:
+    def register_npc_combatant(self, name: str, npc_id: str, is_friendly: bool = False) -> None:
         """Register an NPC in the current combat.
 
         Args:
             name: The combatant name in initiative order.
             npc_id: The NPC entity ID.
+            is_friendly: True if NPC fights alongside players.
         """
         self._npc_combatant_map[name.lower()] = npc_id
+        self._npc_friendly_map[name.lower()] = is_friendly
+        # Initialize combat memory for this NPC
+        if npc_id not in self._combat_memories:
+            self._combat_memories[npc_id] = CombatMemory(npc_name=name)
+
+    def is_friendly_npc(self, name: str) -> bool:
+        """Check if an NPC is friendly (fights with players).
+
+        Args:
+            name: The combatant name.
+
+        Returns:
+            True if NPC is friendly.
+        """
+        return self._npc_friendly_map.get(name.lower(), False)
+
+    def get_combat_memory(self, npc_id: str, npc_name: str = "NPC") -> CombatMemory:
+        """Get or create combat memory for an NPC.
+
+        Args:
+            npc_id: The NPC entity ID.
+            npc_name: The NPC's name (for creating new memory).
+
+        Returns:
+            CombatMemory instance for this NPC.
+        """
+        if npc_id not in self._combat_memories:
+            self._combat_memories[npc_id] = CombatMemory(npc_name=npc_name)
+        return self._combat_memories[npc_id]
+
+    def record_damage_to_npc(
+        self,
+        npc_id: str,
+        attacker_name: str,
+        damage: int,
+        weapon: str,
+        combat_round: int,
+    ) -> None:
+        """Record damage dealt to an NPC (called when players attack NPCs).
+
+        Args:
+            npc_id: The NPC entity ID.
+            attacker_name: Who dealt the damage.
+            damage: Amount of damage.
+            weapon: What weapon/spell was used.
+            combat_round: Current combat round.
+        """
+        memory = self._combat_memories.get(npc_id)
+        if memory:
+            memory.record_damage_taken(attacker_name, damage, weapon, combat_round)
+
+    def record_ally_death(self, ally_name: str, killer_name: str, combat_round: int) -> None:
+        """Record when an NPC ally falls.
+
+        This notifies all allied NPCs in the combat.
+
+        Args:
+            ally_name: The fallen ally's name.
+            killer_name: Who killed them.
+            combat_round: Current combat round.
+        """
+        # Notify all NPCs that an ally has fallen
+        for npc_id, memory in self._combat_memories.items():
+            # Skip the one who died
+            if memory.npc_name.lower() != ally_name.lower():
+                memory.record_ally_down(ally_name, killer_name, combat_round)
 
     def set_combat_channel(self, channel_id: int) -> None:
         """Set the Discord channel to broadcast combat to.
@@ -102,7 +179,10 @@ class NPCCombatController:
         npc_combatant: dict,
         combat_state: CombatState,
     ) -> list[dict]:
-        """Get valid targets for an NPC.
+        """Get valid targets for an NPC based on faction.
+
+        Friendly NPCs target enemies (hostile NPCs + monsters).
+        Hostile NPCs target the party (players + friendly NPCs).
 
         Args:
             npc_combatant: The NPC's combatant entry.
@@ -112,26 +192,41 @@ class NPCCombatController:
             List of valid target dicts.
         """
         targets = []
+        npc_name = npc_combatant["name"]
+        npc_is_friendly = self.is_friendly_npc(npc_name)
 
         for combatant in combat_state.initiative_order:
             # Skip self
-            if combatant["name"] == npc_combatant["name"]:
+            if combatant["name"] == npc_name:
                 continue
 
-            # Skip dead combatants
-            if combatant.get("hp", 0) <= 0:
+            # Skip dead/fled combatants
+            if combatant.get("hp", 0) <= 0 or combatant.get("fled"):
                 continue
 
-            # For now, NPCs target players and vice versa
-            # More sophisticated ally/enemy detection can be added
-            if combatant.get("is_player"):
+            # Determine if this combatant is a valid target
+            combatant_is_player = combatant.get("is_player", False)
+            combatant_is_friendly = combatant.get("is_friendly", False)
+
+            # For friendly NPCs: target enemies (non-player, non-friendly)
+            # For hostile NPCs: target party (players + friendly NPCs)
+            if npc_is_friendly:
+                # Friendly NPC targets enemies
+                is_valid_target = not combatant_is_player and not combatant_is_friendly
+            else:
+                # Hostile NPC targets party (players and friendly NPCs)
+                is_valid_target = combatant_is_player or combatant_is_friendly
+
+            if is_valid_target:
                 targets.append({
                     "name": combatant["name"],
-                    "id": combatant.get("pc_id"),
+                    "id": combatant.get("pc_id") or combatant.get("npc_id"),
                     "hp": combatant["hp"],
                     "max_hp": combatant["max_hp"],
+                    "ac": combatant.get("ac", 10),
                     "conditions": combatant.get("conditions", []),
-                    "is_player": True,
+                    "is_player": combatant_is_player,
+                    "is_friendly": combatant_is_friendly,
                 })
 
         return targets
@@ -153,8 +248,9 @@ class NPCCombatController:
         # Get NPC profile
         npc = self.get_npc_for_combatant(combatant)
         if not npc:
-            logger.warning(f"No NPC profile found for combatant {combatant['name']}")
-            return None
+            logger.info(f"No NPC profile found for {combatant['name']}, using default behavior")
+            # Create a default action without full AI
+            return await self._process_default_npc_turn(combatant, combat_state)
 
         # Update NPC's current HP from combat state
         npc.current_hp = combatant.get("hp", npc.stat_block.hit_points)
@@ -168,6 +264,10 @@ class NPCCombatController:
                 "initiative_order": combat_state.initiative_order,
             },
         )
+
+        # Get combat memory for this NPC
+        memory = self.get_combat_memory(npc.entity_id, npc.name)
+        memory.current_round = combat_state.round
 
         if should_retreat:
             # Generate retreat action
@@ -184,7 +284,7 @@ class NPCCombatController:
             # Get available targets
             targets = self.get_available_targets(combatant, combat_state)
 
-            # Get combat decision from AI
+            # Build combat state dict
             state_dict = {
                 "round": combat_state.round,
                 "initiative_order": [
@@ -192,28 +292,98 @@ class NPCCombatController:
                         "name": c["name"],
                         "hp": c["hp"],
                         "max_hp": c["max_hp"],
+                        "ac": c.get("ac", 10),
                         "is_player": c.get("is_player", False),
+                        "is_npc": c.get("is_npc", False),
+                        "is_friendly": c.get("is_friendly", False),
                         "conditions": c.get("conditions", []),
                         "side": "player" if c.get("is_player") else "enemy",
+                        "x": c.get("x"),
+                        "y": c.get("y"),
                     }
                     for c in combat_state.initiative_order
                 ],
             }
 
+            # Determine if this NPC is friendly
+            npc_is_friendly = self.is_friendly_npc(combatant["name"])
+
+            # Build lean context with memory
+            combatant_states = self.context_builder.build_combatant_states(
+                npc, state_dict, memory, npc_is_friendly
+            )
+            lean_context = self.context_builder.build_lean_combat_context(
+                npc, state_dict, memory, combatant_states
+            )
+
+            # Get combat decision using lean context
             decision = await self.agent.decide_combat_action(
                 npc=npc,
                 combat_state=state_dict,
                 available_targets=targets,
+                combat_context=lean_context,
             )
 
         # Execute the action
         result = await self._execute_action(npc, decision, combatant, combat_state)
+
+        # Record the result in memory
+        self._record_action_result(npc.entity_id, result, combat_state.round)
 
         # Broadcast to Discord if channel is set
         if self._combat_channel_id and npc.discord_config:
             await self._broadcast_result(npc, result)
 
         return result
+
+    def _record_action_result(
+        self,
+        npc_id: str,
+        result: NPCCombatResult,
+        combat_round: int,
+    ) -> None:
+        """Record the result of an NPC action in memory.
+
+        Args:
+            npc_id: The NPC entity ID.
+            result: The combat result.
+            combat_round: Current round.
+        """
+        memory = self._combat_memories.get(npc_id)
+        if not memory:
+            return
+
+        # Record damage dealt
+        if result.hit and result.damage_dealt and result.action.target_name:
+            weapon = result.action.action_name or "attack"
+            memory.record_damage_dealt(
+                result.action.target_name,
+                result.damage_dealt,
+                weapon,
+                combat_round,
+            )
+
+            # Check if target went down
+            if result.target_new_hp is not None and result.target_new_hp <= 0:
+                memory.record_enemy_down(result.action.target_name, combat_round)
+
+        # Record miss
+        elif result.hit is False and result.action.target_name:
+            weapon = result.action.action_name or "attack"
+            memory.record_miss(result.action.target_name, weapon, combat_round, is_attacker=True)
+
+        # Record spell usage
+        if result.action.action_type == CombatActionType.CAST_SPELL:
+            spell_name = result.action.action_name or "unknown spell"
+            # Determine spell level (simplified - could be enhanced)
+            level = None
+            if any(s in spell_name.lower() for s in ["fire bolt", "ray of frost", "shocking grasp"]):
+                level = "cantrip"
+            elif any(s in spell_name.lower() for s in ["scorching ray", "misty step"]):
+                level = "2nd"
+            else:
+                level = "1st"
+            memory.record_spell_used(spell_name, level, combat_round)
 
     async def _execute_action(
         self,
@@ -242,13 +412,19 @@ class NPCCombatController:
         narration = ""
 
         if decision.action_type == CombatActionType.ATTACK:
-            # Execute attack
+            # Execute attack (with range validation + auto-movement)
             attack_roll, damage_roll, hit, damage_dealt, target_new_hp = (
-                await self._execute_attack(decision, combat_state)
+                await self._execute_attack(decision, combat_state, npc=npc, attacker=combatant)
             )
 
             # Generate narration
-            if hit:
+            if attack_roll is None and hit is None and decision.target_name:
+                # Attack couldn't execute (out of range after moving)
+                narration = (
+                    f"{npc.name} moves toward {decision.target_name} "
+                    f"but can't reach them this turn!"
+                )
+            elif hit:
                 narration = self._generate_hit_narration(
                     npc, decision, damage_dealt, target_new_hp
                 )
@@ -258,18 +434,66 @@ class NPCCombatController:
         elif decision.action_type == CombatActionType.MULTIATTACK:
             # Handle multiattack (simplified - just do primary attack)
             attack_roll, damage_roll, hit, damage_dealt, target_new_hp = (
-                await self._execute_attack(decision, combat_state)
+                await self._execute_attack(decision, combat_state, npc=npc, attacker=combatant)
             )
-            narration = f"{npc.name} uses Multiattack!"
-            if hit:
-                narration += f" {self._generate_hit_narration(npc, decision, damage_dealt, target_new_hp)}"
+            if attack_roll is None and hit is None and decision.target_name:
+                narration = (
+                    f"{npc.name} moves toward {decision.target_name} "
+                    f"but can't reach them this turn!"
+                )
             else:
-                narration += f" {self._generate_miss_narration(npc, decision)}"
+                narration = f"{npc.name} uses Multiattack!"
+                if hit:
+                    narration += f" {self._generate_hit_narration(npc, decision, damage_dealt, target_new_hp)}"
+                else:
+                    narration += f" {self._generate_miss_narration(npc, decision)}"
 
         elif decision.action_type == CombatActionType.CAST_SPELL:
-            narration = f"{npc.name} casts {decision.action_name or 'a spell'}!"
-            if decision.target_name:
-                narration += f" targeting {decision.target_name}."
+            # Execute spell attack/damage if applicable
+            spell_name = decision.action_name or "a spell"
+
+            if decision.rolls_needed:
+                has_attack = any(r["type"] == "attack" for r in decision.rolls_needed)
+                has_damage = any(r["type"] == "damage" for r in decision.rolls_needed)
+
+                if has_attack:
+                    # Spell attack roll (with range validation)
+                    attack_roll, damage_roll, hit, damage_dealt, target_new_hp = (
+                        await self._execute_attack(decision, combat_state, npc=npc, attacker=combatant)
+                    )
+                    if attack_roll is None and hit is None and decision.target_name:
+                        narration = (
+                            f"{npc.name} tries to cast {spell_name} at {decision.target_name} "
+                            f"but they're out of range!"
+                        )
+                    elif hit:
+                        narration = self._generate_spell_hit_narration(
+                            npc, spell_name, decision.target_name, damage_dealt, target_new_hp
+                        )
+                    else:
+                        narration = self._generate_spell_miss_narration(
+                            npc, spell_name, decision.target_name
+                        )
+                elif has_damage:
+                    # Auto-hit spell (like Magic Missile) or save-based spell
+                    damage_roll = self._roll_damage(decision.rolls_needed)
+                    damage_dealt = damage_roll.get("total", 0) if damage_roll else 0
+                    if decision.target_name and damage_dealt:
+                        target_new_hp = self._apply_damage_to_target(
+                            decision.target_name, damage_dealt, combat_state
+                        )
+                    narration = self._generate_spell_auto_narration(
+                        npc, spell_name, decision.target_name, damage_dealt, target_new_hp
+                    )
+                else:
+                    # Non-damaging spell
+                    narration = f"{npc.name} casts {spell_name}!"
+                    if decision.target_name:
+                        narration += f" targeting {decision.target_name}."
+            else:
+                narration = f"{npc.name} casts {spell_name}!"
+                if decision.target_name:
+                    narration += f" targeting {decision.target_name}."
 
         elif decision.action_type == CombatActionType.FLEE:
             narration = f"{npc.name} attempts to flee from combat!"
@@ -322,12 +546,16 @@ class NPCCombatController:
         self,
         decision: NPCCombatDecision,
         combat_state: CombatState,
+        npc: Optional[NPCFullProfile] = None,
+        attacker: Optional[dict] = None,
     ) -> tuple[Optional[dict], Optional[dict], Optional[bool], Optional[int], Optional[int]]:
-        """Execute an attack action.
+        """Execute an attack action with range validation and auto-movement.
 
         Args:
             decision: The combat decision.
             combat_state: Current combat state.
+            npc: The NPC profile (for stat lookups and movement speed).
+            attacker: The attacker's combatant dict (for position).
 
         Returns:
             Tuple of (attack_roll, damage_roll, hit, damage_dealt, target_new_hp).
@@ -345,6 +573,65 @@ class NPCCombatController:
         if not target:
             logger.warning(f"Target {decision.target_name} not found")
             return None, None, None, None, None
+
+        # --- Range validation ---
+        if attacker and attacker.get("x") is not None and target.get("x") is not None:
+            dist_ft = grid_distance_ft(
+                attacker.get("x", 0), attacker.get("y", 0),
+                target.get("x", 0), target.get("y", 0),
+            )
+
+            # Determine attack range from weapon or spell
+            attack_dict = None
+            if npc and decision.action_name:
+                for atk in (npc.stat_block.attacks or []):
+                    if atk["name"].lower() == decision.action_name.lower():
+                        attack_dict = atk
+                        break
+
+            if attack_dict:
+                category, normal_range, long_range = get_attack_range(attack_dict)
+            elif npc and decision.action_name and decision.action_type == CombatActionType.CAST_SPELL:
+                # Look up spell range
+                spell_range_str = None
+                for s in (npc.stat_block.cantrips or []):
+                    if s.get("name", "").lower() == decision.action_name.lower():
+                        spell_range_str = s.get("range", "120ft")
+                        break
+                if not spell_range_str:
+                    for s in (npc.stat_block.spells_known or []):
+                        if s.get("name", "").lower() == decision.action_name.lower():
+                            spell_range_str = s.get("range", "120ft")
+                            break
+                if spell_range_str:
+                    category, normal_range, long_range = parse_spell_range(spell_range_str)
+                else:
+                    category, normal_range, long_range = ("ranged", 120, 120)
+            else:
+                # Default: melee, reach 5ft
+                category, normal_range, long_range = ("melee", 5, None)
+
+            max_range = long_range if long_range else normal_range
+
+            if dist_ft > normal_range:
+                if category == "melee":
+                    # Auto-move toward target
+                    speed = npc.stat_block.speed if npc else 30
+                    new_dist = self._move_toward(attacker, target, speed, combat_state)
+                    logger.info(
+                        f"{attacker['name']} moves toward {target['name']}: "
+                        f"{dist_ft}ft -> {new_dist}ft (reach {normal_range}ft)"
+                    )
+                    if new_dist > normal_range:
+                        # Still out of reach -- spent turn moving
+                        logger.info(f"{attacker['name']} cannot reach {target['name']} this turn")
+                        return None, None, None, None, None
+                elif dist_ft > max_range:
+                    # Beyond max range for ranged weapon/spell
+                    logger.warning(
+                        f"{target['name']} is {dist_ft}ft away, beyond max range {max_range}ft"
+                    )
+                    return None, None, None, None, None
 
         # Roll attack
         attack_roll_result = None
@@ -458,6 +745,96 @@ class NPCCombatController:
 
         return f"{npc.name}'s {attack_name} {verb} {target}."
 
+    def _generate_spell_hit_narration(
+        self,
+        npc: NPCFullProfile,
+        spell_name: str,
+        target: Optional[str],
+        damage: Optional[int],
+        target_hp: Optional[int],
+    ) -> str:
+        """Generate narration for a successful spell attack."""
+        target_str = target or "the target"
+        hit_verbs = ["blasts", "scorches", "strikes", "burns", "freezes", "electrocutes"]
+        verb = random.choice(hit_verbs)
+
+        narration = f"{npc.name}'s {spell_name} {verb} {target_str}"
+        if damage:
+            narration += f" for **{damage} damage**!"
+        else:
+            narration += "!"
+
+        if target_hp is not None and target_hp <= 0:
+            narration += f" **{target_str} goes down!**"
+
+        return narration
+
+    def _generate_spell_miss_narration(
+        self,
+        npc: NPCFullProfile,
+        spell_name: str,
+        target: Optional[str],
+    ) -> str:
+        """Generate narration for a missed spell attack."""
+        target_str = target or "the target"
+        miss_verbs = ["fizzles past", "streaks past", "misses", "is evaded by"]
+        verb = random.choice(miss_verbs)
+
+        return f"{npc.name}'s {spell_name} {verb} {target_str}."
+
+    def _generate_spell_auto_narration(
+        self,
+        npc: NPCFullProfile,
+        spell_name: str,
+        target: Optional[str],
+        damage: Optional[int],
+        target_hp: Optional[int],
+    ) -> str:
+        """Generate narration for auto-hit spells (Magic Missile, save-based)."""
+        target_str = target or "the target"
+
+        if "magic missile" in spell_name.lower():
+            narration = f"Three darts of magical force streak from {npc.name}'s fingertips, striking {target_str}"
+        elif "burning hands" in spell_name.lower():
+            narration = f"A sheet of flames erupts from {npc.name}'s outstretched hands, engulfing {target_str}"
+        else:
+            narration = f"{npc.name} casts {spell_name} at {target_str}"
+
+        if damage:
+            narration += f" for **{damage} damage**!"
+        else:
+            narration += "!"
+
+        if target_hp is not None and target_hp <= 0:
+            narration += f" **{target_str} goes down!**"
+
+        return narration
+
+    def _roll_damage(self, rolls_needed: list[dict]) -> Optional[dict]:
+        """Roll damage from roll specifications."""
+        for roll in rolls_needed:
+            if roll.get("type") == "damage":
+                result = self._roll_dice(roll["expression"])
+                return {
+                    "expression": result["expression"],
+                    "rolls": result["rolls"],
+                    "total": result["total"],
+                }
+        return None
+
+    def _apply_damage_to_target(
+        self,
+        target_name: str,
+        damage: int,
+        combat_state: CombatState,
+    ) -> Optional[int]:
+        """Apply damage to a target and return new HP."""
+        for c in combat_state.initiative_order:
+            if c["name"].lower() == target_name.lower():
+                c["hp"] = max(0, c["hp"] - damage)
+                return c["hp"]
+        return None
+
     def _remove_from_combat(
         self,
         combatant: dict,
@@ -466,6 +843,80 @@ class NPCCombatController:
         """Remove a combatant from combat (fled/surrendered)."""
         combatant["hp"] = 0  # Marks as "out" without being dead
         combatant["fled"] = True
+
+    def _move_toward(
+        self,
+        mover: dict,
+        target: dict,
+        speed_ft: int,
+        combat_state: CombatState,
+    ) -> int:
+        """Move a combatant toward a target, up to their speed.
+
+        Uses simple greedy pathfinding (step in the direction that reduces
+        Chebyshev distance). Each square = 5 feet per D&D 5e standard.
+
+        Args:
+            mover: The combatant dict (has x, y).
+            target: The target combatant dict (has x, y).
+            speed_ft: Movement in feet (e.g. 30).
+            combat_state: For collision and bounds checking.
+
+        Returns:
+            Remaining distance in feet after movement.
+        """
+        squares = speed_ft // 5
+        mx, my = mover.get("x", 0), mover.get("y", 0)
+        tx, ty = target.get("x", 0), target.get("y", 0)
+
+        for _ in range(squares):
+            # Already adjacent?
+            if max(abs(tx - mx), abs(ty - my)) <= 1:
+                break
+
+            # Step direction
+            dx = 0 if tx == mx else (1 if tx > mx else -1)
+            dy = 0 if ty == my else (1 if ty > my else -1)
+
+            new_x, new_y = mx + dx, my + dy
+
+            # Bounds check
+            if (new_x < 0 or new_x >= combat_state.grid_width or
+                    new_y < 0 or new_y >= combat_state.grid_height):
+                break
+
+            # Collision check (skip dead combatants)
+            occupied = any(
+                c is not mover and c.get("x") == new_x and
+                c.get("y") == new_y and c.get("hp", 0) > 0
+                for c in combat_state.initiative_order
+            )
+
+            if occupied:
+                # Try orthogonal alternatives
+                moved = False
+                for alt_x, alt_y in [(mx + dx, my), (mx, my + dy)]:
+                    if (0 <= alt_x < combat_state.grid_width and
+                            0 <= alt_y < combat_state.grid_height):
+                        alt_occupied = any(
+                            c is not mover and c.get("x") == alt_x and
+                            c.get("y") == alt_y and c.get("hp", 0) > 0
+                            for c in combat_state.initiative_order
+                        )
+                        if not alt_occupied:
+                            new_x, new_y = alt_x, alt_y
+                            moved = True
+                            break
+                if not moved:
+                    break  # Stuck
+
+            mx, my = new_x, new_y
+
+        # Update position
+        mover["x"] = mx
+        mover["y"] = my
+
+        return grid_distance_ft(mx, my, tx, ty)
 
     async def _broadcast_result(
         self,
@@ -513,9 +964,107 @@ class NPCCombatController:
 
         return None
 
+    async def _process_default_npc_turn(
+        self,
+        combatant: dict,
+        combat_state: CombatState,
+    ) -> NPCCombatResult:
+        """Process a turn for an NPC without a full profile.
+
+        Uses simple default behavior: attack the nearest player.
+
+        Args:
+            combatant: The NPC combatant dict.
+            combat_state: Current combat state.
+
+        Returns:
+            NPCCombatResult with basic attack action.
+        """
+        npc_name = combatant["name"]
+
+        # Find a valid target (any living player)
+        target = None
+        for c in combat_state.initiative_order:
+            if c.get("is_player") and c.get("hp", 0) > 0:
+                target = c
+                break
+
+        if not target:
+            # No valid targets, skip turn
+            return NPCCombatResult(
+                npc_id=combatant.get("npc_id", "unknown"),
+                npc_name=npc_name,
+                action=NPCCombatDecision(
+                    npc_id=combatant.get("npc_id", "unknown"),
+                    round=combat_state.round,
+                    action_type=CombatActionType.DIALOGUE,
+                    reasoning="No valid targets",
+                    combat_dialogue="There's no one left to fight!",
+                ),
+                narration=f"{npc_name} looks around but finds no targets.",
+            )
+
+        # Generate attack phrases
+        attack_phrases = [
+            f"You'll regret coming here!",
+            f"Die, adventurer!",
+            f"For glory!",
+            f"I'll crush you!",
+            f"Your gold is mine!",
+            f"Prepare to meet your end!",
+        ]
+        dialogue = random.choice(attack_phrases)
+
+        # Create attack decision
+        decision = NPCCombatDecision(
+            npc_id=combatant.get("npc_id", "unknown"),
+            round=combat_state.round,
+            action_type=CombatActionType.ATTACK,
+            action_name="Attack",
+            target_name=target["name"],
+            reasoning=f"Attacking {target['name']} as the nearest threat",
+            combat_dialogue=dialogue,
+            rolls_needed=[
+                {"type": "attack", "expression": "1d20+4"},
+                {"type": "damage", "expression": "1d6+2"},
+            ],
+        )
+
+        # Execute the attack (with range validation + auto-movement)
+        attack_roll, damage_roll, hit, damage_dealt, target_new_hp = (
+            await self._execute_attack(decision, combat_state, npc=None, attacker=combatant)
+        )
+
+        # Generate narration
+        if attack_roll is None and hit is None and target:
+            narration = (
+                f"{npc_name} moves toward {target['name']} "
+                f"but can't reach them this turn!"
+            )
+        elif hit:
+            narration = f"{npc_name} strikes {target['name']} for **{damage_dealt} damage**!"
+            if target_new_hp is not None and target_new_hp <= 0:
+                narration += f" **{target['name']} goes down!**"
+        else:
+            narration = f"{npc_name}'s attack misses {target['name']}."
+
+        return NPCCombatResult(
+            npc_id=combatant.get("npc_id", "unknown"),
+            npc_name=npc_name,
+            action=decision,
+            attack_roll=attack_roll,
+            damage_roll=damage_roll,
+            hit=hit,
+            damage_dealt=damage_dealt,
+            target_new_hp=target_new_hp,
+            narration=narration,
+        )
+
     def clear_combat(self) -> None:
-        """Clear NPC combatant registrations."""
+        """Clear NPC combatant registrations and memories."""
         self._npc_combatant_map.clear()
+        self._npc_friendly_map.clear()
+        self._combat_memories.clear()
         self._combat_channel_id = None
 
 

@@ -146,6 +146,9 @@ class NPCAgent:
                 f"**Preferred Targets:** {', '.join(personality.preferred_targets)}"
             )
 
+        # Movement
+        prompt_parts.append(f"\n**Movement:** {stat_block.speed} ft per turn")
+
         # Available attacks
         prompt_parts.append("\n**Available Attacks:**")
         for attack in stat_block.attacks:
@@ -159,8 +162,34 @@ class NPCAgent:
             for ability in stat_block.special_abilities:
                 prompt_parts.append(f"- {ability['name']}: {ability['description']}")
 
-        # Spells
-        if stat_block.spells:
+        # Cantrips (at-will)
+        cantrips = getattr(stat_block, 'cantrips', None) or stat_block.__dict__.get('cantrips', [])
+        if cantrips:
+            prompt_parts.append("\n**Cantrips (at-will):**")
+            for cantrip in cantrips:
+                damage_info = f", {cantrip['damage']} {cantrip.get('damage_type', '')} damage" if cantrip.get('damage') else ""
+                effect_info = f", {cantrip.get('effect', '')}" if cantrip.get('effect') else ""
+                prompt_parts.append(f"- {cantrip['name']}: Range {cantrip.get('range', 'touch')}{damage_info}{effect_info}")
+
+        # Spell slots
+        spell_slots = getattr(stat_block, 'spell_slots', None) or stat_block.__dict__.get('spell_slots', {})
+        if spell_slots:
+            slots_str = ", ".join(f"{level}: {count}" for level, count in spell_slots.items())
+            prompt_parts.append(f"\n**Spell Slots:** {slots_str}")
+
+        # Spells known
+        spells_known = getattr(stat_block, 'spells_known', None) or stat_block.__dict__.get('spells_known', [])
+        if spells_known:
+            prompt_parts.append("\n**Spells Known:**")
+            for spell in spells_known:
+                level = spell.get('level', 1)
+                damage_info = f", {spell['damage']} {spell.get('damage_type', '')} damage" if spell.get('damage') else ""
+                save_info = f", {spell.get('save', '')} save" if spell.get('save') else ""
+                desc = spell.get('description', '')[:80] + '...' if len(spell.get('description', '')) > 80 else spell.get('description', '')
+                prompt_parts.append(f"- {spell['name']} (Level {level}): {desc}{damage_info}{save_info}")
+
+        # Legacy spells format
+        if stat_block.spells and not spells_known:
             prompt_parts.append("\n**Spells Available:**")
             for level, spells in stat_block.spells.items():
                 if spells:
@@ -194,6 +223,39 @@ class NPCAgent:
         )
 
         return "".join(prompt_parts)
+
+    def _build_lean_combat_system_prompt(self, npc: NPCFullProfile) -> str:
+        """Build a minimal system prompt for use with lean combat context.
+
+        The lean context already contains situational info, so this prompt
+        focuses on output format and basic combat rules.
+
+        Args:
+            npc: The NPC's full profile.
+
+        Returns:
+            Minimal system prompt for lean context combat.
+        """
+        speed = npc.stat_block.speed
+        return (
+            "You are deciding combat actions in D&D 5e. The user message describes "
+            "the current situation and your available options.\n\n"
+            f"MOVEMENT & REACH: You have {speed}ft of movement per turn. "
+            "Melee weapons require being within their reach (shown in AVAILABLE, usually 5ft). "
+            "If a melee target is beyond reach, you will auto-move up to "
+            f"{speed}ft toward them. If still out of reach, the turn is spent moving. "
+            "Prefer targets you can reach this turn. Ranged weapons/spells "
+            "can hit from the listed range without moving.\n\n"
+            "Respond with a JSON object containing:\n"
+            '- "action_type": one of [attack, cast_spell, use_ability, dash, dodge, '
+            'disengage, hide, flee, surrender]\n'
+            '- "action_name": specific attack/spell name from your AVAILABLE list\n'
+            '- "target_name": target name from ENEMIES list\n'
+            '- "reasoning": brief tactical reasoning (1 sentence)\n'
+            '- "combat_dialogue": optional in-character line (brief, situational)\n\n'
+            "Make smart tactical choices based on the situation. "
+            "Only generate dialogue if it naturally fits the moment - don't force it."
+        )
 
     async def generate_response(
         self,
@@ -285,6 +347,7 @@ class NPCAgent:
         npc: NPCFullProfile,
         combat_state: dict,
         available_targets: list[dict],
+        combat_context: Optional[str] = None,
     ) -> NPCCombatDecision:
         """Decide what action the NPC takes in combat.
 
@@ -292,20 +355,29 @@ class NPCAgent:
             npc: The NPC's full profile.
             combat_state: Current combat state (round, initiative order, etc.).
             available_targets: List of valid targets with their stats.
+            combat_context: Optional pre-built lean context with memory.
+                           If not provided, builds context the old way.
 
         Returns:
             NPCCombatDecision describing the action to take.
         """
-        # Build combat context
-        combat_context = await self.context_builder.build_combat_context(
-            npc=npc,
-            combat_state=combat_state,
-            available_targets=available_targets,
-        )
+        # Use provided lean context, or build old-style context
+        if combat_context is None:
+            combat_context = await self.context_builder.build_combat_context(
+                npc=npc,
+                combat_state=combat_state,
+                available_targets=available_targets,
+            )
+            # Use full system prompt for old-style context
+            system_prompt = self._build_combat_system_prompt(npc)
+        else:
+            # With lean context, we use a minimal system prompt
+            # The lean context already contains all the situational info
+            system_prompt = self._build_lean_combat_system_prompt(npc)
 
         messages = [
-            {"role": "system", "content": self._build_combat_system_prompt(npc)},
-            {"role": "user", "content": f"**Current Situation:**\n{combat_context}\n\nWhat action do you take?"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": combat_context},
         ]
 
         try:
@@ -327,17 +399,44 @@ class NPCAgent:
             except ValueError:
                 action_type = CombatActionType.ATTACK
 
-            # Build rolls needed
+            # Build rolls needed based on action type
             rolls_needed = []
+            action_name = decision_data.get("action_name")
+
             if action_type == CombatActionType.ATTACK:
                 # Find the attack being used
-                attack_name = decision_data.get("action_name")
-                attack = self._find_attack(npc, attack_name)
+                attack = self._find_attack(npc, action_name)
                 if attack:
                     rolls_needed = [
                         {"type": "attack", "expression": f"1d20+{attack['bonus']}"},
                         {"type": "damage", "expression": attack["damage"]},
                     ]
+
+            elif action_type == CombatActionType.CAST_SPELL:
+                # Find the spell/cantrip being cast
+                spell = self._find_spell(npc, action_name)
+                if spell:
+                    spell_attack = npc.stat_block.__dict__.get('spell_attack_bonus', 5)
+
+                    if spell.get('auto_hit'):
+                        # Spells like Magic Missile auto-hit
+                        if spell.get('damage'):
+                            rolls_needed = [
+                                {"type": "damage", "expression": spell['damage']},
+                            ]
+                    elif spell.get('attack_type') or spell.get('name', '').lower() in ['fire bolt', 'ray of frost', 'shocking grasp', 'scorching ray']:
+                        # Spell attack roll needed
+                        rolls_needed = [
+                            {"type": "attack", "expression": f"1d20+{spell_attack}"},
+                        ]
+                        if spell.get('damage'):
+                            rolls_needed.append({"type": "damage", "expression": spell['damage']})
+                    elif spell.get('save'):
+                        # Save-based spell, just damage roll
+                        if spell.get('damage'):
+                            rolls_needed = [
+                                {"type": "damage", "expression": spell['damage']},
+                            ]
 
             return NPCCombatDecision(
                 npc_id=npc.entity_id,
@@ -381,6 +480,39 @@ class NPCAgent:
 
         # Return first attack as fallback
         return attacks[0]
+
+    def _find_spell(self, npc: NPCFullProfile, spell_name: Optional[str]) -> Optional[dict]:
+        """Find a spell or cantrip by name.
+
+        Args:
+            npc: The NPC profile.
+            spell_name: Name of the spell to find.
+
+        Returns:
+            Spell dict or None.
+        """
+        if not spell_name:
+            return None
+
+        spell_name_lower = spell_name.lower()
+        stat_block = npc.stat_block
+
+        # Check cantrips first (access directly as Pydantic model field)
+        cantrips = stat_block.cantrips or []
+        for cantrip in cantrips:
+            if cantrip.get("name", "").lower() == spell_name_lower:
+                logger.debug(f"Found cantrip: {cantrip}")
+                return cantrip
+
+        # Check spells known
+        spells_known = stat_block.spells_known or []
+        for spell in spells_known:
+            if spell.get("name", "").lower() == spell_name_lower:
+                logger.debug(f"Found spell: {spell}")
+                return spell
+
+        logger.warning(f"Spell not found: {spell_name}. Available cantrips: {[c.get('name') for c in cantrips]}, spells: {[s.get('name') for s in spells_known]}")
+        return None
 
     def _find_target_id(
         self,

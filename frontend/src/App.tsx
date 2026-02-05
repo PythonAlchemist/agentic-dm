@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChatPanel, Sidebar, KnowledgeGraph, EntityDetail, PlayerManager, CombatTracker } from './components';
+import { ChatPanel, Sidebar, KnowledgeGraph, EntityDetail, PlayerManager, CombatDashboard } from './components';
 import { useChat } from './hooks/useChat';
 import { playerAPI } from './api/client';
 import type { Entity, Player } from './types';
@@ -14,6 +14,7 @@ function App() {
     changeMode,
     newSession,
     clearHistory,
+    addMessage,
   } = useChat();
 
   const [showKnowledgeGraph, setShowKnowledgeGraph] = useState(false);
@@ -53,13 +54,26 @@ function App() {
         onClearHistory={clearHistory}
         onOpenCampaign={() => setShowKnowledgeGraph(true)}
         onOpenPlayers={() => setShowPlayerManager(true)}
-        onOpenCombat={() => setShowCombatTracker(true)}
+        onOpenCombat={() => setShowCombatTracker(!showCombatTracker)}
+        combatActive={showCombatTracker}
       />
+
+      {/* Combat Dashboard (inline, takes ~60% when active) */}
+      {showCombatTracker && (
+        <CombatDashboard
+          onClose={() => setShowCombatTracker(false)}
+          players={players}
+          onNPCTurn={addMessage}
+        />
+      )}
+
+      {/* Chat Panel (full width normally, ~40% during combat) */}
       <ChatPanel
         messages={messages}
         onSendMessage={sendMessage}
         isLoading={isLoading}
         mode={mode}
+        className={showCombatTracker ? 'flex-1 min-w-[320px]' : 'flex-1'}
       />
 
       {/* Knowledge Graph */}
@@ -74,14 +88,6 @@ function App() {
       {showPlayerManager && (
         <PlayerManager
           onClose={() => setShowPlayerManager(false)}
-        />
-      )}
-
-      {/* Combat Tracker */}
-      {showCombatTracker && (
-        <CombatTracker
-          onClose={() => setShowCombatTracker(false)}
-          players={players}
         />
       )}
 

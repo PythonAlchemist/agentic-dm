@@ -7,7 +7,7 @@ from typing import Optional, Callable, Awaitable
 from pydantic import BaseModel, Field
 
 from backend.agents.tools import DMTools, CombatState
-from backend.discord.models import NPCFullProfile, NPCStatBlock
+from backend.discord.models import NPCFullProfile, NPCStatBlock, NPCFaction
 from backend.discord.combat_models import NPCCombatResult, CombatActionType
 from backend.discord.combat_controller import NPCCombatController
 from backend.discord.npc_registry import NPCRegistry
@@ -43,6 +43,13 @@ class TurnResult(BaseModel):
 
     # Narration for display
     narration: str = ""
+
+    # Collected NPC turn results (when auto-processing NPC turns)
+    npc_turn_results: list["TurnResult"] = Field(default_factory=list)
+
+
+# Rebuild the model for forward references
+TurnResult.model_rebuild()
 
 
 class CombatConfig(BaseModel):
@@ -166,23 +173,34 @@ class CombatManager:
             npc_id = npc.get("npc_id")
             npc_name = npc["name"]
 
-            # Get NPC profile for stats
+            # Get NPC profile for stats and default faction
+            # Clear cache to ensure fresh profile with default_faction
             profile = None
             if npc_id:
+                if npc_id in self.registry._profile_cache:
+                    del self.registry._profile_cache[npc_id]
                 profile = self.registry.get_npc(npc_id)
+
+            # Determine faction: explicit > profile default > hostile
+            if "is_friendly" in npc:
+                is_friendly = npc["is_friendly"]
+            elif profile and profile.default_faction == NPCFaction.FRIENDLY:
+                is_friendly = True
+            else:
+                is_friendly = False
 
             # Use profile stats or provided stats
             if profile:
                 stats = profile.stat_block
-                hp = npc.get("hp", stats.hit_points)
-                max_hp = npc.get("max_hp", stats.max_hit_points)
-                ac = npc.get("ac", stats.armor_class)
-                init_bonus = npc.get("initiative_bonus", stats.initiative_bonus)
+                hp = npc.get("hp") or stats.hit_points or 10
+                max_hp = npc.get("max_hp") or stats.max_hit_points or hp
+                ac = npc.get("ac") or stats.armor_class or 10
+                init_bonus = npc.get("initiative_bonus") if npc.get("initiative_bonus") is not None else (stats.initiative_bonus or 0)
             else:
-                hp = npc.get("hp", 15)
-                max_hp = npc.get("max_hp", hp)
-                ac = npc.get("ac", 13)
-                init_bonus = npc.get("initiative_bonus", 0)
+                hp = npc.get("hp") or 15
+                max_hp = npc.get("max_hp") or hp
+                ac = npc.get("ac") or 13
+                init_bonus = npc.get("initiative_bonus") or 0
 
             combatants.append({
                 "name": npc_name,
@@ -193,12 +211,13 @@ class CombatManager:
                 "is_player": False,
                 "is_npc": True,
                 "npc_id": npc_id,
+                "is_friendly": is_friendly,
             })
 
             # Register with combat controller
             if npc_id:
                 self._combatant_npc_ids[npc_name.lower()] = npc_id
-                self.combat_controller.register_npc_combatant(npc_name, npc_id)
+                self.combat_controller.register_npc_combatant(npc_name, npc_id, is_friendly)
 
         # Add non-AI monsters
         if monsters:
@@ -216,6 +235,37 @@ class CombatManager:
         # Roll initiative and start combat
         combat_state = self.dm_tools.start_combat(combatants)
 
+        current = combat_state.current_combatant()
+        npc_turn_results = []
+
+        # If first turn is an NPC and auto_npc_turns is enabled, process it
+        if (
+            current
+            and self.config.auto_npc_turns
+            and self._is_npc_combatant(current)
+        ):
+            result = await self.process_current_turn()
+            if result:
+                npc_turn_results.append(result)
+                # Auto-advance through consecutive NPC turns
+                while (
+                    result
+                    and result.turn_type == TurnType.NPC
+                    and result.combat_active
+                ):
+                    next_result = self.dm_tools.next_turn()
+                    if not next_result or next_result.get("combat_ended"):
+                        break
+                    new_current = self.dm_tools.combat_state.current_combatant()
+                    if not new_current or not self._is_npc_combatant(new_current):
+                        break
+                    result = await self.process_current_turn()
+                    if result:
+                        npc_turn_results.append(result)
+
+        # Refresh current after potential NPC turns
+        current = combat_state.current_combatant()
+
         # Build response
         initiative_order = []
         for c in combat_state.initiative_order:
@@ -226,17 +276,34 @@ class CombatManager:
                 "max_hp": c["max_hp"],
                 "is_player": c.get("is_player", False),
                 "is_npc": c.get("is_npc", False),
+                "is_friendly": c.get("is_friendly", False),
+                "x": c.get("x"),
+                "y": c.get("y"),
             })
 
-        current = combat_state.current_combatant()
-
-        return {
+        response = {
             "combat_started": True,
-            "round": 1,
+            "round": combat_state.round,
             "initiative_order": initiative_order,
             "current_turn": current["name"] if current else None,
             "current_is_npc": self._is_npc_combatant(current) if current else False,
+            "grid_width": combat_state.grid_width,
+            "grid_height": combat_state.grid_height,
         }
+
+        # Include all NPC turn results
+        if npc_turn_results:
+            response["npc_turn_results"] = [
+                {
+                    "combatant_name": r.combatant_name,
+                    "turn_type": r.turn_type.value,
+                    "narration": r.narration,
+                    "npc_action": r.npc_result.model_dump() if r.npc_result else None,
+                }
+                for r in npc_turn_results
+            ]
+
+        return response
 
     def _is_npc_combatant(self, combatant: dict) -> bool:
         """Check if combatant is an AI-controlled NPC."""
@@ -450,7 +517,7 @@ class CombatManager:
         automatically processes that turn too.
 
         Returns:
-            TurnResult for the new current turn.
+            TurnResult for the new current turn, with all NPC results in npc_turn_results.
         """
         # Advance turn
         next_turn = self.dm_tools.next_turn()
@@ -472,20 +539,39 @@ class CombatManager:
                 narration=f"**Combat Ended:** {next_turn.get('reason', 'Unknown')}",
             )
 
-        # Process new turn
-        result = await self.process_current_turn()
+        # Collect all NPC turn results
+        npc_results = []
 
-        # If it's an NPC turn and auto-advance is on, keep processing
-        if (
-            result
-            and result.turn_type == TurnType.NPC
-            and self.config.auto_npc_turns
-            and result.combat_active
-        ):
-            # Recursively process until we hit a player/monster turn
-            return await self.end_turn()
+        # Process turns until we hit a player/monster turn or combat ends
+        while True:
+            # Process current turn
+            result = await self.process_current_turn()
 
-        return result
+            if not result:
+                break
+
+            # If it's an NPC turn, save the result and continue
+            if result.turn_type == TurnType.NPC and self.config.auto_npc_turns:
+                npc_results.append(result)
+
+                if not result.combat_active:
+                    # Combat ended
+                    result.npc_turn_results = npc_results
+                    return result
+
+                # Advance to next turn
+                advance = self.dm_tools.next_turn()
+                if not advance or advance.get("combat_ended"):
+                    result.combat_active = False
+                    result.combat_ended_reason = advance.get("reason") if advance else "Combat ended"
+                    result.npc_turn_results = npc_results
+                    return result
+            else:
+                # Non-NPC turn - attach collected NPC results and return
+                result.npc_turn_results = npc_results
+                return result
+
+        return None
 
     async def process_all_npc_turns(self) -> list[TurnResult]:
         """Process all consecutive NPC turns until a player/monster turn.
@@ -529,18 +615,22 @@ class CombatManager:
         if not self.dm_tools.combat_state:
             return True, "No combat state"
 
-        players_alive = 0
-        enemies_alive = 0
+        party_alive = 0  # Players + friendly NPCs
+        enemies_alive = 0  # Hostile NPCs + monsters
 
         for c in self.dm_tools.combat_state.initiative_order:
             if c["hp"] > 0 and not c.get("fled"):
                 if c.get("is_player"):
-                    players_alive += 1
+                    party_alive += 1
+                elif c.get("is_friendly"):
+                    # Friendly NPC - counts as party
+                    party_alive += 1
                 else:
+                    # Hostile NPC or monster
                     enemies_alive += 1
 
-        if players_alive == 0:
-            return True, "All players defeated"
+        if party_alive == 0:
+            return True, "Party defeated"
         if enemies_alive == 0:
             return True, "All enemies defeated"
 

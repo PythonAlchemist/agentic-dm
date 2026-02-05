@@ -86,7 +86,7 @@ const ENTITY_TYPES = [
 
 export function KnowledgeGraph({ onClose, onSelectEntity }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const graphRef = useRef<any>();
+  const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
