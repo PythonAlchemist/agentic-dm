@@ -99,6 +99,14 @@ export function useChat() {
     setError(null);
   }, [sessionId]);
 
+  // Add a message directly (for combat, NPC turns, etc.)
+  const addMessage = useCallback((message: ChatMessage) => {
+    setMessages((prev) => [...prev, {
+      ...message,
+      timestamp: message.timestamp || new Date().toISOString(),
+    }]);
+  }, []);
+
   return {
     messages,
     sessionId,
@@ -109,5 +117,6 @@ export function useChat() {
     changeMode,
     newSession,
     clearHistory,
+    addMessage,
   };
 }

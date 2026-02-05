@@ -8,9 +8,10 @@ interface Props {
   onSendMessage: (message: string) => void;
   isLoading: boolean;
   mode: 'assistant' | 'autonomous';
+  className?: string;
 }
 
-export function ChatPanel({ messages, onSendMessage, isLoading, mode }: Props) {
+export function ChatPanel({ messages, onSendMessage, isLoading, mode, className }: Props) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages
@@ -19,7 +20,7 @@ export function ChatPanel({ messages, onSendMessage, isLoading, mode }: Props) {
   }, [messages]);
 
   return (
-    <div className="flex-1 flex flex-col bg-gray-800">
+    <div className={`flex flex-col bg-gray-800 ${className || 'flex-1'}`}>
       {/* Header */}
       <header className="px-4 py-3 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
         <div>

@@ -5,6 +5,16 @@ interface Props {
 }
 
 export function ChatMessage({ message }: Props) {
+  // Handle NPC theatrical messages
+  if (message.role === 'npc' && message.npcData) {
+    return <NPCMessage message={message} />;
+  }
+
+  // Handle combat system messages
+  if (message.role === 'combat' && message.combatData) {
+    return <CombatSystemMessage message={message} />;
+  }
+
   const isUser = message.role === 'user';
 
   return (
@@ -67,6 +77,72 @@ export function ChatMessage({ message }: Props) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// NPC theatrical message - like a play script
+function NPCMessage({ message }: Props) {
+  const { npcData } = message;
+  if (!npcData) return null;
+
+  return (
+    <div className="mb-4 pl-4 border-l-4 border-purple-500">
+      {/* Character name header */}
+      <div className="font-bold text-purple-400 uppercase tracking-wide text-sm mb-1">
+        {npcData.name}
+      </div>
+
+      {/* Dialogue - in quotes, emphasized */}
+      {npcData.dialogue && (
+        <div className="text-white text-lg mb-2">
+          "{npcData.dialogue}"
+        </div>
+      )}
+
+      {/* Stage direction - action description in italics */}
+      {npcData.action && (
+        <div className="text-gray-400 italic text-sm">
+          [{npcData.action}]
+        </div>
+      )}
+
+      {/* Combat result - target and outcome */}
+      {(npcData.target || npcData.result) && (
+        <div className="mt-2 text-sm font-mono bg-gray-800/50 px-3 py-2 rounded">
+          {npcData.target && (
+            <span className="text-red-400">Target: {npcData.target}</span>
+          )}
+          {npcData.target && npcData.result && <span className="text-gray-500"> | </span>}
+          {npcData.result && (
+            <span className="text-yellow-400">{npcData.result}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Combat system messages (round starts, etc.)
+function CombatSystemMessage({ message }: Props) {
+  const { combatData } = message;
+  if (!combatData) return null;
+
+  const getIcon = () => {
+    switch (combatData.type) {
+      case 'round_start': return '⚔️';
+      case 'turn_start': return '➡️';
+      case 'combat_end': return '🏁';
+      default: return '⚔️';
+    }
+  };
+
+  return (
+    <div className="mb-4 flex justify-center">
+      <div className="px-4 py-2 bg-gray-700/50 rounded-full text-sm text-gray-300 flex items-center gap-2">
+        <span>{getIcon()}</span>
+        <span>{message.content}</span>
       </div>
     </div>
   );

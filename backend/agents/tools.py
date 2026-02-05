@@ -44,6 +44,22 @@ class EncounterResult(BaseModel):
     tactics: str = ""
 
 
+class Combatant(BaseModel):
+    """Individual combatant in combat."""
+
+    name: str
+    initiative: int = 0
+    initiative_bonus: int = 0
+    hp: int = 10
+    max_hp: int = 10
+    is_player: bool = False
+    player_id: Optional[str] = None
+    player_name: Optional[str] = None
+    pc_id: Optional[str] = None
+    character_name: Optional[str] = None
+    conditions: list[str] = Field(default_factory=list)
+
+
 class CombatState(BaseModel):
     """Combat state tracking."""
 
@@ -51,6 +67,26 @@ class CombatState(BaseModel):
     initiative_order: list[dict] = Field(default_factory=list)
     current_turn_idx: int = 0
     active: bool = False
+    grid_width: int = 20
+    grid_height: int = 15
+
+    def current_combatant(self) -> Optional[dict]:
+        """Get the current combatant."""
+        if not self.initiative_order:
+            return None
+        return self.initiative_order[self.current_turn_idx]
+
+    def current_player_info(self) -> Optional[dict]:
+        """Get current player info if it's a player's turn."""
+        current = self.current_combatant()
+        if current and current.get("is_player"):
+            return {
+                "player_id": current.get("player_id"),
+                "player_name": current.get("player_name"),
+                "character_name": current.get("character_name"),
+                "pc_id": current.get("pc_id"),
+            }
+        return None
 
 
 class DMTools:
@@ -387,7 +423,8 @@ class DMTools:
         """Start a new combat encounter.
 
         Args:
-            combatants: List of combatants with name and initiative bonus.
+            combatants: List of combatants with name, initiative bonus, and optional
+                        player info (player_id, player_name, pc_id, character_name).
 
         Returns:
             CombatState with initiative order.
@@ -400,9 +437,19 @@ class DMTools:
             initiative_order.append({
                 "name": c["name"],
                 "initiative": init_total,
+                "initiative_bonus": c.get("initiative_bonus", 0),
                 "hp": c.get("hp", 10),
-                "max_hp": c.get("hp", 10),
+                "max_hp": c.get("max_hp", c.get("hp", 10)),
+                "ac": c.get("ac", 10),
                 "is_player": c.get("is_player", False),
+                "is_npc": c.get("is_npc", False),
+                "is_friendly": c.get("is_friendly", False),
+                "npc_id": c.get("npc_id"),
+                "player_id": c.get("player_id"),
+                "player_name": c.get("player_name"),
+                "pc_id": c.get("pc_id"),
+                "character_name": c.get("character_name"),
+                "conditions": [],
             })
 
         # Sort by initiative (descending)
@@ -415,13 +462,62 @@ class DMTools:
             active=True,
         )
 
+        # Auto-place combatants on the grid
+        self._auto_place_combatants()
+
         return self.combat_state
+
+    def start_combat_from_session(
+        self,
+        session_attendees: list[dict],
+        additional_combatants: Optional[list[dict]] = None,
+    ) -> CombatState:
+        """Start combat with session attendees as combatants.
+
+        Args:
+            session_attendees: List of players from get_session_attendees().
+                Each should have id, name, and optionally active_pc.
+            additional_combatants: Optional list of monsters/NPCs to add.
+
+        Returns:
+            CombatState with initiative order.
+        """
+        combatants = []
+
+        # Add player characters
+        for player in session_attendees:
+            if player.get("active_pc"):
+                pc = player["active_pc"]
+                combatants.append({
+                    "name": pc.get("name", "Unknown"),
+                    "initiative_bonus": pc.get("initiative_bonus", 0),
+                    "hp": pc.get("hp", 10),
+                    "max_hp": pc.get("max_hp", 10),
+                    "is_player": True,
+                    "player_id": player.get("id"),
+                    "player_name": player.get("name"),
+                    "pc_id": pc.get("id"),
+                    "character_name": pc.get("name"),
+                })
+
+        # Add monsters/NPCs
+        if additional_combatants:
+            for c in additional_combatants:
+                combatants.append({
+                    "name": c.get("name", "Monster"),
+                    "initiative_bonus": c.get("initiative_bonus", 0),
+                    "hp": c.get("hp", 10),
+                    "max_hp": c.get("max_hp", c.get("hp", 10)),
+                    "is_player": False,
+                })
+
+        return self.start_combat(combatants)
 
     def next_turn(self) -> Optional[dict]:
         """Advance to the next turn in combat.
 
         Returns:
-            Dict with current combatant info, or None if combat ended.
+            Dict with current combatant info and player details, or None if combat ended.
         """
         if not self.combat_state or not self.combat_state.active:
             return None
@@ -436,18 +532,35 @@ class DMTools:
 
         # Skip dead combatants
         current = self.combat_state.initiative_order[self.combat_state.current_turn_idx]
-        while current["hp"] <= 0:
+        attempts = 0
+        while current["hp"] <= 0 and attempts < len(self.combat_state.initiative_order):
             self.combat_state.current_turn_idx += 1
             if self.combat_state.current_turn_idx >= len(self.combat_state.initiative_order):
                 self.combat_state.current_turn_idx = 0
                 self.combat_state.round += 1
             current = self.combat_state.initiative_order[self.combat_state.current_turn_idx]
+            attempts += 1
 
-        return {
+        # Check if combat is over (all combatants down)
+        if attempts >= len(self.combat_state.initiative_order):
+            self.combat_state.active = False
+            return {"combat_ended": True, "reason": "All combatants down"}
+
+        result = {
             "round": self.combat_state.round,
             "current": current,
             "initiative_order": self.combat_state.initiative_order,
         }
+
+        # Add player info if it's a player's turn
+        if current.get("is_player"):
+            result["player_info"] = {
+                "player_id": current.get("player_id"),
+                "player_name": current.get("player_name"),
+                "character_name": current.get("character_name"),
+            }
+
+        return result
 
     def apply_damage(self, target_name: str, damage: int) -> dict:
         """Apply damage to a combatant.
@@ -475,24 +588,292 @@ class DMTools:
 
         return {"error": f"Combatant '{target_name}' not found"}
 
+    def get_combat_status(self) -> Optional[dict]:
+        """Get current combat status without advancing turn.
+
+        Returns:
+            Current combat state or None if no combat active.
+        """
+        if not self.combat_state or not self.combat_state.active:
+            return None
+
+        current = self.combat_state.current_combatant()
+        result = {
+            "round": self.combat_state.round,
+            "current": current,
+            "initiative_order": self.combat_state.initiative_order,
+            "active": self.combat_state.active,
+        }
+
+        if current and current.get("is_player"):
+            result["player_info"] = self.combat_state.current_player_info()
+
+        return result
+
+    def add_condition(self, target_name: str, condition: str) -> dict:
+        """Add a condition to a combatant.
+
+        Args:
+            target_name: Name of the target.
+            condition: Condition to add (e.g., "poisoned", "stunned").
+
+        Returns:
+            Dict with target status.
+        """
+        if not self.combat_state:
+            return {"error": "No combat active"}
+
+        for c in self.combat_state.initiative_order:
+            if c["name"].lower() == target_name.lower():
+                if "conditions" not in c:
+                    c["conditions"] = []
+                if condition not in c["conditions"]:
+                    c["conditions"].append(condition)
+                return {
+                    "name": c["name"],
+                    "conditions": c["conditions"],
+                }
+
+        return {"error": f"Combatant '{target_name}' not found"}
+
+    def remove_condition(self, target_name: str, condition: str) -> dict:
+        """Remove a condition from a combatant.
+
+        Args:
+            target_name: Name of the target.
+            condition: Condition to remove.
+
+        Returns:
+            Dict with target status.
+        """
+        if not self.combat_state:
+            return {"error": "No combat active"}
+
+        for c in self.combat_state.initiative_order:
+            if c["name"].lower() == target_name.lower():
+                if "conditions" in c and condition in c["conditions"]:
+                    c["conditions"].remove(condition)
+                return {
+                    "name": c["name"],
+                    "conditions": c.get("conditions", []),
+                }
+
+        return {"error": f"Combatant '{target_name}' not found"}
+
+    def apply_healing(self, target_name: str, healing: int) -> dict:
+        """Apply healing to a combatant.
+
+        Args:
+            target_name: Name of the target.
+            healing: Amount of healing.
+
+        Returns:
+            Dict with target status.
+        """
+        if not self.combat_state:
+            return {"error": "No combat active"}
+
+        for c in self.combat_state.initiative_order:
+            if c["name"].lower() == target_name.lower():
+                c["hp"] = min(c["max_hp"], c["hp"] + healing)
+                return {
+                    "name": c["name"],
+                    "healing_received": healing,
+                    "current_hp": c["hp"],
+                    "max_hp": c["max_hp"],
+                    "status": "active" if c["hp"] > 0 else "down",
+                }
+
+        return {"error": f"Combatant '{target_name}' not found"}
+
     def end_combat(self) -> dict:
         """End the current combat.
 
         Returns:
-            Combat summary.
+            Combat summary with player info.
         """
         if not self.combat_state:
             return {"message": "No combat to end"}
 
+        survivors = [c for c in self.combat_state.initiative_order if c["hp"] > 0]
+        defeated = [c for c in self.combat_state.initiative_order if c["hp"] <= 0]
+
         summary = {
             "rounds": self.combat_state.round,
-            "survivors": [
-                c for c in self.combat_state.initiative_order if c["hp"] > 0
+            "survivors": survivors,
+            "defeated": defeated,
+            "player_survivors": [
+                {
+                    "player_name": c.get("player_name"),
+                    "character_name": c.get("character_name"),
+                    "hp": c["hp"],
+                    "max_hp": c["max_hp"],
+                }
+                for c in survivors if c.get("is_player")
             ],
-            "defeated": [
-                c for c in self.combat_state.initiative_order if c["hp"] <= 0
+            "player_casualties": [
+                {
+                    "player_name": c.get("player_name"),
+                    "character_name": c.get("character_name"),
+                }
+                for c in defeated if c.get("is_player")
             ],
         }
 
         self.combat_state = None
         return summary
+
+    def _auto_place_combatants(self) -> None:
+        """Auto-place combatants on the grid: players left, enemies right."""
+        if not self.combat_state:
+            return
+
+        grid = self.combat_state
+        player_side = [c for c in grid.initiative_order
+                       if c.get("is_player") or c.get("is_friendly")]
+        enemy_side = [c for c in grid.initiative_order
+                      if not c.get("is_player") and not c.get("is_friendly")]
+
+        player_col = 3
+        enemy_col = grid.grid_width - 4
+
+        def place_group(group: list[dict], col: int) -> None:
+            start_row = max(0, (grid.grid_height - len(group)) // 2)
+            for i, c in enumerate(group):
+                c["x"] = col
+                c["y"] = start_row + i
+
+        place_group(player_side, player_col)
+        place_group(enemy_side, enemy_col)
+
+    def move_combatant(self, name: str, x: int, y: int) -> dict:
+        """Move a combatant to a new grid position.
+
+        Args:
+            name: Combatant name.
+            x: Target column.
+            y: Target row.
+
+        Returns:
+            Result dict with new position or error.
+        """
+        if not self.combat_state:
+            return {"error": "No combat active"}
+
+        grid = self.combat_state
+
+        # Bounds check
+        if x < 0 or x >= grid.grid_width or y < 0 or y >= grid.grid_height:
+            return {"error": f"Position ({x}, {y}) is out of bounds"}
+
+        # Collision check
+        for c in grid.initiative_order:
+            if c["name"] != name and c.get("x") == x and c.get("y") == y and c["hp"] > 0:
+                return {"error": f"Cell ({x}, {y}) is occupied by {c['name']}"}
+
+        # Find and move
+        for c in grid.initiative_order:
+            if c["name"] == name:
+                c["x"] = x
+                c["y"] = y
+                return {"name": name, "x": x, "y": y}
+
+        return {"error": f"Combatant '{name}' not found"}
+
+    def add_combatant_mid_combat(self, combatant: dict) -> dict:
+        """Add a combatant to an active combat.
+
+        Rolls initiative and inserts at the correct position.
+
+        Args:
+            combatant: Combatant dict with name, hp, etc.
+
+        Returns:
+            Result dict with new combatant info.
+        """
+        if not self.combat_state or not self.combat_state.active:
+            return {"error": "No active combat"}
+
+        # Roll initiative
+        roll = self.roll_dice("1d20")
+        init_total = roll.total + combatant.get("initiative_bonus", 0)
+
+        new_entry = {
+            "name": combatant["name"],
+            "initiative": init_total,
+            "initiative_bonus": combatant.get("initiative_bonus", 0),
+            "hp": combatant.get("hp", 10),
+            "max_hp": combatant.get("max_hp", combatant.get("hp", 10)),
+            "ac": combatant.get("ac", 10),
+            "is_player": combatant.get("is_player", False),
+            "is_npc": combatant.get("is_npc", False),
+            "is_friendly": combatant.get("is_friendly", False),
+            "npc_id": combatant.get("npc_id"),
+            "player_id": combatant.get("player_id"),
+            "player_name": combatant.get("player_name"),
+            "pc_id": combatant.get("pc_id"),
+            "character_name": combatant.get("character_name"),
+            "conditions": [],
+            "x": combatant.get("x"),
+            "y": combatant.get("y"),
+        }
+
+        # Find insertion index to maintain initiative order
+        order = self.combat_state.initiative_order
+        insert_idx = len(order)
+        for i, c in enumerate(order):
+            if c["initiative"] < init_total:
+                insert_idx = i
+                break
+
+        # Adjust current_turn_idx if inserting before current
+        if insert_idx <= self.combat_state.current_turn_idx:
+            self.combat_state.current_turn_idx += 1
+
+        order.insert(insert_idx, new_entry)
+
+        return {
+            "name": new_entry["name"],
+            "initiative": new_entry["initiative"],
+            "hp": new_entry["hp"],
+            "max_hp": new_entry["max_hp"],
+            "x": new_entry.get("x"),
+            "y": new_entry.get("y"),
+            "index": insert_idx,
+        }
+
+    def remove_combatant_mid_combat(self, name: str) -> dict:
+        """Remove a combatant from active combat.
+
+        Adjusts current_turn_idx as needed.
+
+        Args:
+            name: Combatant name to remove.
+
+        Returns:
+            Result dict or error.
+        """
+        if not self.combat_state or not self.combat_state.active:
+            return {"error": "No active combat"}
+
+        order = self.combat_state.initiative_order
+        remove_idx = None
+        for i, c in enumerate(order):
+            if c["name"] == name:
+                remove_idx = i
+                break
+
+        if remove_idx is None:
+            return {"error": f"Combatant '{name}' not found"}
+
+        removed = order.pop(remove_idx)
+
+        # Adjust current_turn_idx
+        if remove_idx < self.combat_state.current_turn_idx:
+            self.combat_state.current_turn_idx -= 1
+        elif remove_idx == self.combat_state.current_turn_idx:
+            # Current combatant was removed, stay at same index (next combatant)
+            if self.combat_state.current_turn_idx >= len(order):
+                self.combat_state.current_turn_idx = 0
+
+        return {"removed": removed["name"], "remaining": len(order)}
