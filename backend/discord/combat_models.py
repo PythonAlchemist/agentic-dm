@@ -189,6 +189,7 @@ class NPCCombatDecision(BaseModel):
 
     # Movement
     movement_description: Optional[str] = None
+    move_toward: Optional[str] = None  # Name of enemy to move toward
 
     # Reasoning (for transparency)
     reasoning: str

@@ -25,9 +25,10 @@ export interface CombatLogEntry {
   type: 'npc' | 'system';
   npcName?: string;
   dialogue?: string;
-  action?: string;
-  target?: string;
-  result?: string;
+  movement?: string;  // e.g., "Move 30ft to E8" or "Dash 60ft to E8"
+  action?: string;    // e.g., "Attack — Greataxe"
+  target?: string;    // e.g., "Thorin"
+  result?: string;    // e.g., "Hit! 10 damage" or "Miss"
   message?: string;
 }
 

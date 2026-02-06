@@ -385,6 +385,160 @@ class NPCCombatController:
                 level = "1st"
             memory.record_spell_used(spell_name, level, combat_round)
 
+    def _find_combatant_by_name(self, name: str, combat_state: CombatState) -> Optional[dict]:
+        """Find a combatant by name in the initiative order."""
+        for c in combat_state.initiative_order:
+            if c["name"].lower() == name.lower():
+                return c
+        return None
+
+    def _grid_to_notation(self, x: int, y: int) -> str:
+        """Convert grid coordinates to chess-like notation (A1, B2, etc.)."""
+        col = chr(ord('A') + x) if x < 26 else f"Z{x - 25}"
+        row = y + 1
+        return f"{col}{row}"
+
+    def _execute_strategic_movement(
+        self,
+        npc: NPCFullProfile,
+        decision: NPCCombatDecision,
+        combatant: dict,
+        combat_state: CombatState,
+        speed_multiplier: float = 1.0,
+    ) -> dict:
+        """Execute strategic movement toward a target.
+
+        Args:
+            npc: The NPC profile.
+            decision: The combat decision.
+            combatant: The NPC's combatant entry.
+            combat_state: Current combat state.
+            speed_multiplier: Speed multiplier (2.0 for dash).
+
+        Returns:
+            Dict with movement details: {moved_ft, from_pos, to_pos, to_notation, target_name}
+        """
+        move_target_name = decision.move_toward or decision.target_name
+        empty_result = {"moved_ft": 0, "from_pos": None, "to_pos": None, "to_notation": None, "target_name": None}
+
+        if not move_target_name:
+            return empty_result
+
+        target = self._find_combatant_by_name(move_target_name, combat_state)
+        if not target:
+            return empty_result
+
+        # Check if we need to move
+        if combatant.get("x") is None or target.get("x") is None:
+            return empty_result
+
+        start_dist = grid_distance_ft(
+            combatant.get("x", 0), combatant.get("y", 0),
+            target.get("x", 0), target.get("y", 0)
+        )
+
+        # Already in melee range
+        if start_dist <= 5:
+            return empty_result
+
+        # Calculate effective speed
+        base_speed = npc.stat_block.speed
+        effective_speed = int(base_speed * speed_multiplier)
+
+        # Execute movement
+        start_x, start_y = combatant.get("x", 0), combatant.get("y", 0)
+        new_dist = self._move_toward(combatant, target, effective_speed, combat_state)
+
+        # Calculate distance moved
+        end_x, end_y = combatant.get("x", 0), combatant.get("y", 0)
+        moved_ft = grid_distance_ft(start_x, start_y, end_x, end_y)
+
+        if moved_ft > 0:
+            return {
+                "moved_ft": moved_ft,
+                "from_pos": (start_x, start_y),
+                "to_pos": (end_x, end_y),
+                "to_notation": self._grid_to_notation(end_x, end_y),
+                "target_name": move_target_name,
+            }
+        return empty_result
+
+    def _build_stage_directions(
+        self,
+        npc_name: str,
+        movement: dict,
+        action_type: str,
+        action_name: Optional[str],
+        target_name: Optional[str],
+        hit: Optional[bool] = None,
+        damage: Optional[int] = None,
+        bonus_action: Optional[str] = None,
+    ) -> str:
+        """Build structured stage directions showing action economy.
+
+        Args:
+            npc_name: Name of the NPC.
+            movement: Movement dict from _execute_strategic_movement.
+            action_type: Type of action (attack, cast_spell, dash, etc.)
+            action_name: Name of the attack/spell.
+            target_name: Target of the action.
+            hit: Whether the attack hit.
+            damage: Damage dealt.
+            bonus_action: Bonus action taken (if any).
+
+        Returns:
+            Formatted stage directions string.
+        """
+        lines = []
+
+        # Movement line
+        if movement.get("moved_ft", 0) > 0:
+            lines.append(f"**Movement:** Move {movement['moved_ft']}ft to {movement['to_notation']}")
+
+        # Action line
+        action_str = ""
+        if action_type == "attack":
+            weapon = action_name or "weapon"
+            if hit is True:
+                action_str = f"**Action:** Attack — {weapon} → {target_name} (HIT, {damage} damage)"
+            elif hit is False:
+                action_str = f"**Action:** Attack — {weapon} → {target_name} (MISS)"
+            else:
+                action_str = f"**Action:** Attack — {weapon} → {target_name}"
+        elif action_type == "cast_spell":
+            spell = action_name or "spell"
+            if hit is True:
+                action_str = f"**Action:** Cast — {spell} → {target_name} (HIT, {damage} damage)"
+            elif hit is False:
+                action_str = f"**Action:** Cast — {spell} → {target_name} (MISS)"
+            elif damage:
+                action_str = f"**Action:** Cast — {spell} → {target_name} ({damage} damage)"
+            else:
+                action_str = f"**Action:** Cast — {spell}" + (f" → {target_name}" if target_name else "")
+        elif action_type == "dash":
+            action_str = f"**Action:** Dash (double movement)"
+        elif action_type == "dodge":
+            action_str = f"**Action:** Dodge"
+        elif action_type == "disengage":
+            action_str = f"**Action:** Disengage"
+        elif action_type == "hide":
+            action_str = f"**Action:** Hide"
+        elif action_type == "flee":
+            action_str = f"**Action:** Flee from combat"
+        elif action_type == "surrender":
+            action_str = f"**Action:** Surrender"
+        else:
+            action_str = f"**Action:** {action_type.replace('_', ' ').title()}"
+
+        if action_str:
+            lines.append(action_str)
+
+        # Bonus action line (if any)
+        if bonus_action:
+            lines.append(f"**Bonus Action:** {bonus_action}")
+
+        return "\n".join(lines)
+
     async def _execute_action(
         self,
         npc: NPCFullProfile,
@@ -410,6 +564,13 @@ class NPCCombatController:
         target_new_hp = None
         conditions_applied = []
         narration = ""
+        movement_info = {"moved_ft": 0}
+
+        # Execute strategic movement first (for non-DASH actions that want to close distance)
+        if decision.move_toward and decision.action_type != CombatActionType.DASH:
+            movement_info = self._execute_strategic_movement(
+                npc, decision, combatant, combat_state
+            )
 
         if decision.action_type == CombatActionType.ATTACK:
             # Execute attack (with range validation + auto-movement)
@@ -417,19 +578,29 @@ class NPCCombatController:
                 await self._execute_attack(decision, combat_state, npc=npc, attacker=combatant)
             )
 
-            # Generate narration
+            # Generate narration with stage directions
             if attack_roll is None and hit is None and decision.target_name:
                 # Attack couldn't execute (out of range after moving)
-                narration = (
-                    f"{npc.name} moves toward {decision.target_name} "
-                    f"but can't reach them this turn!"
-                )
-            elif hit:
-                narration = self._generate_hit_narration(
-                    npc, decision, damage_dealt, target_new_hp
-                )
+                # Get current position for stage directions
+                curr_x, curr_y = combatant.get("x", 0), combatant.get("y", 0)
+                curr_notation = self._grid_to_notation(curr_x, curr_y)
+                stage_dirs = f"**Movement:** Move {movement_info.get('moved_ft', 0)}ft to {curr_notation}\n**Action:** Attack — {decision.action_name or 'weapon'} (OUT OF RANGE)"
+                narration = f"{stage_dirs}\n\n_{npc.name} moves toward {decision.target_name} but can't reach them this turn!_"
             else:
-                narration = self._generate_miss_narration(npc, decision)
+                stage_dirs = self._build_stage_directions(
+                    npc.name,
+                    movement_info,
+                    "attack",
+                    decision.action_name,
+                    decision.target_name,
+                    hit=hit,
+                    damage=damage_dealt,
+                )
+                if hit:
+                    flavor = self._generate_hit_narration(npc, decision, damage_dealt, target_new_hp)
+                else:
+                    flavor = self._generate_miss_narration(npc, decision)
+                narration = f"{stage_dirs}\n\n_{flavor}_"
 
         elif decision.action_type == CombatActionType.MULTIATTACK:
             # Handle multiattack (simplified - just do primary attack)
@@ -437,16 +608,25 @@ class NPCCombatController:
                 await self._execute_attack(decision, combat_state, npc=npc, attacker=combatant)
             )
             if attack_roll is None and hit is None and decision.target_name:
-                narration = (
-                    f"{npc.name} moves toward {decision.target_name} "
-                    f"but can't reach them this turn!"
-                )
+                curr_x, curr_y = combatant.get("x", 0), combatant.get("y", 0)
+                curr_notation = self._grid_to_notation(curr_x, curr_y)
+                stage_dirs = f"**Movement:** Move {movement_info.get('moved_ft', 0)}ft to {curr_notation}\n**Action:** Multiattack (OUT OF RANGE)"
+                narration = f"{stage_dirs}\n\n_{npc.name} moves toward {decision.target_name} but can't reach them this turn!_"
             else:
-                narration = f"{npc.name} uses Multiattack!"
+                stage_dirs = self._build_stage_directions(
+                    npc.name,
+                    movement_info,
+                    "attack",
+                    f"Multiattack — {decision.action_name or 'weapon'}",
+                    decision.target_name,
+                    hit=hit,
+                    damage=damage_dealt,
+                )
                 if hit:
-                    narration += f" {self._generate_hit_narration(npc, decision, damage_dealt, target_new_hp)}"
+                    flavor = self._generate_hit_narration(npc, decision, damage_dealt, target_new_hp)
                 else:
-                    narration += f" {self._generate_miss_narration(npc, decision)}"
+                    flavor = self._generate_miss_narration(npc, decision)
+                narration = f"{stage_dirs}\n\n_{flavor}_"
 
         elif decision.action_type == CombatActionType.CAST_SPELL:
             # Execute spell attack/damage if applicable
@@ -462,18 +642,18 @@ class NPCCombatController:
                         await self._execute_attack(decision, combat_state, npc=npc, attacker=combatant)
                     )
                     if attack_roll is None and hit is None and decision.target_name:
-                        narration = (
-                            f"{npc.name} tries to cast {spell_name} at {decision.target_name} "
-                            f"but they're out of range!"
-                        )
-                    elif hit:
-                        narration = self._generate_spell_hit_narration(
-                            npc, spell_name, decision.target_name, damage_dealt, target_new_hp
-                        )
+                        stage_dirs = self._build_stage_directions(npc.name, movement_info, "cast_spell", spell_name, decision.target_name)
+                        narration = f"{stage_dirs}\n\n_{npc.name} tries to cast {spell_name} at {decision.target_name} but they're out of range!_"
                     else:
-                        narration = self._generate_spell_miss_narration(
-                            npc, spell_name, decision.target_name
+                        stage_dirs = self._build_stage_directions(
+                            npc.name, movement_info, "cast_spell", spell_name, decision.target_name,
+                            hit=hit, damage=damage_dealt
                         )
+                        if hit:
+                            flavor = self._generate_spell_hit_narration(npc, spell_name, decision.target_name, damage_dealt, target_new_hp)
+                        else:
+                            flavor = self._generate_spell_miss_narration(npc, spell_name, decision.target_name)
+                        narration = f"{stage_dirs}\n\n_{flavor}_"
                 elif has_damage:
                     # Auto-hit spell (like Magic Missile) or save-based spell
                     damage_roll = self._roll_damage(decision.rolls_needed)
@@ -482,52 +662,66 @@ class NPCCombatController:
                         target_new_hp = self._apply_damage_to_target(
                             decision.target_name, damage_dealt, combat_state
                         )
-                    narration = self._generate_spell_auto_narration(
-                        npc, spell_name, decision.target_name, damage_dealt, target_new_hp
+                    stage_dirs = self._build_stage_directions(
+                        npc.name, movement_info, "cast_spell", spell_name, decision.target_name, damage=damage_dealt
                     )
+                    flavor = self._generate_spell_auto_narration(npc, spell_name, decision.target_name, damage_dealt, target_new_hp)
+                    narration = f"{stage_dirs}\n\n_{flavor}_"
                 else:
                     # Non-damaging spell
-                    narration = f"{npc.name} casts {spell_name}!"
-                    if decision.target_name:
-                        narration += f" targeting {decision.target_name}."
+                    stage_dirs = self._build_stage_directions(npc.name, movement_info, "cast_spell", spell_name, decision.target_name)
+                    narration = f"{stage_dirs}\n\n_{npc.name} casts {spell_name}!_"
             else:
-                narration = f"{npc.name} casts {spell_name}!"
-                if decision.target_name:
-                    narration += f" targeting {decision.target_name}."
+                stage_dirs = self._build_stage_directions(npc.name, movement_info, "cast_spell", spell_name, decision.target_name)
+                narration = f"{stage_dirs}\n\n_{npc.name} casts {spell_name}!_"
 
         elif decision.action_type == CombatActionType.FLEE:
-            narration = f"{npc.name} attempts to flee from combat!"
+            stage_dirs = self._build_stage_directions(npc.name, movement_info, "flee", None, None)
+            narration = f"{stage_dirs}\n\n_{npc.name} attempts to flee from combat!_"
             # Remove from combat
             self._remove_from_combat(combatant, combat_state)
 
         elif decision.action_type == CombatActionType.SURRENDER:
-            narration = f"{npc.name} throws down their weapons and surrenders!"
+            stage_dirs = self._build_stage_directions(npc.name, movement_info, "surrender", None, None)
+            narration = f"{stage_dirs}\n\n_{npc.name} throws down their weapons and surrenders!_"
             self._remove_from_combat(combatant, combat_state)
 
         elif decision.action_type == CombatActionType.DODGE:
-            narration = f"{npc.name} takes the Dodge action, making themselves harder to hit."
+            stage_dirs = self._build_stage_directions(npc.name, movement_info, "dodge", None, None)
+            narration = f"{stage_dirs}\n\n_{npc.name} takes a defensive stance, making themselves harder to hit._"
             conditions_applied.append("dodging")
 
         elif decision.action_type == CombatActionType.DISENGAGE:
-            narration = f"{npc.name} carefully disengages from melee."
+            stage_dirs = self._build_stage_directions(npc.name, movement_info, "disengage", None, None)
+            narration = f"{stage_dirs}\n\n_{npc.name} carefully disengages from melee._"
 
         elif decision.action_type == CombatActionType.DASH:
-            narration = f"{npc.name} dashes across the battlefield."
-            if decision.movement_description:
-                narration += f" {decision.movement_description}"
+            # Execute double-speed movement toward target
+            dash_movement = self._execute_strategic_movement(
+                npc, decision, combatant, combat_state, speed_multiplier=2.0
+            )
+            moved_ft = dash_movement.get("moved_ft", 0)
+            if moved_ft > 0:
+                stage_dirs = f"**Movement:** Dash {moved_ft}ft to {dash_movement.get('to_notation', '?')}\n**Action:** Dash (double movement)"
+                narration = f"{stage_dirs}\n\n_{npc.name} sprints across the battlefield!_"
+            else:
+                stage_dirs = "**Action:** Dash"
+                narration = f"{stage_dirs}\n\n_{npc.name} takes the Dash action._"
 
         elif decision.action_type == CombatActionType.HIDE:
-            narration = f"{npc.name} attempts to hide."
+            stage_dirs = self._build_stage_directions(npc.name, movement_info, "hide", None, None)
+            narration = f"{stage_dirs}\n\n_{npc.name} attempts to hide._"
 
         elif decision.action_type == CombatActionType.DIALOGUE:
             narration = f'**{npc.name}:** "{decision.combat_dialogue}"' if decision.combat_dialogue else ""
 
         else:
-            narration = f"{npc.name} takes an action."
+            stage_dirs = self._build_stage_directions(npc.name, movement_info, decision.action_type.value, decision.action_name, decision.target_name)
+            narration = f"{stage_dirs}\n\n_{npc.name} takes an action._"
 
-        # Add combat dialogue if present
+        # Add combat dialogue if present (prepend it)
         if decision.combat_dialogue and decision.action_type != CombatActionType.DIALOGUE:
-            narration = f'*{npc.name}: "{decision.combat_dialogue}"*\n\n{narration}'
+            narration = f'*"{decision.combat_dialogue}"*\n\n{narration}'
 
         return NPCCombatResult(
             npc_id=npc.entity_id,
@@ -1030,23 +1224,36 @@ class NPCCombatController:
             ],
         )
 
+        # Track position before attack (for movement stage directions)
+        start_x, start_y = combatant.get("x", 0), combatant.get("y", 0)
+
         # Execute the attack (with range validation + auto-movement)
         attack_roll, damage_roll, hit, damage_dealt, target_new_hp = (
             await self._execute_attack(decision, combat_state, npc=None, attacker=combatant)
         )
 
-        # Generate narration
+        # Check if movement occurred
+        end_x, end_y = combatant.get("x", 0), combatant.get("y", 0)
+        moved_ft = grid_distance_ft(start_x, start_y, end_x, end_y)
+        end_notation = self._grid_to_notation(end_x, end_y)
+
+        # Generate narration with stage directions
         if attack_roll is None and hit is None and target:
+            stage_dirs = f"**Movement:** Move {moved_ft}ft to {end_notation}\n**Action:** Attack — weapon (OUT OF RANGE)"
             narration = (
-                f"{npc_name} moves toward {target['name']} "
-                f"but can't reach them this turn!"
+                f"{stage_dirs}\n\n"
+                f"_{npc_name} moves toward {target['name']} but can't reach them this turn!_"
             )
         elif hit:
-            narration = f"{npc_name} strikes {target['name']} for **{damage_dealt} damage**!"
+            movement_line = f"**Movement:** Move {moved_ft}ft to {end_notation}\n" if moved_ft > 0 else ""
+            stage_dirs = f"{movement_line}**Action:** Attack — weapon\n**Result:** Hit! {damage_dealt} damage"
+            narration = f"{stage_dirs}\n\n_{npc_name} strikes {target['name']}!_"
             if target_new_hp is not None and target_new_hp <= 0:
                 narration += f" **{target['name']} goes down!**"
         else:
-            narration = f"{npc_name}'s attack misses {target['name']}."
+            movement_line = f"**Movement:** Move {moved_ft}ft to {end_notation}\n" if moved_ft > 0 else ""
+            stage_dirs = f"{movement_line}**Action:** Attack — weapon\n**Result:** Miss"
+            narration = f"{stage_dirs}\n\n_{npc_name}'s attack misses {target['name']}._"
 
         return NPCCombatResult(
             npc_id=combatant.get("npc_id", "unknown"),

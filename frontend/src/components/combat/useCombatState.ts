@@ -1,11 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { Player } from '../../types';
 import type { Combatant, CombatState, ChatMessage, SetupCombatant, CombatLogEntry, GridSize } from './types';
 import { combatAPI } from '../../api/client';
 
-const NPC_TURN_DELAY = 2500;
 const DEFAULT_GRID: GridSize = { width: 20, height: 15 };
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Auto-place combatants on the grid: players left, enemies right
 function autoPlaceCombatants(
@@ -48,7 +46,6 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
   const [activeTurnName, setActiveTurnName] = useState<string | null>(null);
   const [combatLog, setCombatLog] = useState<CombatLogEntry[]>([]);
   const logIdRef = useRef(0);
-  const pendingNPCTurnsRef = useRef<any[] | null>(null);
 
   // Grid / battlemap state
   const [gridSize] = useState<GridSize>(DEFAULT_GRID);
@@ -57,15 +54,46 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
 
   // Helper to display a single NPC turn result in the combat log + chat
   const displayNPCTurn = useCallback((npcTurn: { combatant_name: string; narration: string; npc_action?: any }) => {
+    let movementDesc = '';
     let actionDesc = '';
     let resultDesc = '';
+    let targetName = '';
 
     if (npcTurn.npc_action) {
       const action = npcTurn.npc_action.action;
-      actionDesc = action?.action_name
-        ? `${action.action_type} - ${action.action_name}`
-        : action?.action_type || '';
+      const actionType = action?.action_type || '';
+      const actionName = action?.action_name || '';
+      targetName = action?.target_name || '';
 
+      // Parse movement from narration (look for "Move Xft to Y" or "Dash Xft to Y")
+      const moveMatch = npcTurn.narration?.match(/\*\*Movement:\*\*\s*(?:Move|Dash)\s+(\d+)ft\s+to\s+(\w+)/i);
+      if (moveMatch) {
+        const isDash = actionType === 'dash';
+        movementDesc = isDash ? `Dash ${moveMatch[1]}ft → ${moveMatch[2]}` : `Move ${moveMatch[1]}ft → ${moveMatch[2]}`;
+      }
+
+      // Build action description based on action type
+      if (actionType === 'attack' || actionType === 'multiattack') {
+        actionDesc = `Attack — ${actionName || 'weapon'}`;
+      } else if (actionType === 'cast_spell') {
+        actionDesc = `Cast — ${actionName || 'spell'}`;
+      } else if (actionType === 'dash') {
+        actionDesc = 'Dash';
+      } else if (actionType === 'dodge') {
+        actionDesc = 'Dodge';
+      } else if (actionType === 'disengage') {
+        actionDesc = 'Disengage';
+      } else if (actionType === 'hide') {
+        actionDesc = 'Hide';
+      } else if (actionType === 'flee') {
+        actionDesc = 'Flee';
+      } else if (actionType === 'surrender') {
+        actionDesc = 'Surrender';
+      } else {
+        actionDesc = actionName || actionType || '';
+      }
+
+      // Build result description
       if (npcTurn.npc_action.hit !== undefined) {
         resultDesc = npcTurn.npc_action.hit
           ? `Hit! ${npcTurn.npc_action.damage_dealt || 0} damage`
@@ -78,9 +106,10 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
       type: 'npc',
       npcName: npcTurn.combatant_name,
       dialogue: npcTurn.npc_action?.action?.combat_dialogue,
-      action: actionDesc || npcTurn.narration,
-      target: npcTurn.npc_action?.action?.target_name,
-      result: resultDesc,
+      movement: movementDesc || undefined,
+      action: actionDesc || undefined,
+      target: targetName ? `Target: ${targetName}` : undefined,
+      result: resultDesc || undefined,
     }]);
 
     if (onNPCTurn) {
@@ -91,66 +120,59 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
           name: npcTurn.combatant_name,
           dialogue: npcTurn.npc_action?.action?.combat_dialogue,
           action: actionDesc || npcTurn.narration,
-          target: npcTurn.npc_action?.action?.target_name,
+          target: targetName,
           result: resultDesc,
         },
       });
     }
   }, [onNPCTurn]);
 
-  // Slow-roll multiple NPC turn results with delays
-  const slowRollNPCTurns = useCallback(async (npcTurns: any[]) => {
-    for (let i = 0; i < npcTurns.length; i++) {
-      setActiveTurnName(npcTurns[i].combatant_name);
-      if (i > 0) await sleep(NPC_TURN_DELAY);
-      displayNPCTurn(npcTurns[i]);
+  // Helper to refresh combat state from backend
+  const refreshCombatState = useCallback(async () => {
+    try {
+      const status = await combatAPI.getStatus();
+      if ('initiative_order' in status) {
+        const initiativeOrder: Combatant[] = status.initiative_order.map((c: any) => ({
+          name: c.name,
+          initiative: c.initiative,
+          hp: c.hp,
+          max_hp: c.max_hp,
+          is_player: c.is_player,
+          is_npc: c.is_npc,
+          is_friendly: c.is_friendly,
+          conditions: c.conditions || [],
+          x: c.x,
+          y: c.y,
+        }));
 
-      // Refresh combat status after each NPC turn for HP updates
-      try {
-        const status = await combatAPI.getStatus();
-        if ('initiative_order' in status) {
-          const initiativeOrder: Combatant[] = status.initiative_order.map((c: any) => ({
-            name: c.name,
-            initiative: c.initiative,
-            hp: c.hp,
-            max_hp: c.max_hp,
-            is_player: c.is_player,
-            is_npc: c.is_npc,
-            conditions: c.conditions || [],
-          }));
+        const currentIdx = initiativeOrder.findIndex(c => c.name === status.current.name);
+        setCombatState({
+          round: status.round,
+          initiative_order: initiativeOrder,
+          current_turn_idx: currentIdx >= 0 ? currentIdx : 0,
+          active: status.active,
+          current_turn_type: status.current_turn_type,
+          current_is_npc: status.current_is_npc,
+        });
 
-          const currentIdx = initiativeOrder.findIndex(c => c.name === status.current.name);
-          setCombatState({
-            round: status.round,
-            initiative_order: initiativeOrder,
-            current_turn_idx: currentIdx >= 0 ? currentIdx : 0,
-            active: status.active,
-            current_turn_type: status.current_turn_type,
-            current_is_npc: status.current_is_npc,
-          });
-        }
-      } catch {
-        // Status refresh is best-effort during slow roll
+        // Update positions map from backend coordinates
+        setPositions(prev => {
+          const newPositions = new Map(prev);
+          for (const c of initiativeOrder) {
+            if (c.x !== undefined && c.y !== undefined) {
+              newPositions.set(c.name, { x: c.x, y: c.y });
+            }
+          }
+          return newPositions;
+        });
+
+        return status;
       }
+    } catch {
+      // Status refresh is best-effort
     }
-    setActiveTurnName(null);
-  }, [displayNPCTurn]);
-
-  // Process pending NPC turns after the battlemap has rendered.
-  // useEffect fires after React commits the DOM update, so the BattleMap
-  // component is guaranteed to be mounted and visible when this runs.
-  useEffect(() => {
-    if (combatState && pendingNPCTurnsRef.current) {
-      const turns = pendingNPCTurnsRef.current;
-      pendingNPCTurnsRef.current = null;
-
-      // Small delay so the user can see the battlemap before turns begin
-      sleep(500).then(async () => {
-        await slowRollNPCTurns(turns);
-        setIsLoading(false);
-      });
-    }
-  }, [combatState, slowRollNPCTurns]);
+    return null;
+  }, []);
 
   // Helper to emit combat system message
   const emitCombatMessage = useCallback((type: 'round_start' | 'turn_start' | 'action' | 'combat_end', content: string, round?: number) => {
@@ -210,11 +232,12 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
           ac: c.ac,
         }));
 
+      // Don't auto-process NPC turns - require manual "Next" for each turn
       const result = await combatAPI.start({
         players: playerCombatants,
         npcs: npcCombatants,
         monsters: monsterCombatants,
-        auto_npc_turns: true,
+        auto_npc_turns: false,
       });
 
       const initiativeOrder: Combatant[] = result.initiative_order.map((c) => ({
@@ -253,18 +276,11 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
       setSelectedToken(null);
 
       emitCombatMessage('round_start', `Combat begins! Round ${result.round}`, result.round);
-
-      // Queue NPC turns to run after React renders the battlemap
-      if (result.npc_turn_results && result.npc_turn_results.length > 0) {
-        pendingNPCTurnsRef.current = result.npc_turn_results;
-      }
+      setActiveTurnName(result.current_turn);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start combat');
     } finally {
-      // Only clear loading if no NPC turns are queued (useEffect will handle it)
-      if (!pendingNPCTurnsRef.current) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   }, [setupCombatants, emitCombatMessage, gridSize]);
 
@@ -303,54 +319,59 @@ export function useCombatState({ players, onNPCTurn }: UseCombatStateOptions) {
     setError(null);
 
     try {
-      const result = await combatAPI.endTurn();
-      const status = await combatAPI.getStatus();
+      const currentRound = combatState.round;
 
-      if ('active' in status && status.active === false) {
+      // If current turn is an NPC, process their turn first
+      if (combatState.current_is_npc) {
+        const npcResult = await combatAPI.processTurn();
+
+        // Display the NPC's action
+        if (npcResult.npc_action) {
+          displayNPCTurn({
+            combatant_name: npcResult.combatant_name,
+            narration: npcResult.narration,
+            npc_action: npcResult.npc_action,
+          });
+        }
+
+        // Check if combat ended
+        if (!npcResult.combat_active && npcResult.combat_ended_reason) {
+          emitCombatMessage('combat_end', `Combat ended: ${npcResult.combat_ended_reason}`);
+          setCombatState(null);
+          setSetupCombatants([]);
+          setActiveTurnName(null);
+          return;
+        }
+      }
+
+      // Advance to the next combatant
+      const advanceResult = await combatAPI.advanceTurn();
+
+      if (!advanceResult.combat_active) {
+        emitCombatMessage('combat_end', `Combat ended: ${advanceResult.combat_ended_reason || 'Unknown'}`);
         setCombatState(null);
         setSetupCombatants([]);
+        setActiveTurnName(null);
         return;
       }
 
-      if ('initiative_order' in status) {
-        const initiativeOrder: Combatant[] = status.initiative_order.map(c => ({
-          name: c.name,
-          initiative: c.initiative,
-          hp: c.hp,
-          max_hp: c.max_hp,
-          is_player: c.is_player,
-          conditions: c.conditions || [],
-        }));
+      // Refresh full combat state from backend
+      const status = await refreshCombatState();
 
-        const currentIdx = initiativeOrder.findIndex(c => c.name === status.current.name);
-
-        setCombatState({
-          round: status.round,
-          initiative_order: initiativeOrder,
-          current_turn_idx: currentIdx >= 0 ? currentIdx : 0,
-          active: status.active,
-          current_turn_type: status.current_turn_type,
-          current_is_npc: status.current_is_npc,
-        });
-      }
-
-      if (result.npc_turn_results && result.npc_turn_results.length > 0) {
-        await slowRollNPCTurns(result.npc_turn_results);
-      }
-
-      if (status && 'round' in status && status.round > (combatState?.round || 1)) {
+      // Check for new round
+      if (status && 'round' in status && status.round > currentRound) {
         emitCombatMessage('round_start', `Round ${status.round}`, status.round);
       }
 
-      if (!result.combat_active && result.combat_ended_reason) {
-        emitCombatMessage('combat_end', `Combat ended: ${result.combat_ended_reason}`);
-      }
+      // Update active turn indicator
+      setActiveTurnName(advanceResult.combatant_name || null);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to advance turn');
     } finally {
       setIsLoading(false);
     }
-  }, [combatState, slowRollNPCTurns, emitCombatMessage]);
+  }, [combatState, displayNPCTurn, refreshCombatState, emitCombatMessage]);
 
   const applyDamage = useCallback(async (targetName: string, damage: number) => {
     if (!combatState) return;
