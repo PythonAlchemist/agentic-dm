@@ -422,6 +422,19 @@ export const combatAPI = {
   endTurn: (): Promise<TurnResult> =>
     fetchAPI('/combat/turn/end', { method: 'POST' }),
 
+  // Advance to next combatant without processing their turn (for step-by-step combat)
+  advanceTurn: (): Promise<{
+    combat_active: boolean;
+    combat_ended_reason?: string;
+    round?: number;
+    combatant_name?: string;
+    is_npc?: boolean;
+    is_player?: boolean;
+    hp?: number;
+    max_hp?: number;
+  }> =>
+    fetchAPI('/combat/turn/advance', { method: 'POST' }),
+
   processAllNPCTurns: (): Promise<TurnResult[]> =>
     fetchAPI('/combat/turn/npc-all', { method: 'POST' }),
 

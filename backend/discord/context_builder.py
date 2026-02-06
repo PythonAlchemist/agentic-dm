@@ -161,11 +161,22 @@ class NPCContextBuilder:
         trait_str = ", ".join(traits) if traits else personality.combat_style
         lines = [f"You are {npc.name}, a {trait_str} {npc.role}."]
 
+        # Find NPC's own position
+        npc_x, npc_y = None, None
+        for entry in combat_state.get("initiative_order", []):
+            if entry.get("name") == npc.name:
+                npc_x = entry.get("x")
+                npc_y = entry.get("y")
+                break
+
         # SITUATION block
         lines.append("\nSITUATION:")
         hp_pct = int((current_hp / stat_block.max_hit_points) * 100)
         hp_status = self._hp_status_word(hp_pct)
         lines.append(f"- HP: {current_hp}/{stat_block.max_hit_points} ({hp_status})")
+        lines.append(f"- Speed: {stat_block.speed}ft per turn")
+        if npc_x is not None and npc_y is not None:
+            lines.append(f"- Position: ({npc_x}, {npc_y})")
 
         if npc.conditions:
             lines.append(f"- Conditions: {', '.join(npc.conditions)}")
@@ -197,14 +208,34 @@ class NPCContextBuilder:
         if memory.allies_fallen:
             lines.append(f"Fallen allies: {', '.join(memory.allies_fallen)}")
 
-        # ENEMIES (only enemies, not allies)
+        # Calculate best melee reach from attacks
+        best_melee_reach = 5  # default
+        for atk in stat_block.attacks:
+            cat, normal_range, _ = get_attack_range(atk)
+            if cat == "melee" and normal_range > best_melee_reach:
+                best_melee_reach = normal_range
+
+        # ENEMIES (only enemies, not allies) with reachability info
         enemies = [c for c in combatants if not c.is_ally and c.hp > 0]
         if enemies:
             lines.append("\nENEMIES:")
             for e in enemies:
                 threat = f" [THREAT]" if e.threat_level == "high" else ""
                 cond = f" ({', '.join(e.conditions)})" if e.conditions else ""
-                lines.append(f"- {e.name}: {e.hp}/{e.max_hp} HP, AC {e.ac}, {e.distance}{threat}{cond}")
+                dist_ft = e.distance_ft
+
+                # Determine reachability
+                if dist_ft is not None:
+                    if dist_ft <= best_melee_reach:
+                        reach_tag = " [IN MELEE]"
+                    elif dist_ft <= stat_block.speed + best_melee_reach:
+                        reach_tag = " [REACHABLE]"
+                    else:
+                        reach_tag = " [FAR]"
+                else:
+                    reach_tag = ""
+
+                lines.append(f"- {e.name}: {e.hp}/{e.max_hp} HP, AC {e.ac}, {e.distance}{reach_tag}{threat}{cond}")
 
         # ALLIES (brief)
         allies = [c for c in combatants if c.is_ally and c.hp > 0 and c.name != npc.name]

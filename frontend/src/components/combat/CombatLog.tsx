@@ -46,19 +46,34 @@ function CombatLogItem({ entry }: { entry: CombatLogEntry }) {
         <div className="text-white">"{entry.dialogue}"</div>
       )}
 
-      {/* Action (stage direction) */}
-      {entry.action && (
-        <div className="text-gray-400 italic text-xs">[{entry.action}]</div>
-      )}
+      {/* Stage Directions */}
+      <div className="text-xs mt-1 space-y-0.5 font-mono">
+        {/* Movement */}
+        {entry.movement && (
+          <div className="text-blue-400">
+            <span className="text-gray-500">Movement:</span> {entry.movement}
+          </div>
+        )}
 
-      {/* Target & Result */}
-      {(entry.target || entry.result) && (
-        <div className="text-xs mt-1 font-mono">
-          {entry.target && <span className="text-red-400">{entry.target}</span>}
-          {entry.target && entry.result && <span className="text-gray-600"> - </span>}
-          {entry.result && <span className="text-yellow-400">{entry.result}</span>}
-        </div>
-      )}
+        {/* Action */}
+        {entry.action && (
+          <div className="text-green-400">
+            <span className="text-gray-500">Action:</span> {entry.action}
+          </div>
+        )}
+
+        {/* Target */}
+        {entry.target && (
+          <div className="text-red-400">{entry.target}</div>
+        )}
+
+        {/* Result */}
+        {entry.result && (
+          <div className={entry.result.includes('Hit') ? 'text-yellow-400 font-bold' : 'text-gray-400'}>
+            {entry.result}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

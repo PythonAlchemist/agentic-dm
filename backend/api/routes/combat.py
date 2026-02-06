@@ -373,6 +373,55 @@ async def end_current_turn() -> TurnResultResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/combat/turn/advance")
+async def advance_turn() -> dict:
+    """Advance to the next combatant without processing their turn.
+
+    Use this for step-by-step combat where each turn requires manual confirmation.
+    Returns info about the new current combatant.
+    """
+    try:
+        manager = get_combat_manager()
+        dm_tools = manager.dm_tools
+
+        if not dm_tools.combat_state:
+            raise HTTPException(status_code=400, detail="No active combat")
+
+        # Advance to next turn
+        next_turn = dm_tools.next_turn()
+
+        if not next_turn:
+            raise HTTPException(status_code=400, detail="Failed to advance turn")
+
+        if next_turn.get("combat_ended"):
+            return {
+                "combat_active": False,
+                "combat_ended_reason": next_turn.get("reason", "Combat ended"),
+            }
+
+        # Get current combatant info from combat status
+        status = dm_tools.get_combat_status()
+        if not status:
+            raise HTTPException(status_code=400, detail="No current turn")
+
+        current = status.get("current", {})
+        return {
+            "combat_active": True,
+            "round": dm_tools.combat_state.round,
+            "combatant_name": current.get("name", ""),
+            "is_npc": current.get("is_npc", False),
+            "is_player": current.get("is_player", False),
+            "hp": current.get("hp", 0),
+            "max_hp": current.get("max_hp", 0),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to advance turn: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/combat/turn/npc-all")
 async def process_all_npc_turns() -> list[TurnResultResponse]:
     """Process all consecutive NPC turns.

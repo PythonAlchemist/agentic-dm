@@ -240,21 +240,23 @@ class NPCAgent:
         return (
             "You are deciding combat actions in D&D 5e. The user message describes "
             "the current situation and your available options.\n\n"
-            f"MOVEMENT & REACH: You have {speed}ft of movement per turn. "
-            "Melee weapons require being within their reach (shown in AVAILABLE, usually 5ft). "
-            "If a melee target is beyond reach, you will auto-move up to "
-            f"{speed}ft toward them. If still out of reach, the turn is spent moving. "
-            "Prefer targets you can reach this turn. Ranged weapons/spells "
-            "can hit from the listed range without moving.\n\n"
-            "Respond with a JSON object containing:\n"
-            '- "action_type": one of [attack, cast_spell, use_ability, dash, dodge, '
-            'disengage, hide, flee, surrender]\n'
-            '- "action_name": specific attack/spell name from your AVAILABLE list\n'
-            '- "target_name": target name from ENEMIES list\n'
-            '- "reasoning": brief tactical reasoning (1 sentence)\n'
-            '- "combat_dialogue": optional in-character line (brief, situational)\n\n'
-            "Make smart tactical choices based on the situation. "
-            "Only generate dialogue if it naturally fits the moment - don't force it."
+            f"TACTICAL MOVEMENT: You have {speed}ft movement per turn.\n"
+            "- [IN MELEE] = already in melee range, attack immediately\n"
+            "- [REACHABLE] = can move + attack this turn\n"
+            "- [FAR] = too far to reach this turn, will spend turn closing distance\n\n"
+            "STRATEGY:\n"
+            "- Melee: Target [IN MELEE] or [REACHABLE] enemies. Avoid [FAR] unless no choice.\n"
+            "- Ranged: Stay at distance! Don't close in. Target anyone in weapon range.\n"
+            "- Use 'dash' action_type to double movement speed when closing long distances.\n"
+            "- Use 'move_toward' to specify who you're closing in on.\n\n"
+            "Respond with a JSON object:\n"
+            '- "action_type": attack, cast_spell, dash, dodge, disengage, hide, flee, surrender\n'
+            '- "action_name": specific attack/spell name from AVAILABLE\n'
+            '- "target_name": enemy name from ENEMIES list\n'
+            '- "move_toward": name of enemy to move toward (optional, for closing distance)\n'
+            '- "reasoning": tactical reasoning (1 sentence)\n'
+            '- "combat_dialogue": optional in-character line\n\n'
+            "Make smart tactical choices. Melee fighters close in. Ranged fighters keep distance."
         )
 
     async def generate_response(
@@ -449,6 +451,7 @@ class NPCAgent:
                     available_targets,
                 ),
                 movement_description=decision_data.get("movement_description"),
+                move_toward=decision_data.get("move_toward"),
                 reasoning=decision_data.get("reasoning", "No reasoning provided."),
                 combat_dialogue=decision_data.get("combat_dialogue"),
                 rolls_needed=rolls_needed,
