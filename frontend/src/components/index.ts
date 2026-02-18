@@ -7,3 +7,4 @@ export { EntityDetail } from './EntityDetail';
 export { KnowledgeGraph } from './KnowledgeGraph';
 export { PlayerManager } from './PlayerManager';
 export { CombatDashboard } from './combat';
+export { ShopDashboard } from './shop';

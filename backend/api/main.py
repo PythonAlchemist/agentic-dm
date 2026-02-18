@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import chat, search, campaign, ingest, transcript, players, npc_discord, combat
+from backend.api.routes import chat, search, campaign, ingest, transcript, players, npc_discord, combat, shop
 from backend.core.config import settings
 
 
@@ -48,6 +48,7 @@ app.include_router(transcript.router, prefix="/api/transcript", tags=["Transcrip
 app.include_router(players.router, prefix="/api", tags=["Players"])
 app.include_router(npc_discord.router, prefix="/api", tags=["NPC Discord"])
 app.include_router(combat.router, prefix="/api", tags=["Combat"])
+app.include_router(shop.router, prefix="/api", tags=["Shop"])
 
 
 @app.get("/")

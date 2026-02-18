@@ -27,6 +27,7 @@ class EntityType(str, Enum):
     RULE = "RULE"  # Game rules
     LORE = "LORE"  # World lore
     SETTING = "SETTING"  # Campaign settings
+    SHOP = "SHOP"  # Shops and merchants
 
 
 class RelationshipType(str, Enum):

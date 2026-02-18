@@ -278,6 +278,58 @@ export interface TurnResult {
   npc_turn_results?: NPCTurnResultItem[];
 }
 
+// Shop types
+export interface ShopItem {
+  entity_id?: string;
+  name: string;
+  description?: string;
+  price_gp: number;
+  quantity: number;
+  rarity: string;
+  category: string;
+  magical: boolean;
+  weight?: number;
+}
+
+export interface ShopProfile {
+  entity_id: string;
+  name: string;
+  description?: string;
+  shop_size: string;
+  shop_specialty: string;
+  gold_reserves: number;
+  shopkeeper_id?: string;
+  location_id?: string;
+  inventory: ShopItem[];
+  shopkeeper_name?: string;
+  shopkeeper_race?: string;
+  shopkeeper_description?: string;
+  shopkeeper_personality?: Record<string, unknown>;
+}
+
+export interface ShopGenerateRequest {
+  size: 'small' | 'medium' | 'large';
+  specialty: string;
+  name?: string;
+  shopkeeper_name?: string;
+  shopkeeper_race?: string;
+  location_id?: string;
+}
+
+export interface ShopTransaction {
+  item: string;
+  qty: number;
+  price_each: number;
+  total: number;
+  action: 'buy' | 'sell';
+}
+
+export interface ShopChatMessage {
+  role: 'user' | 'shopkeeper';
+  content: string;
+  transactions?: ShopTransaction[];
+}
+
 // UI State types
 export type DMMode = 'assistant' | 'autonomous';
 

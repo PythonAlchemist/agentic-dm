@@ -9,7 +9,9 @@ interface Props {
   onOpenCampaign: () => void;
   onOpenPlayers: () => void;
   onOpenCombat: () => void;
+  onOpenShop: () => void;
   combatActive?: boolean;
+  shopActive?: boolean;
 }
 
 export function Sidebar({
@@ -21,7 +23,9 @@ export function Sidebar({
   onOpenCampaign,
   onOpenPlayers,
   onOpenCombat,
+  onOpenShop,
   combatActive,
+  shopActive,
 }: Props) {
   return (
     <aside className="w-64 bg-gray-900 border-r border-gray-700 flex flex-col">
@@ -129,6 +133,17 @@ export function Sidebar({
         >
           <span>⚔️</span>
           <span>{combatActive ? 'Combat Active' : 'Combat Tracker'}</span>
+        </button>
+        <button
+          onClick={onOpenShop}
+          className={`w-full py-2 px-4 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 ${
+            shopActive
+              ? 'bg-amber-600 ring-2 ring-amber-400 ring-offset-1 ring-offset-gray-900'
+              : 'bg-amber-600/80 hover:bg-amber-600'
+          }`}
+        >
+          <span>🏪</span>
+          <span>{shopActive ? 'Shop Open' : 'Shop'}</span>
         </button>
       </div>
 

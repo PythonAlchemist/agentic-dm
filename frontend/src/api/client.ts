@@ -17,9 +17,12 @@ import type {
   Session,
   SessionCreate,
   SessionAttendance,
+  ShopProfile,
+  ShopGenerateRequest,
+  ShopItem,
 } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001/api';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 class APIError extends Error {
   status: number;
@@ -544,6 +547,68 @@ export const combatAPI = {
     fetchAPI('/combat/grid', {
       method: 'POST',
       body: JSON.stringify({ width, height }),
+    }),
+};
+
+// Shop API
+export const shopAPI = {
+  generate: (request: ShopGenerateRequest): Promise<ShopProfile> =>
+    fetchAPI('/shop/generate', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
+
+  get: (shopId: string): Promise<ShopProfile> =>
+    fetchAPI(`/shop/${shopId}`),
+
+  list: (limit?: number): Promise<ShopProfile[]> => {
+    const params = limit ? `?limit=${limit}` : '';
+    return fetchAPI(`/shops${params}`);
+  },
+
+  update: (shopId: string, data: { name?: string; description?: string; gold_reserves?: number }): Promise<ShopProfile> =>
+    fetchAPI(`/shop/${shopId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (shopId: string): Promise<{ success: boolean }> =>
+    fetchAPI(`/shop/${shopId}`, { method: 'DELETE' }),
+
+  addItem: (shopId: string, item: Omit<ShopItem, 'entity_id'>): Promise<ShopItem> =>
+    fetchAPI(`/shop/${shopId}/inventory`, {
+      method: 'POST',
+      body: JSON.stringify(item),
+    }),
+
+  updateItem: (shopId: string, itemId: string, updates: Partial<ShopItem>): Promise<ShopItem> =>
+    fetchAPI(`/shop/${shopId}/inventory/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    }),
+
+  removeItem: (shopId: string, itemId: string): Promise<{ success: boolean }> =>
+    fetchAPI(`/shop/${shopId}/inventory/${itemId}`, { method: 'DELETE' }),
+
+  getShopkeeper: (shopId: string): Promise<Record<string, unknown>> =>
+    fetchAPI(`/shop/${shopId}/shopkeeper`),
+
+  chat: (
+    shopId: string,
+    message: string,
+    playerName?: string,
+    conversationHistory?: Array<{ role: string; content: string }>,
+  ): Promise<{
+    response: string;
+    transactions: Array<{ item: string; qty: number; price_each: number; total: number; action: 'buy' | 'sell' }>;
+  }> =>
+    fetchAPI(`/shop/${shopId}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        player_name: playerName,
+        conversation_history: conversationHistory || [],
+      }),
     }),
 };
 
