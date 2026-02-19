@@ -30,6 +30,8 @@ dependencies = [
     "httpx>=0.28.0",
     "tenacity>=9.0.0",
     "en-core-web-sm",
+    # Audio transcription
+    "deepgram-sdk>=3.0.0",
 ]
 
 [project.optional-dependencies]

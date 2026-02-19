@@ -10,8 +10,10 @@ interface Props {
   onOpenPlayers: () => void;
   onOpenCombat: () => void;
   onOpenShop: () => void;
+  onOpenAudio: () => void;
   combatActive?: boolean;
   shopActive?: boolean;
+  audioActive?: boolean;
 }
 
 export function Sidebar({
@@ -24,8 +26,10 @@ export function Sidebar({
   onOpenPlayers,
   onOpenCombat,
   onOpenShop,
+  onOpenAudio,
   combatActive,
   shopActive,
+  audioActive,
 }: Props) {
   return (
     <aside className="w-64 bg-gray-900 border-r border-gray-700 flex flex-col">
@@ -144,6 +148,17 @@ export function Sidebar({
         >
           <span>🏪</span>
           <span>{shopActive ? 'Shop Open' : 'Shop'}</span>
+        </button>
+        <button
+          onClick={onOpenAudio}
+          className={`w-full py-2 px-4 rounded-lg text-sm transition-colors flex items-center justify-center gap-2 ${
+            audioActive
+              ? 'bg-blue-600 ring-2 ring-blue-400 ring-offset-1 ring-offset-gray-900'
+              : 'bg-blue-600/80 hover:bg-blue-600'
+          }`}
+        >
+          <span>🎙️</span>
+          <span>{audioActive ? 'Transcribing' : 'Session Transcript'}</span>
         </button>
       </div>
 

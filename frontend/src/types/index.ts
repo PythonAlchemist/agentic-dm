@@ -330,6 +330,61 @@ export interface ShopChatMessage {
   transactions?: ShopTransaction[];
 }
 
+// Audio transcription types
+export type AudioJobPhase =
+  | 'uploading'
+  | 'transcribing'
+  | 'awaiting_mapping'
+  | 'processing_transcript'
+  | 'completed'
+  | 'failed';
+
+export interface SpeakerSample {
+  speaker_index: number;
+  utterance_count: number;
+  total_duration: number;
+  sample_texts: string[];
+}
+
+export interface SpeakerMappingEntry {
+  speaker_index: number;
+  role: 'dm' | 'player';
+  player_name: string;
+  character_name?: string;
+}
+
+export interface AudioTranscriptResult {
+  session_id: string;
+  session_number?: number;
+  campaign_id?: string;
+  segments_processed: number;
+  entities_extracted: number;
+  entities_created: number;
+  relationships_extracted: number;
+  relationships_created: number;
+  entity_counts: Record<string, number>;
+  processing_time_ms: number;
+  errors: string[];
+}
+
+export interface AudioJobStatus {
+  job_id: string;
+  filename: string;
+  phase: AudioJobPhase;
+  error?: string;
+  speaker_samples?: SpeakerSample[];
+  total_duration?: number;
+  segment_count?: number;
+  transcript_result?: AudioTranscriptResult;
+}
+
+export interface AudioJobListItem {
+  job_id: string;
+  filename: string;
+  phase: AudioJobPhase;
+  error?: string;
+}
+
 // UI State types
 export type DMMode = 'assistant' | 'autonomous';
 

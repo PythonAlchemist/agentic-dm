@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import chat, search, campaign, ingest, transcript, players, npc_discord, combat, shop
+from backend.api.routes import chat, search, campaign, ingest, transcript, players, npc_discord, combat, shop, audio
 from backend.core.config import settings
 
 
@@ -16,6 +16,7 @@ async def lifespan(app: FastAPI):
     settings.pdf_dir.mkdir(parents=True, exist_ok=True)
     settings.transcript_dir.mkdir(parents=True, exist_ok=True)
     settings.chroma_dir.mkdir(parents=True, exist_ok=True)
+    settings.audio_dir.mkdir(parents=True, exist_ok=True)
 
     yield
 
@@ -49,6 +50,7 @@ app.include_router(players.router, prefix="/api", tags=["Players"])
 app.include_router(npc_discord.router, prefix="/api", tags=["NPC Discord"])
 app.include_router(combat.router, prefix="/api", tags=["Combat"])
 app.include_router(shop.router, prefix="/api", tags=["Shop"])
+app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
 
 
 @app.get("/")

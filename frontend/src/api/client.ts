@@ -20,6 +20,9 @@ import type {
   ShopProfile,
   ShopGenerateRequest,
   ShopItem,
+  AudioJobStatus,
+  AudioJobListItem,
+  SpeakerMappingEntry,
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -610,6 +613,46 @@ export const shopAPI = {
         conversation_history: conversationHistory || [],
       }),
     }),
+};
+
+// Audio Transcription API
+export const audioAPI = {
+  upload: (file: File, sessionNumber?: number): Promise<{ job_id: string; filename: string; message: string }> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (sessionNumber !== undefined) {
+      formData.append('session_number', String(sessionNumber));
+    }
+    const url = `${API_BASE}/audio/upload`;
+    return fetch(url, { method: 'POST', body: formData }).then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
+        throw new APIError(res.status, err.detail || 'Upload failed');
+      }
+      return res.json();
+    });
+  },
+
+  getStatus: (jobId: string): Promise<AudioJobStatus> =>
+    fetchAPI(`/audio/status/${jobId}`),
+
+  mapSpeakers: (
+    jobId: string,
+    mappings: SpeakerMappingEntry[],
+    sessionNumber?: number,
+    campaignId?: string,
+  ): Promise<{ job_id: string; message: string; phase: string }> =>
+    fetchAPI(`/audio/${jobId}/map-speakers`, {
+      method: 'POST',
+      body: JSON.stringify({
+        mappings,
+        session_number: sessionNumber,
+        campaign_id: campaignId,
+      }),
+    }),
+
+  listJobs: (): Promise<{ jobs: AudioJobListItem[] }> =>
+    fetchAPI('/audio/jobs'),
 };
 
 // Health check

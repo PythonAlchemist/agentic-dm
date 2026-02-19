@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     pdf_dir: Path = data_dir / "pdfs"
     transcript_dir: Path = data_dir / "transcripts"
     chroma_dir: Path = data_dir / "chromadb"
+    audio_dir: Path = data_dir / "audio"
 
     # OpenAI
     openai_api_key: str = ""
@@ -43,6 +44,9 @@ class Settings(BaseSettings):
     # RAG
     retrieval_top_k: int = 5
     rerank_top_k: int = 3
+
+    # Deepgram
+    deepgram_api_key: str = ""
 
     # API
     api_host: str = "0.0.0.0"

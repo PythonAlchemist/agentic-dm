@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChatPanel, Sidebar, KnowledgeGraph, EntityDetail, PlayerManager, CombatDashboard, ShopDashboard } from './components';
+import { ChatPanel, Sidebar, KnowledgeGraph, EntityDetail, PlayerManager, CombatDashboard, ShopDashboard, AudioTranscriber } from './components';
 import { useChat } from './hooks/useChat';
 import { playerAPI } from './api/client';
 import type { Entity, Player } from './types';
@@ -21,6 +21,7 @@ function App() {
   const [showPlayerManager, setShowPlayerManager] = useState(false);
   const [showCombatTracker, setShowCombatTracker] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [showAudioTranscriber, setShowAudioTranscriber] = useState(false);
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
 
@@ -57,8 +58,10 @@ function App() {
         onOpenPlayers={() => setShowPlayerManager(true)}
         onOpenCombat={() => setShowCombatTracker(!showCombatTracker)}
         onOpenShop={() => setShowShop(!showShop)}
+        onOpenAudio={() => setShowAudioTranscriber(!showAudioTranscriber)}
         combatActive={showCombatTracker}
         shopActive={showShop}
+        audioActive={showAudioTranscriber}
       />
 
       {/* Combat Dashboard (inline, takes ~60% when active) */}
@@ -77,13 +80,20 @@ function App() {
         />
       )}
 
+      {/* Audio Transcriber (inline, takes ~60% when active) */}
+      {showAudioTranscriber && (
+        <AudioTranscriber
+          onClose={() => setShowAudioTranscriber(false)}
+        />
+      )}
+
       {/* Chat Panel (full width normally, ~40% during combat) */}
       <ChatPanel
         messages={messages}
         onSendMessage={sendMessage}
         isLoading={isLoading}
         mode={mode}
-        className={(showCombatTracker || showShop) ? 'flex-1 min-w-[320px]' : 'flex-1'}
+        className={(showCombatTracker || showShop || showAudioTranscriber) ? 'flex-1 min-w-[320px]' : 'flex-1'}
       />
 
       {/* Knowledge Graph */}
