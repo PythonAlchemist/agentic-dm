@@ -63,35 +63,35 @@ class DeepgramTranscriber:
         segments: list[DiarizedSegment] = []
         speaker_utterances: dict[int, list[DiarizedSegment]] = defaultdict(list)
 
-        # Extract utterances (preferred — already grouped by speaker turns)
-        utterances_container = getattr(response.results, "utterances", None)
-        utterances = []
-        if utterances_container:
-            utterances = getattr(utterances_container, "utterances", utterances_container) or []
+        # Prefer word-level diarization for finer speaker boundaries
+        segments, speaker_utterances = self._segments_from_words(response)
 
-        for utt in utterances:
-            speaker = getattr(utt, "speaker", 0) or 0
-            text = getattr(utt, "transcript", "").strip()
-            start = getattr(utt, "start", 0.0) or 0.0
-            end = getattr(utt, "end", 0.0) or 0.0
-            confidence = getattr(utt, "confidence", 0.0) or 0.0
-
-            if not text:
-                continue
-
-            seg = DiarizedSegment(
-                speaker=speaker,
-                text=text,
-                start=start,
-                end=end,
-                confidence=confidence,
-            )
-            segments.append(seg)
-            speaker_utterances[speaker].append(seg)
-
-        # If no utterances, fall back to word-level diarization
+        # Fall back to utterances if word-level data is unavailable
         if not segments:
-            segments, speaker_utterances = self._segments_from_words(response)
+            utterances_container = getattr(response.results, "utterances", None)
+            utterances = []
+            if utterances_container:
+                utterances = getattr(utterances_container, "utterances", utterances_container) or []
+
+            for utt in utterances:
+                speaker = getattr(utt, "speaker", 0) or 0
+                text = getattr(utt, "transcript", "").strip()
+                start = getattr(utt, "start", 0.0) or 0.0
+                end = getattr(utt, "end", 0.0) or 0.0
+                confidence = getattr(utt, "confidence", 0.0) or 0.0
+
+                if not text:
+                    continue
+
+                seg = DiarizedSegment(
+                    speaker=speaker,
+                    text=text,
+                    start=start,
+                    end=end,
+                    confidence=confidence,
+                )
+                segments.append(seg)
+                speaker_utterances[speaker].append(seg)
 
         # Build speaker samples
         speaker_samples = []
