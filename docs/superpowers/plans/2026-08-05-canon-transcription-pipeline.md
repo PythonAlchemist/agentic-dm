@@ -1655,6 +1655,293 @@ git commit -m "fix(canon): only real chapter headings start a new chapter"
 
 ---
 
+### Task 8: Normalize chapter identity and clear stale chunks
+
+**Why this exists.** The full 509-page run (real, $5.62, 509/509 pages, zero failures)
+assembled **36 chapters** where the book has roughly 21. Task 7 compared exact title
+strings, but the same chapter renders two ways — body heading uses a colon, the running
+header uses a pipe:
+
+```
+p96-137   Chapter 4: Castle Ravenloft
+p138-169  Chapter 4 | Castle Ravenloft     <- running header form
+p170-170  Chapter 4: Castle Ravenloft
+p171-175  Chapter 4 | Castle Ravenloft
+p176-187  Chapter 4: Castle Ravenloft
+```
+
+Castle Ravenloft split five ways. Chapter 11 also split on a curly vs straight apostrophe
+in "Van Richten's Tower". Chapter slug is the ChromaDB retrieval filter, so this directly
+degrades retrieval quality.
+
+**Second, separate defect.** Re-running the pipeline **orphans the previous chunks**.
+Chunk IDs are `{source}_p{page}_c{index}`; when chapter grouping changes, both the page
+stamp and the index shift, so `upsert` writes a fresh set *alongside* the stale one. The
+collection then holds two contradictory versions of the book and retrieval silently
+returns a mix. Nothing in the pipeline currently deletes anything.
+
+Both fixes are **free to apply** — all 509 pages are cached, so only Stage 2 onward
+re-runs.
+
+**Files:**
+- Modify: `backend/canon/assembler.py`
+- Modify: `tests/test_canon/test_assembler.py`
+- Modify: `backend/canon/ingest.py`
+- Modify: `tests/test_canon/test_ingest.py`
+- Modify: `backend/scripts/ingest_canon.py`
+
+**Interfaces:**
+- Consumes: `PageTranscript`, `Chapter`, `EmbeddingPipeline` (all unchanged)
+- Produces: new private `_chapter_key(title: str) -> str | None` in `assembler.py`; new `async clear_book_chunks(book_slug: str, pipeline: EmbeddingPipeline | None = None) -> int` in `ingest.py`. `assemble_chapters`, `slugify`, `chapter_to_chunks`, and `ingest_chapters` keep their exact signatures.
+
+- [ ] **Step 1: Write the failing assembler tests**
+
+Append to `tests/test_canon/test_assembler.py`:
+
+```python
+class TestChapterIdentity:
+    def test_separator_variants_are_the_same_chapter(self):
+        """Body headings use a colon; running headers use a pipe."""
+        chapters = assemble_chapters(
+            [
+                page(96, "# Chapter 4: Castle Ravenloft\n\nA."),
+                page(138, "# Chapter 4 | Castle Ravenloft\n\nB."),
+                page(170, "# Chapter 4: Castle Ravenloft\n\nC."),
+            ]
+        )
+
+        assert len(chapters) == 1
+        assert chapters[0].start_page == 96
+        assert chapters[0].end_page == 170
+
+    def test_apostrophe_variants_are_the_same_chapter(self):
+        chapters = assemble_chapters(
+            [
+                page(329, "# Chapter 11: Van Richten’s Tower\n\nA."),
+                page(330, "# Chapter 11: Van Richten's Tower\n\nB."),
+            ]
+        )
+
+        assert len(chapters) == 1
+
+    def test_first_seen_title_wins(self):
+        """The chapter opening carries the real title; running headers do not."""
+        chapters = assemble_chapters(
+            [
+                page(96, "# Chapter 4: Castle Ravenloft\n\nA."),
+                page(138, "# Chapter 4 | Castle Ravenloft\n\nB."),
+            ]
+        )
+
+        assert chapters[0].title == "Chapter 4: Castle Ravenloft"
+
+    def test_different_chapter_numbers_still_split(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Chapter 4 | Castle Ravenloft\n\nA."),
+                page(2, "# Chapter 5 | The Town of Vallaki\n\nB."),
+            ]
+        )
+
+        assert len(chapters) == 2
+
+    def test_appendix_letters_are_distinct_chapters(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Appendix A: Character Options\n\nA."),
+                page(2, "# Appendix B: Monsters\n\nB."),
+            ]
+        )
+
+        assert len(chapters) == 2
+```
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `uv run pytest tests/test_canon/test_assembler.py::TestChapterIdentity -v`
+Expected: FAIL — the separator, apostrophe, and first-seen-title tests each report 2+
+chapters where 1 is expected. Capture the output.
+
+- [ ] **Step 3: Implement the chapter key**
+
+In `backend/canon/assembler.py`, replace `CHAPTER_HEADING_PATTERN` and
+`_is_chapter_heading` with:
+
+```python
+CHAPTER_KEY_PATTERN = re.compile(
+    r"^(chapter\s+\d+|appendix\s+[a-z]\b|introduction|prologue|epilogue|foreword)",
+    re.IGNORECASE,
+)
+
+
+def _chapter_key(title: str) -> str | None:
+    """Normalized identity of the chapter a heading names, or None if not a chapter.
+
+    The same chapter renders differently in body headings and running headers —
+    "Chapter 4: Castle Ravenloft" versus "Chapter 4 | Castle Ravenloft" — and
+    apostrophes vary between straight and curly. Reducing both to "chapter 4"
+    makes those the same chapter rather than two.
+    """
+    match = CHAPTER_KEY_PATTERN.match(title.strip())
+    if match is None:
+        return None
+    return re.sub(r"\s+", " ", match.group(1).strip().lower())
+```
+
+- [ ] **Step 4: Apply key comparison in `assemble_chapters`**
+
+Replace the boundary computation:
+
+```python
+        title = heading.group(1).strip() if heading is not None else None
+        starts_new_chapter = (
+            title is not None
+            and _is_chapter_heading(title)
+            and (current is None or current["title"] != title)
+        )
+```
+
+with:
+
+```python
+        title = heading.group(1).strip() if heading is not None else None
+        key = _chapter_key(title) if title is not None else None
+        starts_new_chapter = key is not None and (
+            current is None or current.get("key") != key
+        )
+```
+
+Add `"key": key,` alongside `"title": title,` where a new chapter dict is built. The
+front-matter branch must set `"key": None`. Because a new chapter is only opened when the
+key *changes*, the first title seen for a chapter is retained and later running-header
+variants are appended as content — which is what `test_first_seen_title_wins` pins.
+
+- [ ] **Step 5: Run the assembler tests**
+
+Run: `uv run pytest tests/test_canon/test_assembler.py -v`
+Expected: 19 passed (14 existing + 5 new). All 14 existing must pass unchanged — the
+fixtures use distinct chapter numbers, so key comparison preserves their behavior. If any
+existing test fails, **report it rather than editing it**.
+
+- [ ] **Step 6: Write the failing chunk-clearing tests**
+
+Append to `tests/test_canon/test_ingest.py`:
+
+```python
+class TestClearBookChunks:
+    @pytest.mark.asyncio
+    async def test_deletes_existing_chunks_and_returns_count(self):
+        pipeline = MagicMock()
+        pipeline.collection.get = MagicMock(
+            return_value={"ids": ["cos_p1_c0", "cos_p1_c1"]}
+        )
+        pipeline.collection.delete = MagicMock()
+
+        removed = await clear_book_chunks("cos", pipeline=pipeline)
+
+        assert removed == 2
+        pipeline.collection.get.assert_called_once_with(where={"source": "cos"})
+        pipeline.collection.delete.assert_called_once_with(
+            ids=["cos_p1_c0", "cos_p1_c1"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_delete_call_when_nothing_stored(self):
+        pipeline = MagicMock()
+        pipeline.collection.get = MagicMock(return_value={"ids": []})
+        pipeline.collection.delete = MagicMock()
+
+        removed = await clear_book_chunks("cos", pipeline=pipeline)
+
+        assert removed == 0
+        pipeline.collection.delete.assert_not_called()
+```
+
+Add `clear_book_chunks` to the existing import line at the top of the file.
+
+- [ ] **Step 7: Run to verify they fail**
+
+Run: `uv run pytest tests/test_canon/test_ingest.py::TestClearBookChunks -v`
+Expected: FAIL with `ImportError: cannot import name 'clear_book_chunks'`
+
+- [ ] **Step 8: Implement `clear_book_chunks`**
+
+Add to `backend/canon/ingest.py`, after `chapter_to_chunks`:
+
+```python
+async def clear_book_chunks(
+    book_slug: str,
+    pipeline: EmbeddingPipeline | None = None,
+) -> int:
+    """Delete every stored chunk for a book. Returns how many were removed.
+
+    Chunk IDs encode page and chunk index, both of which shift when chapter
+    grouping changes. Without clearing first, a re-run upserts a new set beside
+    the stale one and the collection holds two contradictory versions of the book.
+    """
+    pipeline = pipeline or EmbeddingPipeline()
+    existing = pipeline.collection.get(where={"source": book_slug})
+    ids = existing.get("ids", [])
+    if ids:
+        pipeline.collection.delete(ids=ids)
+    return len(ids)
+```
+
+- [ ] **Step 9: Wire it into the CLI**
+
+In `backend/scripts/ingest_canon.py`, add `clear_book_chunks` to the existing
+`backend.canon.ingest` import, and replace the embed block in `run()`:
+
+```python
+    stored: list[str] = []
+    if not skip_embed:
+        stored = await ingest_chapters(chapters, book_slug=book_slug)
+        print(f"Embedded {len(stored)} chunks into ChromaDB")
+```
+
+with:
+
+```python
+    stored: list[str] = []
+    if not skip_embed:
+        pipeline = EmbeddingPipeline()
+        removed = await clear_book_chunks(book_slug, pipeline=pipeline)
+        if removed:
+            print(f"Cleared {removed} stale chunks for {book_slug}")
+        stored = await ingest_chapters(chapters, book_slug=book_slug, pipeline=pipeline)
+        print(f"Embedded {len(stored)} chunks into ChromaDB")
+```
+
+Add `from backend.ingestion.embeddings import EmbeddingPipeline` to the imports. One
+pipeline is constructed and shared by both calls rather than each building its own.
+
+- [ ] **Step 10: Run the full canon suite**
+
+Run: `uv run pytest tests/test_canon/ -v`
+Expected: 56 passed (47 existing + 5 assembler + 2 ingest, plus the 2 already counted).
+Report the actual number; the point is that nothing regressed.
+
+- [ ] **Step 11: Re-run the real book against cache (free) and verify**
+
+Run: `uv run python -m backend.scripts.ingest_canon data/cos.pdf`
+
+Expected:
+- `Billed this run: $0.0` — all 509 pages cached. If this bills anything, STOP and report.
+- Roughly **21 chapters**, not 36. Castle Ravenloft appears once, spanning ~p96-187.
+- `Cleared 524 stale chunks for cos` before the new embed.
+- Report the full chapter list in your report.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add backend/canon/assembler.py tests/test_canon/test_assembler.py \
+        backend/canon/ingest.py tests/test_canon/test_ingest.py \
+        backend/scripts/ingest_canon.py
+git commit -m "fix(canon): key chapters by identity and clear stale chunks on re-ingest"
+```
+
+---
+
 ## Verification
 
 Whole suite: `uv run pytest -q`
