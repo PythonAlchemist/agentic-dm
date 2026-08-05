@@ -114,6 +114,31 @@ class PDFProcessor:
 
         return chunks
 
+    def chunk_text(
+        self,
+        text: str,
+        source: str,
+        page: int,
+        start_index: int = 0,
+    ) -> list[DocumentChunk]:
+        """Chunk already-extracted text.
+
+        Public entry point for callers that have text from somewhere other than a
+        PDF text layer, such as vision-transcribed page markdown.
+
+        Args:
+            text: The text to chunk
+            source: Source name recorded on each chunk
+            page: Page number recorded on each chunk
+            start_index: Starting chunk index, for unique IDs across calls
+
+        Returns:
+            List of DocumentChunk objects
+        """
+        return self._chunk_text(
+            text=text, source=source, page=page, start_index=start_index
+        )
+
     def _process_page(
         self,
         text: str,
