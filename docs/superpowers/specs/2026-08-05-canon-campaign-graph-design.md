@@ -230,12 +230,70 @@ Book extraction is clean prose with headings, a known cast, and a hard precision
 because generators treat the output as truth. Different problem, different module. The one
 piece worth reusing is `ner/resolution/` for cross-chapter dedupe.
 
-**Stage 1 — extract per chapter, per layer.** Three focused passes per chapter, each with
-a narrow schema, rather than one general prompt. A spatial pass that only cares about
-containment produces markedly cleaner output. ~15 chapters × 3 layers ≈ 45 calls.
+### Source: vision transcription is the primary path
 
-**Stage 2 — resolve globally.** Strahd appears in a dozen chapters; candidates collapse to
-one node. This is the stage most likely to need iteration.
+`data/cos.pdf` is **unusable as a text source**: 224 MB, 509 pages, every page a single
+image carrying ~100 characters of browser print-header text. It is a print-to-PDF of an
+AnyFlip flipbook.
+
+The D&D Beyond MCP (`ddb_read_book`, slug `dnd/cos`, owned) was the intended source, but
+as of 2026-08-05 it times out at 45s on `networkidle` for **every** book tried — CoS and
+`dnd/wa` alike — so the failure is in the MCP or network, not one heavy page. It remains a
+useful secondary source if it recovers; a fix worth trying is waiting on `domcontentloaded`
+rather than `networkidle`.
+
+**Vision transcription is therefore the primary path, and would be defensible even if the
+MCP worked.** Two reasons beyond availability: the pipeline needs prose chunks in ChromaDB
+regardless — the hybrid-RAG half of this design depends on them — so transcription is a
+required deliverable, not a workaround; and vision handles maps, tables, and stat-block
+layouts that D&D Beyond's HTML renders poorly.
+
+**Transcribe once, extract many times.** The three layer passes must run over *text*, not
+over the page images. Re-sending images per pass triples image-token cost for no benefit.
+
+### Pipeline stages
+
+| # | Stage | Model | Notes |
+|---|---|---|---|
+| 0 | Extract page images from PDF | — | Images are already embedded; pull at native resolution (~1278×1800), no re-rendering |
+| 1 | Transcribe page → markdown | `gpt-4o` | One call per page. Preserve headings, tables, stat blocks; describe maps/art rather than transcribing them |
+| 2 | Assemble pages → chapters | — | Detect chapter boundaries from transcribed headings |
+| 3 | Chunk + embed → ChromaDB | `text-embedding-3-small` | Reuses existing `backend/ingestion/` |
+| 4 | Extract per chapter, per layer | `gpt-4o-mini` | Three focused passes per chapter, each with a narrow schema. A spatial pass that only cares about containment produces markedly cleaner output than a general prompt. ~15 chapters × 3 ≈ 45 calls |
+| 5 | Resolve globally | `gpt-4o-mini` + `ner/resolution/` | Strahd appears in a dozen chapters; candidates collapse to one node. The stage most likely to need iteration |
+| 6 | Review gate → write canon | — | Stages to a preview; canon is written only on confirmation |
+
+**Model split rationale.** Stage 1 uses `gpt-4o` rather than `gpt-4o-mini` despite the
+40× price difference: transcription errors propagate into every downstream extraction pass
+*and* into the RAG chunks, so it is the one stage where quality compounds. Stages 4–5 read
+clean text and `gpt-4o-mini` is sufficient.
+
+### Cost
+
+Measured, not estimated: 509 pages at ~1278×1800 is **1,105 image tokens/page** under
+OpenAI's tiling, or 562k image tokens for the book.
+
+| Line item | Tokens | Rate | Cost |
+|---|---|---|---|
+| Stage 1 input (images + prompt) | ~664k | $2.50/1M | $1.66 |
+| Stage 1 output (markdown) | ~509k | $10.00/1M | $5.09 |
+| Stages 4–5 input | ~1.5M | $0.15/1M | $0.23 |
+| Stages 4–5 output | ~600k | $0.60/1M | $0.36 |
+| **Total** | | | **~$7.34** |
+
+Roughly **$3.70 via the Batch API** (50% discount), which suits this workload since nothing
+is latency-sensitive.
+
+The soft number is stage 1 output, assumed at ~1,000 markdown tokens/page. Dense
+two-column pages could reach 2,000, roughly doubling that line to a ~$12 worst case. Not
+worth optimizing around.
+
+### Re-runs, caching, and failure
+
+**Cache transcription by image hash.** Stage 1 is ~90% of the cost and its input never
+changes. Persist page markdown to `data/canon/cos/pages/NNN.md` keyed by image hash, so
+the many re-runs of stages 4–6 cost cents rather than dollars. Without this cache the
+iteration loop is unaffordable enough that it would discourage fixing extraction bugs.
 
 **Deterministic IDs**, so re-runs update in place rather than duplicating:
 
@@ -244,27 +302,15 @@ cos:npc:ireena-kolyana
 cos:location:castle-ravenloft:k37
 ```
 
-Extraction over a 500-page book will be re-run several times before it is right, so this
-matters more than it appears.
+**Per-page failure isolation.** A page that fails transcription is retried, then flagged
+and skipped — one bad page must not abort a 509-page run. Skipped pages are reported at
+the end, never silently dropped.
 
 **Graph ↔ prose link.** Canon nodes store the chunk IDs they were extracted from, so
 hybrid RAG can traverse structure and then fetch the actual text.
 
 **Review before commit**, consistent with the existing transcript pipeline. Higher stakes
 here, since canon is shared across every table.
-
-### Source risk
-
-`data/cos.pdf` is **unusable as a text source**: 224 MB, 509 pages, every page a single
-image with ~100 characters of browser print-header text. It is a print-to-PDF of an
-AnyFlip flipbook.
-
-Primary source is the D&D Beyond MCP (`ddb_read_book`, book slug `dnd/cos`, owned).
-As of 2026-08-05 it timed out three times at 45s on `networkidle`, on both the TOC and a
-chapter. The `dm-screen` plugin uses the same MCP successfully, suggesting a transient
-issue. Mitigations, in order: retry; have the MCP wait on `domcontentloaded` instead of
-`networkidle`; fall back to vision extraction over the PDF page images — more expensive,
-but it handles maps and stat blocks that DDB text renders poorly anyway.
 
 ## Read Path Integration
 
@@ -303,8 +349,12 @@ valuable and verifiable:
 
 1. **Ontology and resolver** — schema changes, the plane-aware scoping fix, the resolver,
    and its tests. Testable against hand-seeded fixture data with no book ingestion at all.
-2. **Canon extraction** — `backend/canon/`, the two-stage pipeline, review gate. Depends
-   on stage 1 for a target schema, and on the D&D Beyond MCP being reachable.
+2. **Canon extraction** — `backend/canon/`, the seven pipeline stages, review gate.
+   Depends on stage 1 for a target schema. No external blocker: vision transcription runs
+   against the local PDF, so this is not gated on the D&D Beyond MCP recovering.
+   Sub-sequence within it: get stages 0–3 (transcription → ChromaDB) working and cached
+   first, since that is independently useful — it gives the existing RAG pipeline a real
+   Curse of Strahd corpus even before any graph extraction happens.
 3. **Read path integration** — query planner layer/perspective selection, API params,
    diff endpoint.
 
