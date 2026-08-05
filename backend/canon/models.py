@@ -9,7 +9,7 @@ class PageImage:
 
     page_number: int  # 1-indexed
     image_bytes: bytes
-    ext: str  # "png" or "jpeg"
+    ext: str  # "png", "jpeg", or "jpg" -- the only formats the vision API accepts
     width: int
     height: int
     sha256: str

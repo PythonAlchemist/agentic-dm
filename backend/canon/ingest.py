@@ -33,6 +33,12 @@ def chapter_to_chunks(
                 "chapter_slug": chapter.slug,
                 "chapter_title": chapter.title,
                 "plane": "canon",
+                # `page` above is chapter.start_page for every chunk in the chapter,
+                # which understates the true source page for chunks from later in a
+                # long chapter. Stamp the honest range alongside it until per-chunk
+                # page tracking exists (deferred; see canon pipeline design doc).
+                "chapter_start_page": chapter.start_page,
+                "chapter_end_page": chapter.end_page,
             }
         )
 

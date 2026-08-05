@@ -46,7 +46,13 @@ class PageTranscriber:
 
     async def transcribe_page(self, page: PageImage) -> PageTranscript:
         """Transcribe one page. Never raises; failures come back as status='failed'."""
-        cached = self.cache.get(page.page_number, page.sha256)
+        try:
+            cached = self.cache.get(page.page_number, page.sha256)
+        except Exception as exc:  # noqa: BLE001 - a broken cache must not block transcription
+            logger.warning(
+                "Cache read failed for page %s, re-transcribing: %s", page.page_number, exc
+            )
+            cached = None
         if cached is not None:
             return cached
 
@@ -87,7 +93,12 @@ class PageTranscriber:
                 error=str(exc),
             )
 
-        self.cache.put(transcript)
+        try:
+            self.cache.put(transcript)
+        except Exception as exc:  # noqa: BLE001 - a cache write failure must not lose the transcript
+            logger.warning(
+                "Cache write failed for page %s (transcript kept): %s", page.page_number, exc
+            )
         return transcript
 
     async def transcribe_pages(self, pages: Iterable[PageImage]) -> list[PageTranscript]:

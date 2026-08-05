@@ -168,7 +168,7 @@ def main() -> None:
         print("Cached pages cost nothing; this is the worst case.")
         return
 
-    asyncio.run(
+    summary = asyncio.run(
         run(
             pdf_path=args.pdf,
             book_slug=args.book_slug,
@@ -177,6 +177,7 @@ def main() -> None:
             skip_embed=args.skip_embed,
         )
     )
+    sys.exit(1 if summary["failed_pages"] else 0)
 
 
 if __name__ == "__main__":

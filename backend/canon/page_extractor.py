@@ -10,6 +10,10 @@ from backend.canon.models import PageImage
 
 RENDER_DPI = 150
 
+# Formats the vision API accepts as an `image/{ext}` MIME type. Embedded images in
+# other formats (e.g. jpx, jbig2, tiff) are rendered instead of extracted verbatim.
+ACCEPTED_EXTRACT_FORMATS = {"png", "jpeg", "jpg"}
+
 
 class PageExtractor:
     """Yield exactly one image per page of a PDF.
@@ -41,10 +45,15 @@ class PageExtractor:
             page = self._doc[page_number - 1]
             images = page.get_images(full=True)
 
+            extracted = None
             if len(images) == 1:
                 info = self._doc.extract_image(images[0][0])
-                data, ext = info["image"], info["ext"]
-                width, height = info["width"], info["height"]
+                if info["ext"] in ACCEPTED_EXTRACT_FORMATS:
+                    extracted = info
+
+            if extracted is not None:
+                data, ext = extracted["image"], extracted["ext"]
+                width, height = extracted["width"], extracted["height"]
             else:
                 pix = page.get_pixmap(dpi=RENDER_DPI)
                 data, ext = pix.tobytes("png"), "png"

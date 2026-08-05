@@ -78,22 +78,31 @@ class TestAssembleChapters:
     def test_disambiguation_avoids_collision_with_pre_suffixed_title(self):
         """A literal title matching an auto-generated suffix must not collide with it.
 
-        The fourth chapter's own slug ("...-2") equals the suffix _disambiguate will
-        already have assigned to the third chapter's duplicate title, so this exercises
-        the walk-forward collision avoidance rather than the first-bump case.
+        The duplicate of chapter 5 must be non-adjacent to the original (an
+        intervening chapter 6) so the two stay separate chapters instead of merging
+        under Task 8's running-header identity rule. Once separate, the duplicate is
+        assigned the suffix "...-2" by _disambiguate. A fifth chapter is then titled
+        "Chapter 5: Areas of the Keep 2" -- its own raw slug is *also*
+        "...-2", so it collides with the suffix already claimed by the duplicate and
+        must be walked forward again to "...-2-2".
         """
         chapters = assemble_chapters(
             [
                 page(1, "# Chapter 5: Areas of the Keep\n\nA."),
                 page(2, "# Chapter 6: The Undercroft\n\nB."),
                 page(3, "# Chapter 5: Areas of the Keep\n\nC."),
-                page(4, "# Chapter 5: Areas of the Keep 2\n\nD."),
+                page(4, "# Chapter 7: The Old Barracks\n\nD."),
+                page(5, "# Chapter 5: Areas of the Keep 2\n\nE."),
             ]
         )
 
-        slugs = [c.slug for c in chapters]
-        assert len(slugs) >= 3, f"expected the collision scenario to reach 3+ chapters, got {slugs}"
-        assert len(slugs) == len(set(slugs)), f"expected distinct slugs, got {slugs}"
+        assert [c.slug for c in chapters] == [
+            "chapter-5-areas-of-the-keep",
+            "chapter-6-the-undercroft",
+            "chapter-5-areas-of-the-keep-2",
+            "chapter-7-the-old-barracks",
+            "chapter-5-areas-of-the-keep-2-2",
+        ]
 
     def test_three_identical_titles_get_sequential_slugs(self):
         """Three non-adjacent chapters sharing a title get sequential suffixes."""

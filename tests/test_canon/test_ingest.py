@@ -30,6 +30,11 @@ class TestChapterToChunks:
             for c in chunks
         )
         assert all(c.metadata["plane"] == "canon" for c in chunks)
+        # `page` is stamped as the chapter's start page (see test_chunk_page_is_chapter_start),
+        # which understates the true location for chunks from later in a long chapter. These
+        # two carry the honest range alongside it until per-chunk page tracking exists.
+        assert all(c.metadata["chapter_start_page"] == 43 for c in chunks)
+        assert all(c.metadata["chapter_end_page"] == 52 for c in chunks)
 
     def test_chunk_page_is_chapter_start(self):
         chunks = chapter_to_chunks(make_chapter(), book_slug="cos")

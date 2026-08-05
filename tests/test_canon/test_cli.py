@@ -5,7 +5,7 @@ import pytest
 import backend.scripts.ingest_canon as ingest_canon
 from backend.canon.cache import TranscriptCache
 from backend.canon.models import PageImage, PageTranscript
-from backend.scripts.ingest_canon import estimate_cost, parse_page_range
+from backend.scripts.ingest_canon import estimate_cost, main, parse_page_range
 
 
 class TestParsePageRange:
@@ -133,3 +133,58 @@ class TestRunCostAccounting:
         )
         assert summary["usd"] == expected_usd
         assert summary["pages"] == 2
+
+
+class _FakeTranscriberAllFail:
+    """Stands in for PageTranscriber: every page fails, no network touched."""
+
+    def __init__(self, cache, client=None, model=None, concurrency=8):
+        self.cache = cache
+
+    async def transcribe_pages(self, pages):
+        return sorted(
+            (
+                PageTranscript(
+                    page_number=page.page_number,
+                    markdown="",
+                    image_sha256=page.sha256,
+                    model="gpt-4o",
+                    status="failed",
+                    error="rate limited",
+                )
+                for page in pages
+            ),
+            key=lambda t: t.page_number,
+        )
+
+
+class TestMainExitCode:
+    """main() must signal failed pages via a non-zero exit code (Finding 4)."""
+
+    def test_exits_zero_on_a_clean_run(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ingest_canon.settings, "canon_dir", tmp_path)
+        monkeypatch.setattr(ingest_canon, "PageExtractor", _FakeExtractor)
+        monkeypatch.setattr(ingest_canon, "PageTranscriber", _FakeTranscriber)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["ingest_canon.py", str(tmp_path / "fake.pdf"), "-b", "clean-book", "--skip-embed"],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 0
+
+    def test_exits_nonzero_when_pages_fail(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ingest_canon.settings, "canon_dir", tmp_path)
+        monkeypatch.setattr(ingest_canon, "PageExtractor", _FakeExtractor)
+        monkeypatch.setattr(ingest_canon, "PageTranscriber", _FakeTranscriberAllFail)
+        monkeypatch.setattr(
+            "sys.argv",
+            ["ingest_canon.py", str(tmp_path / "fake.pdf"), "-b", "broken-book", "--skip-embed"],
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
