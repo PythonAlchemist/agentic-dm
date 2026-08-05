@@ -55,37 +55,64 @@ class TestAssembleChapters:
         assert assemble_chapters([]) == []
 
     def test_duplicate_titles_get_distinct_slugs(self):
-        chapters = assemble_chapters(
-            [page(1, "# Areas of the Keep\n\nA."), page(2, "# Areas of the Keep\n\nB.")]
-        )
+        """Two non-adjacent chapters sharing a title still get distinct slugs.
 
-        assert [c.slug for c in chapters] == ["areas-of-the-keep", "areas-of-the-keep-2"]
-
-    def test_disambiguation_avoids_collision_with_pre_suffixed_title(self):
-        chapters = assemble_chapters(
-            [
-                page(1, "# Areas of the Keep\n\nA."),
-                page(2, "# Areas of the Keep\n\nB."),
-                page(3, "# Areas of the Keep 2\n\nC."),
-            ]
-        )
-
-        slugs = [c.slug for c in chapters]
-        assert len(slugs) == len(set(slugs)), f"expected distinct slugs, got {slugs}"
-
-    def test_three_identical_titles_get_sequential_slugs(self):
+        Adjacent same-titled pages now merge (running-header fix), so the duplicate
+        must be separated by a different intervening chapter to reach _disambiguate
+        as two separate chapters at all.
+        """
         chapters = assemble_chapters(
             [
-                page(1, "# Areas of the Keep\n\nA."),
-                page(2, "# Areas of the Keep\n\nB."),
-                page(3, "# Areas of the Keep\n\nC."),
+                page(1, "# Chapter 5: Areas of the Keep\n\nA."),
+                page(2, "# Chapter 6: The Undercroft\n\nB."),
+                page(3, "# Chapter 5: Areas of the Keep\n\nC."),
             ]
         )
 
         assert [c.slug for c in chapters] == [
-            "areas-of-the-keep",
-            "areas-of-the-keep-2",
-            "areas-of-the-keep-3",
+            "chapter-5-areas-of-the-keep",
+            "chapter-6-the-undercroft",
+            "chapter-5-areas-of-the-keep-2",
+        ]
+
+    def test_disambiguation_avoids_collision_with_pre_suffixed_title(self):
+        """A literal title matching an auto-generated suffix must not collide with it.
+
+        The fourth chapter's own slug ("...-2") equals the suffix _disambiguate will
+        already have assigned to the third chapter's duplicate title, so this exercises
+        the walk-forward collision avoidance rather than the first-bump case.
+        """
+        chapters = assemble_chapters(
+            [
+                page(1, "# Chapter 5: Areas of the Keep\n\nA."),
+                page(2, "# Chapter 6: The Undercroft\n\nB."),
+                page(3, "# Chapter 5: Areas of the Keep\n\nC."),
+                page(4, "# Chapter 5: Areas of the Keep 2\n\nD."),
+            ]
+        )
+
+        slugs = [c.slug for c in chapters]
+        assert len(slugs) >= 3, f"expected the collision scenario to reach 3+ chapters, got {slugs}"
+        assert len(slugs) == len(set(slugs)), f"expected distinct slugs, got {slugs}"
+
+    def test_three_identical_titles_get_sequential_slugs(self):
+        """Three non-adjacent chapters sharing a title get sequential suffixes."""
+        chapters = assemble_chapters(
+            [
+                page(1, "# Chapter 5: Areas of the Keep\n\nA."),
+                page(2, "# Chapter 6: The Undercroft\n\nB."),
+                page(3, "# Chapter 5: Areas of the Keep\n\nC."),
+                page(4, "# Chapter 7: The Old Barracks\n\nD."),
+                page(5, "# Chapter 5: Areas of the Keep\n\nE."),
+            ]
+        )
+
+        assert [c.slug for c in chapters] == [
+            "chapter-5-areas-of-the-keep",
+            "chapter-6-the-undercroft",
+            "chapter-5-areas-of-the-keep-2",
+            "chapter-7-the-old-barracks",
+            "chapter-5-areas-of-the-keep-3",
         ]
 
 
