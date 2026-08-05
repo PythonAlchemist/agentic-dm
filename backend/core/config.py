@@ -22,11 +22,13 @@ class Settings(BaseSettings):
     transcript_dir: Path = data_dir / "transcripts"
     chroma_dir: Path = data_dir / "chromadb"
     audio_dir: Path = data_dir / "audio"
+    canon_dir: Path = data_dir / "canon"
 
     # OpenAI
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
     openai_embedding_model: str = "text-embedding-3-small"
+    openai_vision_model: str = "gpt-4o"
     embedding_dimensions: int = 1536
 
     # Neo4j
