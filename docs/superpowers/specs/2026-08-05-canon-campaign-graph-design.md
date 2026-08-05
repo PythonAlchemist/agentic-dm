@@ -182,18 +182,35 @@ All reads go through one function:
 
 ```python
 resolve(campaign_id, perspective='truth'|'table', layers=None,
-        as_of_session=None) -> Entities | Edges
+        entity_type=None, source_book=None, as_of_session=None) -> Entities | Edges
 ```
+
+`layers=None` returns all layers. `as_of_session` is meaningful **only** for
+`perspective='table'`; passing it with `perspective='truth'` is an error, not a silently
+ignored argument.
 
 Node resolution, using APOC (already enabled in `docker-compose.yml`):
 
 ```cypher
-MATCH (canon:Entity {plane:'canon', source_book:$book})
-WHERE canon.entity_type = $type
+// Branch 1: canon entities, with any campaign overrides merged over them
+MATCH (canon:Entity {plane:'canon'})
+WHERE ($source_book IS NULL OR canon.source_book = $source_book)
+  AND ($entity_type IS NULL OR canon.entity_type = $entity_type)
 OPTIONAL MATCH (camp:Entity {plane:'campaign'})-[:INSTANCE_OF]->(canon)
   WHERE (camp)-[:BELONGS_TO]->(:Entity {id:$campaign_id})
 RETURN apoc.map.merge(properties(canon), properties(camp)) AS entity
+
+UNION
+
+// Branch 2: table-invented entities, which have no canon node to merge over
+MATCH (camp:Entity {plane:'campaign'})-[:BELONGS_TO]->(:Entity {id:$campaign_id})
+WHERE NOT (camp)-[:INSTANCE_OF]->(:Entity)
+  AND ($entity_type IS NULL OR camp.entity_type = $entity_type)
+RETURN properties(camp) AS entity
 ```
+
+Both branches are required. A canon-rooted query alone silently drops every entity a table
+invented — the second branch is easy to forget and produces a subtly incomplete graph.
 
 Campaign nodes store only overridden properties, so `properties(camp)` is a sparse patch.
 
@@ -278,6 +295,22 @@ search every edge in the graph.
 **Ephemeral fixtures, not the live database.** `tests/test_discord/test_combat_manager.py`
 connects to a running Neo4j, which is why those 11 tests fail when it is down. Canon tests
 seed and tear down a fixture graph per test.
+
+## Implementation Sequencing
+
+This spec covers more than one implementation plan. Three stages, each independently
+valuable and verifiable:
+
+1. **Ontology and resolver** — schema changes, the plane-aware scoping fix, the resolver,
+   and its tests. Testable against hand-seeded fixture data with no book ingestion at all.
+2. **Canon extraction** — `backend/canon/`, the two-stage pipeline, review gate. Depends
+   on stage 1 for a target schema, and on the D&D Beyond MCP being reachable.
+3. **Read path integration** — query planner layer/perspective selection, API params,
+   diff endpoint.
+
+Stage 1 should be planned and built before stage 2 is planned in detail: extraction is
+shaped by the schema, and the schema is cheaper to revise before a 500-page book has been
+loaded into it.
 
 ## Out of Scope
 
