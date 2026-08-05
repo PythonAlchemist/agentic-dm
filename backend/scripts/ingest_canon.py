@@ -66,42 +66,58 @@ async def run(
 ) -> dict:
     """Run stages 0-3 and return a summary."""
     extractor = PageExtractor(pdf_path)
-    cache = TranscriptCache(settings.canon_dir / book_slug)
-    transcriber = PageTranscriber(cache, concurrency=concurrency)
+    try:
+        cache = TranscriptCache(settings.canon_dir / book_slug)
+        transcriber = PageTranscriber(cache, concurrency=concurrency)
 
-    page_images = list(extractor.extract(pages=pages))
-    print(f"Extracted {len(page_images)} page images")
+        page_images = list(extractor.extract(pages=pages))
+        print(f"Extracted {len(page_images)} page images")
 
-    transcripts = await transcriber.transcribe_pages(page_images)
-    failed = [t.page_number for t in transcripts if t.status == "failed"]
-    spent_in = sum(t.input_tokens for t in transcripts)
-    spent_out = sum(t.output_tokens for t in transcripts)
-    actual_usd = round(
-        spent_in / 1_000_000 * INPUT_RATE + spent_out / 1_000_000 * OUTPUT_RATE, 2
-    )
-    print(f"Transcribed {len(transcripts) - len(failed)}/{len(transcripts)} pages")
-    if failed:
-        print(f"  FAILED pages (retry to fix): {failed}")
-    print(f"  Billed this run: ${actual_usd} (cache hits are free)")
+        # Determine cache hits before transcribing so the cost sum below can
+        # exclude them. Cached transcripts carry their *original* billed
+        # token counts (see TranscriptCache.get()), so summing indiscriminately
+        # would misreport a fully-cached re-run as costing money again.
+        already_cached = {
+            img.page_number
+            for img in page_images
+            if cache.get(img.page_number, img.sha256) is not None
+        }
 
-    chapters = assemble_chapters(transcripts)
-    print(f"Assembled {len(chapters)} chapters")
-    for chapter in chapters:
-        print(f"  p{chapter.start_page}-{chapter.end_page}  {chapter.title}")
+        transcripts = await transcriber.transcribe_pages(page_images)
+        failed = [t.page_number for t in transcripts if t.status == "failed"]
+        spent_in = sum(
+            t.input_tokens for t in transcripts if t.page_number not in already_cached
+        )
+        spent_out = sum(
+            t.output_tokens for t in transcripts if t.page_number not in already_cached
+        )
+        actual_usd = round(
+            spent_in / 1_000_000 * INPUT_RATE + spent_out / 1_000_000 * OUTPUT_RATE, 2
+        )
+        print(f"Transcribed {len(transcripts) - len(failed)}/{len(transcripts)} pages")
+        if failed:
+            print(f"  FAILED pages (retry to fix): {failed}")
+        print(f"  Billed this run: ${actual_usd} (cache hits are free)")
 
-    stored: list[str] = []
-    if not skip_embed:
-        stored = await ingest_chapters(chapters, book_slug=book_slug)
-        print(f"Embedded {len(stored)} chunks into ChromaDB")
+        chapters = assemble_chapters(transcripts)
+        print(f"Assembled {len(chapters)} chapters")
+        for chapter in chapters:
+            print(f"  p{chapter.start_page}-{chapter.end_page}  {chapter.title}")
 
-    extractor.close()
-    return {
-        "pages": len(page_images),
-        "failed_pages": failed,
-        "chapters": len(chapters),
-        "chunks": len(stored),
-        "usd": actual_usd,
-    }
+        stored: list[str] = []
+        if not skip_embed:
+            stored = await ingest_chapters(chapters, book_slug=book_slug)
+            print(f"Embedded {len(stored)} chunks into ChromaDB")
+
+        return {
+            "pages": len(page_images),
+            "failed_pages": failed,
+            "chapters": len(chapters),
+            "chunks": len(stored),
+            "usd": actual_usd,
+        }
+    finally:
+        extractor.close()
 
 
 def main() -> None:
@@ -131,7 +147,14 @@ def main() -> None:
     pages = parse_page_range(args.pages) if args.pages else None
 
     if args.estimate:
-        count = len(pages) if pages else PageExtractor(args.pdf).page_count
+        if pages:
+            count = len(pages)
+        else:
+            extractor = PageExtractor(args.pdf)
+            try:
+                count = extractor.page_count
+            finally:
+                extractor.close()
         estimate = estimate_cost(count)
         print(
             f"{estimate['pages']} pages -> ~${estimate['total_usd']} "
