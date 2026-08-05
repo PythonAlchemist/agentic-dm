@@ -60,3 +60,30 @@ class TestAssembleChapters:
         )
 
         assert [c.slug for c in chapters] == ["areas-of-the-keep", "areas-of-the-keep-2"]
+
+    def test_disambiguation_avoids_collision_with_pre_suffixed_title(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Areas of the Keep\n\nA."),
+                page(2, "# Areas of the Keep\n\nB."),
+                page(3, "# Areas of the Keep 2\n\nC."),
+            ]
+        )
+
+        slugs = [c.slug for c in chapters]
+        assert len(slugs) == len(set(slugs)), f"expected distinct slugs, got {slugs}"
+
+    def test_three_identical_titles_get_sequential_slugs(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Areas of the Keep\n\nA."),
+                page(2, "# Areas of the Keep\n\nB."),
+                page(3, "# Areas of the Keep\n\nC."),
+            ]
+        )
+
+        assert [c.slug for c in chapters] == [
+            "areas-of-the-keep",
+            "areas-of-the-keep-2",
+            "areas-of-the-keep-3",
+        ]

@@ -70,10 +70,15 @@ def _finish(pending: dict) -> Chapter:
 
 
 def _disambiguate(chapters: list[Chapter]) -> list[Chapter]:
-    """Ensure slugs are unique by suffixing repeats with -2, -3, ..."""
-    seen: dict[str, int] = {}
+    """Ensure slugs are unique, tracking the slugs actually emitted."""
+    used: set[str] = set()
     for chapter in chapters:
-        seen[chapter.slug] = seen.get(chapter.slug, 0) + 1
-        if seen[chapter.slug] > 1:
-            chapter.slug = f"{chapter.slug}-{seen[chapter.slug]}"
+        base = chapter.slug
+        candidate = base
+        suffix = 1
+        while candidate in used:
+            suffix += 1
+            candidate = f"{base}-{suffix}"
+        used.add(candidate)
+        chapter.slug = candidate
     return chapters
