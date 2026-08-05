@@ -6,6 +6,21 @@ from backend.canon.models import Chapter, PageTranscript
 
 H1_PATTERN = re.compile(r"^#\s+(?!#)(.+?)\s*$", re.MULTILINE)
 
+CHAPTER_HEADING_PATTERN = re.compile(
+    r"^(?:chapter\s+\d+|appendix\s+[a-z]\b|introduction|prologue|epilogue|foreword)",
+    re.IGNORECASE,
+)
+
+
+def _is_chapter_heading(title: str) -> bool:
+    """True if an H1 names a real chapter rather than a section or map label.
+
+    Transcribed pages emit H1s for things that are not chapters — location keys,
+    area names, running headers. Only titles matching a book's chapter vocabulary
+    start a new chapter.
+    """
+    return CHAPTER_HEADING_PATTERN.match(title.strip()) is not None
+
 
 def slugify(title: str) -> str:
     """Turn a chapter title into a URL-safe slug."""
@@ -29,12 +44,18 @@ def assemble_chapters(transcripts: list[PageTranscript]) -> list[Chapter]:
 
     for transcript in usable:
         heading = H1_PATTERN.search(transcript.markdown)
+        title = heading.group(1).strip() if heading is not None else None
+        starts_new_chapter = (
+            title is not None
+            and _is_chapter_heading(title)
+            and (current is None or current["title"] != title)
+        )
 
-        if heading is not None:
+        if starts_new_chapter:
             if current is not None:
                 chapters.append(_finish(current))
             current = {
-                "title": heading.group(1).strip(),
+                "title": title,
                 "start_page": transcript.page_number,
                 "end_page": transcript.page_number,
                 "parts": [transcript.markdown.strip()],
