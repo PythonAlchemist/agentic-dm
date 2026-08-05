@@ -1455,10 +1455,213 @@ Expected: three chunks of Curse of Strahd prose mentioning Ireena. The class is
 
 ---
 
+### Task 7: Fix chapter boundary detection
+
+**Why this exists.** The Task 6 boundary pilot (PDF pages 79–82, real API run) produced
+three chapters from four pages:
+
+```
+p79-79  N. Town of Vallaki
+p80-80  Chapter 3: The Village of Barovia
+p81-82  Chapter 3: The Village of Barovia
+```
+
+Two distinct defects, both in `assemble_chapters`:
+
+1. **Any H1 starts a chapter.** Page 79's `N. Town of Vallaki` is a location-key or map
+   label, not a chapter — a false boundary.
+2. **A repeated chapter title starts a second chapter.** Pages 80 and 81 both emitted
+   `Chapter 3: The Village of Barovia`; page 81's is almost certainly a running header the
+   transcription prompt failed to suppress. One real chapter became two.
+
+Across 509 pages this fragments the book into many spurious chapters. `Chapter.slug` is
+the retrieval metadata Task 5 writes to ChromaDB, so the corpus would be searchable but
+its chapter grouping unusable.
+
+This task fixes it in the assembler only — **no re-transcription, no API cost.** Pages are
+already cached, so only Stage 2 re-runs.
+
+**Files:**
+- Modify: `backend/canon/assembler.py`
+- Modify: `tests/test_canon/test_assembler.py`
+
+**Interfaces:**
+- Consumes: `PageTranscript`, `Chapter` (unchanged)
+- Produces: `assemble_chapters()` and `slugify()` keep their exact signatures. New module-level `CHAPTER_HEADING_PATTERN` and private `_is_chapter_heading(title: str) -> bool`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_canon/test_assembler.py`:
+
+```python
+class TestChapterBoundaryDetection:
+    def test_non_chapter_h1_does_not_start_a_chapter(self):
+        """A location key or map label is not a chapter boundary."""
+        chapters = assemble_chapters(
+            [
+                page(1, "# Chapter 2: The Lands of Barovia\n\nA."),
+                page(2, "# N. Town of Vallaki\n\nB."),
+                page(3, "C."),
+            ]
+        )
+
+        assert len(chapters) == 1
+        assert chapters[0].title == "Chapter 2: The Lands of Barovia"
+        assert chapters[0].end_page == 3
+        assert "N. Town of Vallaki" in chapters[0].markdown
+
+    def test_repeated_chapter_title_is_a_continuation(self):
+        """A running header repeating the current chapter must not split it."""
+        chapters = assemble_chapters(
+            [
+                page(80, "# Chapter 3: The Village of Barovia\n\nA."),
+                page(81, "# Chapter 3: The Village of Barovia\n\nB."),
+                page(82, "C."),
+            ]
+        )
+
+        assert len(chapters) == 1
+        assert chapters[0].start_page == 80
+        assert chapters[0].end_page == 82
+
+    def test_different_consecutive_chapters_still_split(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Chapter 3: The Village of Barovia\n\nA."),
+                page(2, "# Chapter 4: Castle Ravenloft\n\nB."),
+            ]
+        )
+
+        assert [c.title for c in chapters] == [
+            "Chapter 3: The Village of Barovia",
+            "Chapter 4: Castle Ravenloft",
+        ]
+
+    def test_recognises_appendix_and_introduction(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Introduction\n\nA."),
+                page(2, "# Appendix A: Fortunes of Ravenloft\n\nB."),
+            ]
+        )
+
+        assert [c.title for c in chapters] == [
+            "Introduction",
+            "Appendix A: Fortunes of Ravenloft",
+        ]
+
+    def test_pilot_page_shape_yields_two_chapters(self):
+        """Regression against the exact shape observed in the 79-82 boundary pilot."""
+        chapters = assemble_chapters(
+            [
+                page(79, "# N. Town of Vallaki\n\nA."),
+                page(80, "# Chapter 3: The Village of Barovia\n\nB."),
+                page(81, "# Chapter 3: The Village of Barovia\n\nC."),
+                page(82, "D."),
+            ]
+        )
+
+        assert len(chapters) == 2
+        assert chapters[0].slug == "front-matter"
+        assert chapters[1].title == "Chapter 3: The Village of Barovia"
+        assert chapters[1].start_page == 80
+        assert chapters[1].end_page == 82
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `uv run pytest tests/test_canon/test_assembler.py::TestChapterBoundaryDetection -v`
+Expected: FAIL — the first test reports 2 chapters where 1 is expected, and the pilot-shape test reports 3 where 2 is expected. Capture that output; it is the evidence this task's fix is real.
+
+- [ ] **Step 3: Add the chapter-heading pattern**
+
+In `backend/canon/assembler.py`, add below the existing `H1_PATTERN`:
+
+```python
+CHAPTER_HEADING_PATTERN = re.compile(
+    r"^(?:chapter\s+\d+|appendix\s+[a-z]\b|introduction|prologue|epilogue|foreword)",
+    re.IGNORECASE,
+)
+
+
+def _is_chapter_heading(title: str) -> bool:
+    """True if an H1 names a real chapter rather than a section or map label.
+
+    Transcribed pages emit H1s for things that are not chapters — location keys,
+    area names, running headers. Only titles matching a book's chapter vocabulary
+    start a new chapter.
+    """
+    return CHAPTER_HEADING_PATTERN.match(title.strip()) is not None
+```
+
+- [ ] **Step 4: Apply the boundary rule**
+
+In `assemble_chapters`, replace the body of the per-transcript loop's heading branch. The
+existing code reads:
+
+```python
+        heading = H1_PATTERN.search(transcript.markdown)
+
+        if heading is not None:
+```
+
+Replace those two lines with:
+
+```python
+        heading = H1_PATTERN.search(transcript.markdown)
+        title = heading.group(1).strip() if heading is not None else None
+        starts_new_chapter = (
+            title is not None
+            and _is_chapter_heading(title)
+            and (current is None or current["title"] != title)
+        )
+
+        if starts_new_chapter:
+```
+
+Then inside that branch, replace `"title": heading.group(1).strip(),` with `"title": title,`.
+
+A page whose H1 is not a chapter heading, or which repeats the current chapter's title,
+now falls through to the continuation path and its markdown is appended — so no text is
+lost, it simply does not create a boundary.
+
+- [ ] **Step 5: Run the new tests**
+
+Run: `uv run pytest tests/test_canon/test_assembler.py::TestChapterBoundaryDetection -v`
+Expected: 5 passed
+
+- [ ] **Step 6: Confirm no regression in the existing assembler tests**
+
+Run: `uv run pytest tests/test_canon/test_assembler.py -v`
+Expected: 14 passed (9 existing + 5 new). All nine originals must pass unchanged. In
+particular `test_pages_before_first_heading_become_front_matter` and
+`test_duplicate_titles_get_distinct_slugs` still hold: the latter uses
+`# Areas of the Keep`, which is *not* a chapter heading — so verify that test's fixture
+still produces the two chapters it asserts, and if the new rule changes its meaning,
+report that rather than editing the test to pass.
+
+- [ ] **Step 7: Re-run the boundary pilot against cached pages (free)**
+
+Run: `uv run python -m backend.scripts.ingest_canon data/cos.pdf --pages 79-82 --skip-embed`
+Expected: `Billed this run: $0.0` (all four pages cached) and exactly two chapters, with
+`Chapter 3: The Village of Barovia` spanning p80–82.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add backend/canon/assembler.py tests/test_canon/test_assembler.py
+git commit -m "fix(canon): only real chapter headings start a new chapter"
+```
+
+---
+
 ## Verification
 
 Whole suite: `uv run pytest -q`
-Expected: 168 existing tests still pass, plus 36 new canon tests (5 + 5 + 6 + 7 + 7 + 6).
+Expected: 168 existing tests still pass, plus 47 new canon tests
+(Task 1: 5, Task 2: 5, Task 3: 9, Task 4: 14, Task 5: 7, Task 6: 7). Counts include tests
+added during review fix rounds, so they exceed the per-task figures written in the steps
+above; the step-level numbers describe the first green run, not the final state.
 
 Neo4j must be running for the pre-existing `tests/test_discord/test_combat_manager.py` suite: `docker compose up -d`.
 
@@ -1467,3 +1670,20 @@ Neo4j must be running for the pre-existing `tests/test_discord/test_combat_manag
 - **Nothing here touches the graph.** Stages 4–6 (entity extraction into Neo4j) are a separate plan. This plan's deliverable is searchable prose.
 - **The cache is load-bearing.** If transcription is re-run repeatedly during development without cache hits, the cost model in the spec no longer holds. Task 2's `test_hash_mismatch_is_a_miss` and Task 6's Step 7 both exist to protect this.
 - **Failed pages are expected** on a 509-page run. They are reported, not fatal, and a re-run retries only them.
+
+### Known follow-up: the cache ignores prompt and model changes
+
+`TranscriptCache` validates only the **image** hash. The transcription prompt and the
+model name are recorded in the sidecar but never checked, so **editing
+`TRANSCRIPTION_PROMPT` or switching models does not invalidate cached pages** — the
+improved prompt silently fails to apply to anything already transcribed.
+
+This has not bitten yet because Task 7 deliberately fixes chapter detection in the
+assembler rather than the prompt, precisely so cached pages stay valid. But it is a trap
+for the next person who tries to improve transcription quality: they will edit the prompt,
+re-run, see no change, and have no error to explain it.
+
+The fix is small — hash `TRANSCRIPTION_PROMPT`, store it alongside `model` in the sidecar,
+and treat a mismatch of either as a cache miss in `TranscriptCache.get()`. It costs a full
+re-transcription (~$6.43) the first time it lands, which is why it is not bundled into
+Task 7. Worth doing before any prompt tuning, and worth *not* doing before the full run.
