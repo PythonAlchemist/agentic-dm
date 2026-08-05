@@ -11,10 +11,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
-from backend.canon.ingest import ingest_chapters
+from backend.canon.ingest import clear_book_chunks, ingest_chapters
 from backend.canon.page_extractor import PageExtractor
 from backend.canon.transcriber import PageTranscriber
 from backend.core.config import settings
+from backend.ingestion.embeddings import EmbeddingPipeline
 
 # gpt-4o rates, USD per 1M tokens
 INPUT_RATE = 2.50
@@ -106,7 +107,11 @@ async def run(
 
         stored: list[str] = []
         if not skip_embed:
-            stored = await ingest_chapters(chapters, book_slug=book_slug)
+            pipeline = EmbeddingPipeline()
+            removed = await clear_book_chunks(book_slug, pipeline=pipeline)
+            if removed:
+                print(f"Cleared {removed} stale chunks for {book_slug}")
+            stored = await ingest_chapters(chapters, book_slug=book_slug, pipeline=pipeline)
             print(f"Embedded {len(stored)} chunks into ChromaDB")
 
         return {

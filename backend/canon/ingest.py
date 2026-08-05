@@ -39,6 +39,24 @@ def chapter_to_chunks(
     return chunks
 
 
+async def clear_book_chunks(
+    book_slug: str,
+    pipeline: EmbeddingPipeline | None = None,
+) -> int:
+    """Delete every stored chunk for a book. Returns how many were removed.
+
+    Chunk IDs encode page and chunk index, both of which shift when chapter
+    grouping changes. Without clearing first, a re-run upserts a new set beside
+    the stale one and the collection holds two contradictory versions of the book.
+    """
+    pipeline = pipeline or EmbeddingPipeline()
+    existing = pipeline.collection.get(where={"source": book_slug})
+    ids = existing.get("ids", [])
+    if ids:
+        pipeline.collection.delete(ids=ids)
+    return len(ids)
+
+
 async def ingest_chapters(
     chapters: list[Chapter],
     book_slug: str,

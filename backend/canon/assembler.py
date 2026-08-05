@@ -6,20 +6,24 @@ from backend.canon.models import Chapter, PageTranscript
 
 H1_PATTERN = re.compile(r"^#\s+(?!#)(.+?)\s*$", re.MULTILINE)
 
-CHAPTER_HEADING_PATTERN = re.compile(
-    r"^(?:chapter\s+\d+|appendix\s+[a-z]\b|introduction|prologue|epilogue|foreword)",
+CHAPTER_KEY_PATTERN = re.compile(
+    r"^(chapter\s+\d+|appendix\s+[a-z]\b|introduction|prologue|epilogue|foreword)",
     re.IGNORECASE,
 )
 
 
-def _is_chapter_heading(title: str) -> bool:
-    """True if an H1 names a real chapter rather than a section or map label.
+def _chapter_key(title: str) -> str | None:
+    """Normalized identity of the chapter a heading names, or None if not a chapter.
 
-    Transcribed pages emit H1s for things that are not chapters — location keys,
-    area names, running headers. Only titles matching a book's chapter vocabulary
-    start a new chapter.
+    The same chapter renders differently in body headings and running headers —
+    "Chapter 4: Castle Ravenloft" versus "Chapter 4 | Castle Ravenloft" — and
+    apostrophes vary between straight and curly. Reducing both to "chapter 4"
+    makes those the same chapter rather than two.
     """
-    return CHAPTER_HEADING_PATTERN.match(title.strip()) is not None
+    match = CHAPTER_KEY_PATTERN.match(title.strip())
+    if match is None:
+        return None
+    return re.sub(r"\s+", " ", match.group(1).strip().lower())
 
 
 def slugify(title: str) -> str:
@@ -45,10 +49,9 @@ def assemble_chapters(transcripts: list[PageTranscript]) -> list[Chapter]:
     for transcript in usable:
         heading = H1_PATTERN.search(transcript.markdown)
         title = heading.group(1).strip() if heading is not None else None
-        starts_new_chapter = (
-            title is not None
-            and _is_chapter_heading(title)
-            and (current is None or current["title"] != title)
+        key = _chapter_key(title) if title is not None else None
+        starts_new_chapter = key is not None and (
+            current is None or current.get("key") != key
         )
 
         if starts_new_chapter:
@@ -56,6 +59,7 @@ def assemble_chapters(transcripts: list[PageTranscript]) -> list[Chapter]:
                 chapters.append(_finish(current))
             current = {
                 "title": title,
+                "key": key,
                 "start_page": transcript.page_number,
                 "end_page": transcript.page_number,
                 "parts": [transcript.markdown.strip()],
@@ -65,6 +69,7 @@ def assemble_chapters(transcripts: list[PageTranscript]) -> list[Chapter]:
         if current is None:
             current = {
                 "title": "Front Matter",
+                "key": None,
                 "start_page": transcript.page_number,
                 "end_page": transcript.page_number,
                 "parts": [transcript.markdown.strip()],

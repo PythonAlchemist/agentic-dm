@@ -188,3 +188,60 @@ class TestChapterBoundaryDetection:
         assert chapters[1].title == "Chapter 3: The Village of Barovia"
         assert chapters[1].start_page == 80
         assert chapters[1].end_page == 82
+
+
+class TestChapterIdentity:
+    def test_separator_variants_are_the_same_chapter(self):
+        """Body headings use a colon; running headers use a pipe."""
+        chapters = assemble_chapters(
+            [
+                page(96, "# Chapter 4: Castle Ravenloft\n\nA."),
+                page(138, "# Chapter 4 | Castle Ravenloft\n\nB."),
+                page(170, "# Chapter 4: Castle Ravenloft\n\nC."),
+            ]
+        )
+
+        assert len(chapters) == 1
+        assert chapters[0].start_page == 96
+        assert chapters[0].end_page == 170
+
+    def test_apostrophe_variants_are_the_same_chapter(self):
+        chapters = assemble_chapters(
+            [
+                page(329, "# Chapter 11: Van Richten’s Tower\n\nA."),
+                page(330, "# Chapter 11: Van Richten's Tower\n\nB."),
+            ]
+        )
+
+        assert len(chapters) == 1
+
+    def test_first_seen_title_wins(self):
+        """The chapter opening carries the real title; running headers do not."""
+        chapters = assemble_chapters(
+            [
+                page(96, "# Chapter 4: Castle Ravenloft\n\nA."),
+                page(138, "# Chapter 4 | Castle Ravenloft\n\nB."),
+            ]
+        )
+
+        assert chapters[0].title == "Chapter 4: Castle Ravenloft"
+
+    def test_different_chapter_numbers_still_split(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Chapter 4 | Castle Ravenloft\n\nA."),
+                page(2, "# Chapter 5 | The Town of Vallaki\n\nB."),
+            ]
+        )
+
+        assert len(chapters) == 2
+
+    def test_appendix_letters_are_distinct_chapters(self):
+        chapters = assemble_chapters(
+            [
+                page(1, "# Appendix A: Character Options\n\nA."),
+                page(2, "# Appendix B: Monsters\n\nB."),
+            ]
+        )
+
+        assert len(chapters) == 2

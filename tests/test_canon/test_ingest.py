@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.canon.ingest import chapter_to_chunks, ingest_chapters
+from backend.canon.ingest import chapter_to_chunks, clear_book_chunks, ingest_chapters
 from backend.canon.models import Chapter
 
 
@@ -72,3 +72,32 @@ class TestIngestChapters:
 
         assert ids == []
         pipeline.embed_and_store_batch.assert_not_awaited()
+
+
+class TestClearBookChunks:
+    @pytest.mark.asyncio
+    async def test_deletes_existing_chunks_and_returns_count(self):
+        pipeline = MagicMock()
+        pipeline.collection.get = MagicMock(
+            return_value={"ids": ["cos_p1_c0", "cos_p1_c1"]}
+        )
+        pipeline.collection.delete = MagicMock()
+
+        removed = await clear_book_chunks("cos", pipeline=pipeline)
+
+        assert removed == 2
+        pipeline.collection.get.assert_called_once_with(where={"source": "cos"})
+        pipeline.collection.delete.assert_called_once_with(
+            ids=["cos_p1_c0", "cos_p1_c1"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_delete_call_when_nothing_stored(self):
+        pipeline = MagicMock()
+        pipeline.collection.get = MagicMock(return_value={"ids": []})
+        pipeline.collection.delete = MagicMock()
+
+        removed = await clear_book_chunks("cos", pipeline=pipeline)
+
+        assert removed == 0
+        pipeline.collection.delete.assert_not_called()
