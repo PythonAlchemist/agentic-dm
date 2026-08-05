@@ -108,6 +108,59 @@ class TestPageTranscriber:
         assert [r.status for r in results] == ["ok", "failed", "ok"]
 
     @pytest.mark.asyncio
+    async def test_empty_choices_yields_failed_not_raised(self, tmp_path):
+        response = MagicMock()
+        response.choices = []
+        response.usage = MagicMock(prompt_tokens=10, completion_tokens=0)
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=response)
+        transcriber = PageTranscriber(TranscriptCache(tmp_path), client=client)
+
+        result = await transcriber.transcribe_page(make_page())
+
+        assert result.status == "failed"
+        assert result.markdown == ""
+        assert result.error is not None
+
+    @pytest.mark.asyncio
+    async def test_usage_none_yields_failed_not_raised(self, tmp_path):
+        message = MagicMock()
+        message.content = "some text"
+        choice = MagicMock()
+        choice.message = message
+        response = MagicMock()
+        response.choices = [choice]
+        response.usage = None
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(return_value=response)
+        transcriber = PageTranscriber(TranscriptCache(tmp_path), client=client)
+
+        result = await transcriber.transcribe_page(make_page())
+
+        assert result.status == "failed"
+        assert result.markdown == ""
+        assert result.error is not None
+
+    @pytest.mark.asyncio
+    async def test_batch_with_malformed_response_returns_one_transcript_per_page(
+        self, tmp_path
+    ):
+        ok = make_client().chat.completions.create.return_value
+        malformed = MagicMock()
+        malformed.choices = []
+        malformed.usage = MagicMock(prompt_tokens=10, completion_tokens=0)
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=[ok, malformed, ok])
+        transcriber = PageTranscriber(TranscriptCache(tmp_path), client=client)
+
+        results = await transcriber.transcribe_pages(
+            [make_page(1, "a" * 64), make_page(2, "b" * 64), make_page(3, "c" * 64)]
+        )
+
+        assert [r.page_number for r in results] == [1, 2, 3]
+        assert [r.status for r in results] == ["ok", "failed", "ok"]
+
+    @pytest.mark.asyncio
     async def test_sends_image_as_data_url(self, tmp_path):
         client = make_client()
         await PageTranscriber(TranscriptCache(tmp_path), client=client).transcribe_page(

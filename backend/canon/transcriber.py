@@ -67,6 +67,15 @@ class PageTranscriber:
                         }
                     ],
                 )
+            transcript = PageTranscript(
+                page_number=page.page_number,
+                markdown=(response.choices[0].message.content or "").strip(),
+                image_sha256=page.sha256,
+                model=self.model,
+                status="ok",
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens,
+            )
         except Exception as exc:  # noqa: BLE001 - one page must not abort the run
             logger.warning("Page %s transcription failed: %s", page.page_number, exc)
             return PageTranscript(
@@ -78,22 +87,34 @@ class PageTranscriber:
                 error=str(exc),
             )
 
-        transcript = PageTranscript(
-            page_number=page.page_number,
-            markdown=(response.choices[0].message.content or "").strip(),
-            image_sha256=page.sha256,
-            model=self.model,
-            status="ok",
-            input_tokens=response.usage.prompt_tokens,
-            output_tokens=response.usage.completion_tokens,
-        )
         self.cache.put(transcript)
         return transcript
 
     async def transcribe_pages(self, pages: Iterable[PageImage]) -> list[PageTranscript]:
         """Transcribe many pages concurrently, ordered by page number."""
-        results = await asyncio.gather(*(self.transcribe_page(p) for p in pages))
-        return sorted(results, key=lambda t: t.page_number)
+        pages = list(pages)
+        results = await asyncio.gather(
+            *(self.transcribe_page(p) for p in pages), return_exceptions=True
+        )
+
+        transcripts: list[PageTranscript] = []
+        for page, result in zip(pages, results, strict=True):
+            if isinstance(result, BaseException):
+                logger.warning("Page %s transcription failed: %s", page.page_number, result)
+                transcripts.append(
+                    PageTranscript(
+                        page_number=page.page_number,
+                        markdown="",
+                        image_sha256=page.sha256,
+                        model=self.model,
+                        status="failed",
+                        error=str(result),
+                    )
+                )
+            else:
+                transcripts.append(result)
+
+        return sorted(transcripts, key=lambda t: t.page_number)
 
     @staticmethod
     def _data_url(page: PageImage) -> str:
