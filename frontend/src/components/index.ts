@@ -2,6 +2,7 @@ export { ChatMessage } from './ChatMessage';
 export { ChatInput } from './ChatInput';
 export { ChatPanel } from './ChatPanel';
 export { Sidebar } from './Sidebar';
+export { CampaignLanding } from './CampaignLanding';
 export { CampaignDashboard } from './CampaignDashboard';
 export { EntityDetail } from './EntityDetail';
 export { KnowledgeGraph } from './KnowledgeGraph';

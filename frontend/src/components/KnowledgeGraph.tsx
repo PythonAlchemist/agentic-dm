@@ -21,6 +21,7 @@ interface LinkObject {
 interface Props {
   onClose: () => void;
   onSelectEntity: (entity: Entity) => void;
+  campaignId?: string;
 }
 
 interface GraphNode extends NodeObject {
@@ -84,7 +85,7 @@ const ENTITY_TYPES = [
   { value: 'SESSION', label: 'Sessions' },
 ];
 
-export function KnowledgeGraph({ onClose, onSelectEntity }: Props) {
+export function KnowledgeGraph({ onClose, onSelectEntity, campaignId }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -122,7 +123,7 @@ export function KnowledgeGraph({ onClose, onSelectEntity }: Props) {
     setError(null);
     try {
       const types = selectedType ? [selectedType] : undefined;
-      const result = await campaignAPI.getGraph(types, 200);
+      const result = await campaignAPI.getGraph(types, 200, campaignId);
 
       // Transform nodes with colors and sizes
       const nodes: GraphNode[] = result.nodes.map((node) => ({
@@ -145,7 +146,7 @@ export function KnowledgeGraph({ onClose, onSelectEntity }: Props) {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedType]);
+  }, [selectedType, campaignId]);
 
   useEffect(() => {
     loadGraph();

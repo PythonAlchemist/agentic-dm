@@ -14,6 +14,7 @@ import type {
   PCCreate,
   Campaign,
   CampaignCreate,
+  CampaignUpdate,
   Session,
   SessionCreate,
   SessionAttendance,
@@ -23,6 +24,8 @@ import type {
   AudioJobStatus,
   AudioJobListItem,
   SpeakerMappingEntry,
+  TranscriptHistoryItem,
+  TranscriptDetail,
 } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
@@ -77,9 +80,6 @@ export const chatAPI = {
 
   clearHistory: (sessionId: string): Promise<{ success: boolean }> =>
     fetchAPI(`/chat/sessions/${sessionId}/clear`, { method: 'POST' }),
-
-  changeMode: (sessionId: string, mode: string): Promise<SessionInfo> =>
-    fetchAPI(`/chat/sessions/${sessionId}/mode?mode=${mode}`, { method: 'POST' }),
 };
 
 // Tools API
@@ -117,18 +117,20 @@ export const toolsAPI = {
 export const campaignAPI = {
   listEntities: (
     entityType?: string,
-    limit = 50
+    limit = 50,
+    campaignId?: string,
   ): Promise<{ entities: Entity[]; total: number }> => {
     const params = new URLSearchParams();
     if (entityType) params.set('entity_type', entityType);
     params.set('limit', String(limit));
+    if (campaignId) params.set('campaign_id', campaignId);
     return fetchAPI(`/campaign/entities?${params}`);
   },
 
   getEntity: (entityId: string): Promise<Entity> =>
     fetchAPI(`/campaign/entities/${entityId}`),
 
-  createEntity: (entity: EntityCreate): Promise<Entity> =>
+  createEntity: (entity: EntityCreate & { campaign_id?: string }): Promise<Entity> =>
     fetchAPI('/campaign/entities', {
       method: 'POST',
       body: JSON.stringify(entity),
@@ -143,16 +145,19 @@ export const campaignAPI = {
   search: (
     query: string,
     entityTypes?: string[],
-    limit = 10
+    limit = 10,
+    campaignId?: string,
   ): Promise<{ query: string; results: Entity[] }> => {
     const params = new URLSearchParams({ q: query, limit: String(limit) });
     if (entityTypes?.length) params.set('entity_types', entityTypes.join(','));
+    if (campaignId) params.set('campaign_id', campaignId);
     return fetchAPI(`/campaign/search?${params}`);
   },
 
   getGraph: (
     entityTypes?: string[],
-    limit = 200
+    limit = 200,
+    campaignId?: string,
   ): Promise<{
     nodes: Entity[];
     links: Array<{ source: string; target: string; type: string }>;
@@ -161,6 +166,7 @@ export const campaignAPI = {
   }> => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (entityTypes?.length) params.set('entity_types', entityTypes.join(','));
+    if (campaignId) params.set('campaign_id', campaignId);
     return fetchAPI(`/campaign/graph?${params}`);
   },
 };
@@ -208,9 +214,21 @@ export const playerAPI = {
 
 // Campaign management API (extends existing campaignAPI)
 export const campaignManagementAPI = {
+  list: (): Promise<Campaign[]> =>
+    fetchAPI('/campaigns'),
+
+  get: (campaignId: string): Promise<Campaign> =>
+    fetchAPI(`/campaigns/${campaignId}`),
+
   create: (data: CampaignCreate): Promise<Campaign> =>
     fetchAPI('/campaigns', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (campaignId: string, data: CampaignUpdate): Promise<Campaign> =>
+    fetchAPI(`/campaigns/${campaignId}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }),
 
@@ -651,8 +669,22 @@ export const audioAPI = {
       }),
     }),
 
+  confirmEntities: (jobId: string): Promise<{
+    job_id: string;
+    phase: string;
+    entities_created: number;
+    relationships_created: number;
+  }> =>
+    fetchAPI(`/audio/${jobId}/confirm`, { method: 'POST' }),
+
   listJobs: (): Promise<{ jobs: AudioJobListItem[] }> =>
     fetchAPI('/audio/jobs'),
+
+  listTranscripts: (): Promise<{ transcripts: TranscriptHistoryItem[] }> =>
+    fetchAPI('/audio/transcripts'),
+
+  getTranscript: (jobId: string): Promise<TranscriptDetail> =>
+    fetchAPI(`/audio/transcripts/${jobId}`),
 };
 
 // Health check

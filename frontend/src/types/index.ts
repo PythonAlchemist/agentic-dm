@@ -37,7 +37,6 @@ export interface ToolResult {
 export interface ChatRequest {
   message: string;
   session_id?: string;
-  mode?: 'assistant' | 'autonomous';
   campaign_id?: string;
   use_rag?: boolean;
 }
@@ -49,12 +48,10 @@ export interface ChatResponse {
   sources: Source[];
   tool_results: ToolResult[];
   suggestions: string[];
-  mode: string;
 }
 
 export interface SessionInfo {
   session_id: string;
-  mode: string;
   message_count: number;
   campaign_id?: string;
 }
@@ -167,15 +164,56 @@ export interface PCCreate {
 export interface Campaign {
   id: string;
   name: string;
+  entity_type?: string;
+  // World & Setting
   setting?: string;
+  world_description?: string;
+  theme?: string;
   description?: string;
+  // Rules & Mechanics
+  rule_system?: string;
+  level_range?: string;
+  house_rules?: string;
+  allowed_sources?: string;
+  // Story Context
+  premise?: string;
+  current_story_arc?: string;
+  dm_notes?: string;
+  // Meta
+  start_date?: string;
   status?: string;
+  player_count?: number;
 }
 
 export interface CampaignCreate {
   name: string;
   setting?: string;
+  world_description?: string;
+  theme?: string;
   description?: string;
+  rule_system?: string;
+  level_range?: string;
+  house_rules?: string;
+  allowed_sources?: string;
+  premise?: string;
+  current_story_arc?: string;
+  dm_notes?: string;
+}
+
+export interface CampaignUpdate {
+  name?: string;
+  setting?: string;
+  world_description?: string;
+  theme?: string;
+  description?: string;
+  rule_system?: string;
+  level_range?: string;
+  house_rules?: string;
+  allowed_sources?: string;
+  premise?: string;
+  current_story_arc?: string;
+  dm_notes?: string;
+  status?: string;
 }
 
 export interface Session extends Entity {
@@ -336,6 +374,7 @@ export type AudioJobPhase =
   | 'transcribing'
   | 'awaiting_mapping'
   | 'processing_transcript'
+  | 'awaiting_review'
   | 'completed'
   | 'failed';
 
@@ -353,6 +392,18 @@ export interface SpeakerMappingEntry {
   character_name?: string;
 }
 
+export interface ExtractedEntityItem {
+  name: string;
+  entity_type: string;
+  confidence: number;
+}
+
+export interface ExtractedRelationshipItem {
+  source: string;
+  target: string;
+  type: string;
+}
+
 export interface AudioTranscriptResult {
   session_id: string;
   session_number?: number;
@@ -365,6 +416,16 @@ export interface AudioTranscriptResult {
   entity_counts: Record<string, number>;
   processing_time_ms: number;
   errors: string[];
+  entities?: ExtractedEntityItem[];
+  relationships?: ExtractedRelationshipItem[];
+}
+
+export interface DiarizedSegment {
+  speaker: number;
+  text: string;
+  start: number;
+  end: number;
+  confidence: number;
 }
 
 export interface AudioJobStatus {
@@ -373,9 +434,15 @@ export interface AudioJobStatus {
   phase: AudioJobPhase;
   error?: string;
   speaker_samples?: SpeakerSample[];
+  segments?: DiarizedSegment[];
   total_duration?: number;
   segment_count?: number;
   transcript_result?: AudioTranscriptResult;
+  // Available during awaiting_review phase
+  entities?: ExtractedEntityItem[];
+  relationships?: ExtractedRelationshipItem[];
+  entity_counts?: Record<string, number>;
+  segments_processed?: number;
 }
 
 export interface AudioJobListItem {
@@ -385,12 +452,38 @@ export interface AudioJobListItem {
   error?: string;
 }
 
-// UI State types
-export type DMMode = 'assistant' | 'autonomous';
+// Transcript history types
+export interface TranscriptHistoryItem {
+  job_id: string;
+  filename: string;
+  completed_at: string;
+  session_number?: number;
+  total_duration?: number;
+  segment_count?: number;
+  entities_extracted?: number;
+}
 
+export interface TranscriptDetail {
+  job_id: string;
+  filename: string;
+  completed_at: string;
+  session_number?: number;
+  campaign_id?: string;
+  total_duration?: number;
+  segment_count?: number;
+  speaker_mappings: Array<{
+    speaker_index: number;
+    role: string;
+    player_name: string;
+    character_name?: string;
+  }>;
+  transcript_text: string;
+  transcript_result?: AudioTranscriptResult;
+}
+
+// UI State types
 export interface AppState {
   sessionId: string | null;
-  mode: DMMode;
   campaignId: string | null;
   messages: ChatMessage[];
   isLoading: boolean;

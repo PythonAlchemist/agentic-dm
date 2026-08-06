@@ -1,8 +1,9 @@
-import type { DMMode } from '../types';
+import type { Campaign } from '../types';
 
 interface Props {
-  mode: DMMode;
-  onModeChange: (mode: DMMode) => void;
+  activeCampaign: Campaign;
+  onDeselectCampaign: () => void;
+  onEditCampaign: () => void;
   sessionId: string | null;
   onNewSession: () => void;
   onClearHistory: () => void;
@@ -17,8 +18,9 @@ interface Props {
 }
 
 export function Sidebar({
-  mode,
-  onModeChange,
+  activeCampaign,
+  onDeselectCampaign,
+  onEditCampaign,
   sessionId,
   onNewSession,
   onClearHistory,
@@ -36,41 +38,41 @@ export function Sidebar({
       {/* Logo */}
       <div className="p-4 border-b border-gray-700">
         <h1 className="text-xl font-bold text-white flex items-center gap-2">
-          🎲 DM Assistant
+          DM Assistant
         </h1>
         <p className="text-xs text-gray-400 mt-1">AI-Powered D&D 5e</p>
       </div>
 
-      {/* Mode Selector */}
+      {/* Campaign Info */}
       <div className="p-4 border-b border-gray-700">
-        <label className="text-sm text-gray-400 block mb-2">Mode</label>
-        <div className="flex gap-2">
+        <button
+          onClick={onDeselectCampaign}
+          className="text-sm text-gray-400 hover:text-white transition-colors mb-2 flex items-center gap-1"
+        >
+          &larr; All Campaigns
+        </button>
+        <div className="flex items-start justify-between gap-1">
+          <h2 className="font-semibold text-white leading-tight">{activeCampaign.name}</h2>
           <button
-            onClick={() => onModeChange('assistant')}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-              mode === 'assistant'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
+            onClick={onEditCampaign}
+            className="px-1.5 py-1 text-gray-400 hover:text-white transition-colors shrink-0"
+            title="Edit campaign"
           >
-            Assistant
-          </button>
-          <button
-            onClick={() => onModeChange('autonomous')}
-            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-              mode === 'autonomous'
-                ? 'bg-purple-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            DM Mode
+            &#9998;
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          {mode === 'assistant'
-            ? 'Helps you run your game with rules lookups and suggestions.'
-            : 'Takes the DM seat and runs the game for you.'}
-        </p>
+        {(activeCampaign.setting || activeCampaign.theme) && (
+          <p className="text-xs text-gray-500 mt-1">
+            {activeCampaign.setting}
+            {activeCampaign.setting && activeCampaign.theme && ' · '}
+            {activeCampaign.theme}
+          </p>
+        )}
+        {activeCampaign.status && activeCampaign.status !== 'active' && (
+          <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full bg-yellow-600/20 text-yellow-400">
+            {activeCampaign.status}
+          </span>
+        )}
       </div>
 
       {/* Quick Actions */}

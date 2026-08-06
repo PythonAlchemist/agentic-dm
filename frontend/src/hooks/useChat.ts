@@ -1,11 +1,10 @@
 import { useState, useCallback } from 'react';
 import { chatAPI } from '../api/client';
-import type { ChatMessage, DMMode } from '../types';
+import type { ChatMessage } from '../types';
 
-export function useChat() {
+export function useChat(campaignId?: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [mode, setMode] = useState<DMMode>('assistant');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +26,7 @@ export function useChat() {
         const response = await chatAPI.send({
           message: content,
           session_id: sessionId || undefined,
-          mode,
+          campaign_id: campaignId || undefined,
           use_rag: true,
         });
 
@@ -54,7 +53,7 @@ export function useChat() {
         // Add error message to chat
         const errorChatMessage: ChatMessage = {
           role: 'assistant',
-          content: `⚠️ Error: ${errorMessage}`,
+          content: `Error: ${errorMessage}`,
           timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, errorChatMessage]);
@@ -62,23 +61,7 @@ export function useChat() {
         setIsLoading(false);
       }
     },
-    [sessionId, mode]
-  );
-
-  const changeMode = useCallback(
-    async (newMode: DMMode) => {
-      setMode(newMode);
-
-      // If we have an active session, update it on the server
-      if (sessionId) {
-        try {
-          await chatAPI.changeMode(sessionId, newMode);
-        } catch (err) {
-          console.error('Failed to change mode on server:', err);
-        }
-      }
-    },
-    [sessionId]
+    [sessionId, campaignId]
   );
 
   const newSession = useCallback(() => {
@@ -110,11 +93,9 @@ export function useChat() {
   return {
     messages,
     sessionId,
-    mode,
     isLoading,
     error,
     sendMessage,
-    changeMode,
     newSession,
     clearHistory,
     addMessage,
