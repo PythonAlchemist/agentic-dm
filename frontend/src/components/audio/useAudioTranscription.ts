@@ -4,7 +4,7 @@ import type { AudioJobStatus, SpeakerMappingEntry } from './types';
 
 const POLL_INTERVAL = 2000;
 
-type Phase = 'idle' | 'uploading' | 'polling' | 'mapping' | 'processing' | 'completed' | 'error';
+type Phase = 'idle' | 'uploading' | 'polling' | 'mapping' | 'processing' | 'review' | 'completed' | 'error';
 
 export interface AudioTranscriptionState {
   phase: Phase;
@@ -13,6 +13,7 @@ export interface AudioTranscriptionState {
   error: string | null;
   upload: (file: File, sessionNumber?: number) => Promise<void>;
   submitMappings: (mappings: SpeakerMappingEntry[], sessionNumber?: number, campaignId?: string) => Promise<void>;
+  confirmEntities: () => Promise<void>;
   reset: () => void;
 }
 
@@ -40,6 +41,9 @@ export function useAudioTranscription(): AudioTranscriptionState {
         if (status.phase === 'awaiting_mapping') {
           stopPolling();
           setPhase('mapping');
+        } else if (status.phase === 'awaiting_review') {
+          stopPolling();
+          setPhase('review');
         } else if (status.phase === 'completed') {
           stopPolling();
           setPhase('completed');
@@ -94,6 +98,19 @@ export function useAudioTranscription(): AudioTranscriptionState {
     }
   }, [jobId, startPolling]);
 
+  const confirmEntities = useCallback(async () => {
+    if (!jobId) return;
+
+    try {
+      await audioAPI.confirmEntities(jobId);
+      // Poll once more to get the completed status with transcript_result
+      startPolling(jobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to confirm entities');
+      setPhase('error');
+    }
+  }, [jobId, startPolling]);
+
   const reset = useCallback(() => {
     stopPolling();
     setPhase('idle');
@@ -102,5 +119,5 @@ export function useAudioTranscription(): AudioTranscriptionState {
     setError(null);
   }, [stopPolling]);
 
-  return { phase, jobId, jobStatus, error, upload, submitMappings, reset };
+  return { phase, jobId, jobStatus, error, upload, submitMappings, confirmEntities, reset };
 }

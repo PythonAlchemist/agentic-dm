@@ -1,9 +1,12 @@
 """LLM-based entity and relationship extraction."""
 
 import json
+import logging
 from typing import Optional
 
 from openai import AsyncOpenAI
+
+logger = logging.getLogger(__name__)
 
 from backend.core.config import settings
 from backend.graph.schema import EntityType, RelationshipType
@@ -18,29 +21,45 @@ from backend.ner.models import (
 EXTRACTION_SYSTEM_PROMPT = """You are a D&D entity extractor. Extract named entities and relationships from D&D session transcripts.
 
 Entity types to extract:
-- PC: Player characters (the party members)
-- NPC: Non-player characters
+- PC: Player characters (the party members being played by people at the table)
+- NPC: Non-player characters (characters controlled by the DM)
 - LOCATION: Places (cities, dungeons, rooms, regions)
 - ITEM: Objects, weapons, artifacts, treasure
-- MONSTER: Creatures and enemies
+- MONSTER: Creatures and enemies encountered in combat
 - FACTION: Organizations and groups
 - SPELL: Named spells that are cast
 - QUEST: Quest names or objectives mentioned
+- CLASS: Character classes (Fighter, Bard, Druid, Ranger, etc.)
+- RACE: Character races/species (Gnome, Elf, Half-Elf, Human, Goliath, etc.)
+
+IMPORTANT rules:
+- Races and classes are their OWN entities (type RACE or CLASS), NOT characters. "Half-Elf" is a RACE entity, "Ranger" is a CLASS entity. Then link them to characters via HAS_RACE / HAS_CLASS relationships.
+- Deduplicate: use ONE canonical name per entity. If someone is called both "Vex" and "Vex'ahlia", pick the full name "Vex'ahlia" as canonical_name. Do NOT create separate entities for nicknames/shortened names.
+- If a known entity is mentioned by a nickname or alias, use the known entity's exact name — do not create a new entity.
+- Player names (the real people) should use PLAYS_AS relationships to link to their PC entities.
 
 Relationship types to extract:
+- HAS_CLASS: Character -> CLASS entity (e.g. Scanlan -> Bard)
+- HAS_RACE: Character -> RACE entity (e.g. Keyleth -> Half-Elf)
 - LOCATED_IN: Entity is in a location
 - KNOWS: Character knows another character
 - ALLIED_WITH: Characters/factions are allies
 - HOSTILE_TO: Characters/factions are enemies
 - OWNS: Character owns an item
+- WIELDS: Character wields or is equipped with a weapon/item
 - KILLED: Entity killed another entity
 - MEMBER_OF: Character is member of faction
+- SERVES: Character serves another character or faction
+- RELATED_TO: Characters are family/blood relations (specify in evidence)
+- TRAVELED_TO: Character traveled to or visited a location
+- PLAYS_AS: Real player -> their PC (e.g. "Laura" PLAYS_AS "Vex'ahlia")
+- PARTICIPATED_IN: Entity participated in an event
 
 Return valid JSON only. Be conservative - only extract entities you're confident about."""
 
 EXTRACTION_USER_PROMPT = """Extract D&D entities and relationships from this transcript segment.
 
-Known campaign entities (use these exact names if mentioned):
+Known campaign entities (use these exact names if referenced, do NOT create duplicates):
 {known_entities}
 
 Transcript:
@@ -51,14 +70,18 @@ Transcript:
 Return JSON with this exact format:
 {{
   "entities": [
-    {{"text": "exact text found", "type": "ENTITY_TYPE", "canonical_name": "standardized name"}}
+    {{"text": "exact text found", "type": "ENTITY_TYPE", "canonical_name": "full standardized name"}}
   ],
   "relationships": [
-    {{"source": "entity name", "target": "entity name", "type": "RELATIONSHIP_TYPE", "evidence": "quote from text"}}
+    {{"source": "canonical entity name", "target": "canonical entity name", "type": "RELATIONSHIP_TYPE", "evidence": "brief quote from text"}}
   ]
 }}
 
-Only include entities and relationships you find in the text. Do not invent or assume."""
+Remember:
+- Races/classes are separate entities (type RACE/CLASS), linked to characters via HAS_RACE/HAS_CLASS
+- Use full canonical names, merge nicknames (Vex -> Vex'ahlia, Pike -> Pike Trickfoot)
+- Match known entities exactly, don't create duplicates
+- Only include entities and relationships you find in the text"""
 
 
 class LLMExtractor:
@@ -182,7 +205,8 @@ class LLMExtractor:
                 try:
                     rel_type = RelationshipType(type_str)
                 except ValueError:
-                    continue  # Skip unknown types
+                    logger.warning("Skipping unknown relationship type: %s (%s -> %s)", type_str, raw.get("source"), raw.get("target"))
+                    continue
 
                 source = raw.get("source", "")
                 target = raw.get("target", "")

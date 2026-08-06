@@ -92,6 +92,9 @@ class EntityResolver:
     ) -> float:
         """Compute similarity between two entities.
 
+        Uses both full string similarity and partial matching to catch
+        cases like "Vex" vs "Vex'ahlia" where one name is a substring.
+
         Args:
             entity1: First entity.
             entity2: Second entity.
@@ -99,12 +102,19 @@ class EntityResolver:
         Returns:
             Similarity score (0.0-1.0).
         """
-        # Use fuzzy string matching on normalized names
-        score = fuzz.ratio(
-            entity1.normalized_name.lower(),
-            entity2.normalized_name.lower(),
-        )
-        return score / 100.0
+        name1 = entity1.normalized_name.lower()
+        name2 = entity2.normalized_name.lower()
+
+        # Exact substring check — if one name is contained in the other
+        if name1 in name2 or name2 in name1:
+            shorter = min(len(name1), len(name2))
+            if shorter >= 3:  # Avoid matching trivially short strings
+                return 0.95
+
+        # Use best of full ratio and partial ratio for fuzzy matching
+        full_score = fuzz.ratio(name1, name2) / 100.0
+        partial_score = fuzz.partial_ratio(name1, name2) / 100.0
+        return max(full_score, partial_score * 0.95)
 
     def _merge_cluster(self, cluster: list[ExtractedEntity]) -> ExtractedEntity:
         """Merge a cluster of similar entities into one.

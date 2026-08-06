@@ -13,6 +13,7 @@ class AudioJobPhase(str, Enum):
     TRANSCRIBING = "transcribing"
     AWAITING_MAPPING = "awaiting_mapping"
     PROCESSING_TRANSCRIPT = "processing_transcript"
+    AWAITING_REVIEW = "awaiting_review"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -73,6 +74,21 @@ class AudioJob(BaseModel):
 
     # Set after transcription completes
     diarized_transcript: Optional[DiarizedTranscript] = None
+
+    # Pending review data (set after extraction, before graph commit)
+    pending_entities: Optional[list[dict]] = None  # Display-friendly summaries
+    pending_relationships: Optional[list[dict]] = None  # Display-friendly summaries
+    pending_raw_entities: Optional[list[dict]] = None  # Full serialized ExtractedEntity
+    pending_raw_relationships: Optional[list[dict]] = None  # Full serialized ExtractedRelationship
+    pending_transcript_text: Optional[str] = None
+    pending_speaker_defs: Optional[list[dict]] = None
+    pending_session_number: Optional[int] = None
+    pending_campaign_id: Optional[str] = None
+    pending_session_id: Optional[str] = None
+    pending_entity_counts: Optional[dict] = None
+    pending_processing_time_ms: Optional[float] = None
+    pending_segments_processed: Optional[int] = None
+    pending_errors: Optional[list[str]] = None
 
     # Set after processing completes
     transcript_result: Optional[dict] = None

@@ -10,6 +10,7 @@ const PHASE_CONFIG: Record<string, { label: string; progress: number; color: str
   transcribing: { label: 'Transcribing with Deepgram...', progress: 45, color: 'bg-blue-500' },
   awaiting_mapping: { label: 'Ready for speaker mapping', progress: 60, color: 'bg-yellow-500' },
   processing_transcript: { label: 'Processing transcript & extracting entities...', progress: 80, color: 'bg-purple-500' },
+  awaiting_review: { label: 'Ready for review', progress: 90, color: 'bg-amber-500' },
   completed: { label: 'Complete!', progress: 100, color: 'bg-green-500' },
   failed: { label: 'Failed', progress: 100, color: 'bg-red-500' },
 };
