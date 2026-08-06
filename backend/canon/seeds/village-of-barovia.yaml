@@ -30,6 +30,12 @@ nodes:
     description: The walled town west of the village.
 
   # --- NPCs ---
+  - id: cos:npc:kolyan-indirovich
+    name: Kolyan Indirovich
+    entity_type: NPC
+    description: >-
+      The dead burgomaster. Unburied in the mansion's upper floor -- "bury my
+      father" is the plea that sets chapter 3 in motion.
   - id: cos:npc:ireena-kolyana
     name: Ireena Kolyana
     entity_type: NPC
@@ -103,6 +109,9 @@ edges:
   - {source: cos:npc:parriwimple, target: cos:location:bildraths-mercantile, type: LOCATED_IN}
 
   # Social
+  - {source: cos:npc:kolyan-indirovich, target: cos:location:burgomasters-mansion, type: LOCATED_IN}
+  - {source: cos:npc:kolyan-indirovich, target: cos:npc:ireena-kolyana, type: RELATED_TO, evidence: "adoptive father and daughter"}
+  - {source: cos:npc:kolyan-indirovich, target: cos:npc:ismark-kolyanovich, type: RELATED_TO, evidence: "father and son"}
   - {source: cos:npc:ismark-kolyanovich, target: cos:npc:ireena-kolyana, type: RELATED_TO, evidence: "adoptive siblings"}
   - {source: cos:npc:donavich, target: cos:npc:doru, type: RELATED_TO, evidence: "father and son"}
   - {source: cos:npc:bildrath-cantemir, target: cos:npc:parriwimple, type: RELATED_TO, evidence: "uncle and nephew"}

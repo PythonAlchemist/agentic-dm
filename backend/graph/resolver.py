@@ -85,39 +85,66 @@ WHERE ($entity_type IS NULL OR camp.entity_type = $entity_type)
 RETURN properties(camp) AS camp_props
 """
 
-_EDGES_CANON = """
+# Shared by _EDGES_CANON and _EDGES_CAMPAIGN, which are identical apart from their
+# MATCH/WHERE clauses -- this is what keeps them from drifting apart again now that
+# both have been touched in the same pass. _EDGES_TABLE cannot share it: Critical 2
+# requires it to return NULL for source_canon_id rather than the real canon id, so
+# forcing it into this constant would mean parameterising the RETURN clause itself.
+# That is more contortion than the three-line duplication it would save, so
+# _EDGES_TABLE keeps its own RETURN below, with a comment pointing back here.
+_EDGE_RETURN = """
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
+"""
+
+_EDGES_CANON = (
+    """
 MATCH (a:Entity {plane:'canon'})-[r]->(b:Entity)
 WHERE r.layer IS NOT NULL
   AND ($layers IS NULL OR r.layer IN $layers)
-RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
-       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
-       a.plane AS plane, properties(r) AS props
 """
+    + _EDGE_RETURN
+)
 
-_EDGES_CAMPAIGN = """
-MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(:Entity {id:$campaign_id})
+# Truth deliberately does NOT constrain the target's plane to campaign-only: a
+# campaign entity legitimately points at a canon entity it hasn't overridden (e.g.
+# a table-invented hireling located in a canon town nobody has touched). But an
+# unconstrained target also lets a campaign-plane source's edge point at ANOTHER
+# campaign's node and leak that node's id, so the target must be allowed to be
+# canon OR to belong to this same campaign -- never a bare, unscoped campaign node.
+_EDGES_CAMPAIGN = (
+    """
+MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(c:Entity {id:$campaign_id})
 MATCH (a)-[r]->(b:Entity)
 WHERE r.layer IS NOT NULL
   AND ($layers IS NULL OR r.layer IN $layers)
-RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
-       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
-       a.plane AS plane, properties(r) AS props
+  AND (b.plane = 'canon' OR (b)-[:BELONGS_TO]->(c))
 """
+    + _EDGE_RETURN
+)
 
-# Table view: BOTH endpoints must be campaign-plane AND belong to this campaign.
-# Constraining only the source (as truth does) lets a campaign-plane source's
-# edge to an un-instantiated canon target leak that canon node's id -- and node
-# ids are human-readable spoilers (e.g. "cos:location:castle-ravenloft:k37").
-# Canon must never appear in a table read, at either end of an edge. `c` is
-# bound once and both endpoints must belong to it, so this also fixes the
-# cross-campaign leak without weakening the canon-endpoint guard.
+# Table view: BOTH endpoints must be campaign-plane, belong to this campaign, AND
+# be independently revealed as of the session -- the edge's own reveal state says
+# nothing about whether either endpoint has ever been shown to the table. Node ids
+# are human-readable spoilers (e.g. "cos:location:castle-ravenloft:k37"), so an
+# unrevealed or canon endpoint leaking through an edge is as severe as an
+# unrevealed entity leaking directly. `c` is bound once and both endpoints must
+# belong to it, so this also fixes the cross-campaign leak without weakening the
+# canon-endpoint guard. source_canon_id is NULL here (not the shared _EDGE_RETURN)
+# because it is consumed only by shadow_edges, which the table path never calls,
+# and a copy-on-write node's canon_id is itself a canon id that must not reach
+# the table.
 _EDGES_TABLE = """
 MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(c:Entity {id:$campaign_id})
 MATCH (b:Entity {plane:'campaign'})-[:BELONGS_TO]->(c)
 MATCH (a)-[r]->(b)
 WHERE r.layer IS NOT NULL
   AND ($layers IS NULL OR r.layer IN $layers)
-RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+  AND r.revealed_in_session IS NOT NULL AND r.revealed_in_session <= $as_of_session
+  AND a.revealed_in_session IS NOT NULL AND a.revealed_in_session <= $as_of_session
+  AND b.revealed_in_session IS NOT NULL AND b.revealed_in_session <= $as_of_session
+RETURN a.id AS source_id, NULL AS source_canon_id,
        b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
        a.plane AS plane, properties(r) AS props
 """
@@ -155,7 +182,14 @@ class PlaneResolver:
                         "as_of_session": as_of_session,
                     },
                 )
-                return [dict(r["camp_props"]) for r in rows]
+                # A copy-on-write node's canon_id is itself a canon id -- leaking
+                # it through the table view is exactly the spoiler this view
+                # exists to prevent (Critical 2). `plane` is kept: callers and
+                # existing tests assert on it.
+                return [
+                    {k: v for k, v in dict(r["camp_props"]).items() if k != "canon_id"}
+                    for r in rows
+                ]
 
             params = {
                 "campaign_id": self.campaign_id,
@@ -184,21 +218,27 @@ class PlaneResolver:
         with neo4j_session() as session:
             if perspective == "table":
                 rows = session.run(
-                    _EDGES_TABLE, {"layers": layers, "campaign_id": self.campaign_id}
+                    _EDGES_TABLE,
+                    {
+                        "layers": layers,
+                        "campaign_id": self.campaign_id,
+                        "as_of_session": as_of_session,
+                    },
                 )
-                return [
-                    self._row_to_edge(r)
-                    for r in rows
-                    if _revealed(r["props"], as_of_session)
-                ]
+                # Reveal filtering now happens in _EDGES_TABLE itself, for both
+                # the edge and both endpoints, so the whole campaign edge set no
+                # longer has to come over the wire to be filtered in Python here.
+                return [self._row_to_edge(r) for r in rows]
 
-            # Truth deliberately does NOT constrain the target's plane: a campaign
-            # entity legitimately points at a canon entity it hasn't overridden
-            # (e.g. a table-invented hireling located in a canon town nobody has
-            # touched). That edge is true and generators need it. The asymmetry
-            # with the table branch above is the whole point -- see class docstring.
-            # Canon edges are shared across every table and must NOT be
-            # campaign-scoped; only the campaign-plane query is.
+            # Truth deliberately does NOT constrain the target's plane to
+            # campaign-only: a campaign entity legitimately points at a canon
+            # entity it hasn't overridden (e.g. a table-invented hireling located
+            # in a canon town nobody has touched). That edge is true and
+            # generators need it. The asymmetry with the table branch above is the
+            # whole point -- see class docstring. Canon edges are shared across
+            # every table and must NOT be campaign-scoped; only the
+            # campaign-plane query is (and it also scopes the target -- see
+            # _EDGES_CAMPAIGN's comment).
             canon = [
                 self._row_to_edge(r)
                 for r in session.run(_EDGES_CANON, {"layers": layers})
@@ -252,8 +292,3 @@ class PlaneResolver:
             raise ValueError("as_of_session is meaningful only for perspective='table'")
         if perspective == "table" and as_of_session is None:
             raise ValueError("perspective='table' requires as_of_session")
-
-
-def _revealed(props: dict, as_of_session: int | None) -> bool:
-    revealed = props.get("revealed_in_session")
-    return revealed is not None and revealed <= as_of_session

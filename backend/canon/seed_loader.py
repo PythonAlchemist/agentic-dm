@@ -5,11 +5,12 @@ a seed is source: it is committed, reviewed, and doubles as the golden set that
 stage 2's extractor is graded against.
 """
 
+from collections import Counter
 from pathlib import Path
 
 import yaml
 
-from backend.graph.schema import LAYER_MAP, RelationshipType
+from backend.graph.schema import LAYER_MAP, EntityType, RelationshipType
 
 SEED_DIR = Path(__file__).parent / "seeds"
 
@@ -20,12 +21,21 @@ def validate_seed(data: dict) -> list[str]:
     """Return human-readable problems with a seed document. Empty means valid."""
     problems: list[str] = []
     known_types = {r.value for r in RelationshipType}
+    known_entity_types = {t.value for t in EntityType}
     ids = {n.get("id") for n in data.get("nodes", [])}
+
+    id_counts = Counter(n.get("id") for n in data.get("nodes", []))
+    for dup_id, count in id_counts.items():
+        if dup_id is not None and count > 1:
+            problems.append(f"duplicate node id {dup_id!r} declared {count} times")
 
     for node in data.get("nodes", []):
         for field in ("id", "name", "entity_type"):
             if not node.get(field):
                 problems.append(f"node missing {field}: {node}")
+        entity_type = node.get("entity_type")
+        if entity_type is not None and entity_type not in known_entity_types:
+            problems.append(f"unknown entity_type {entity_type!r} in {node}")
 
     for e in data.get("edges", []):
         if e.get("type") not in known_types:

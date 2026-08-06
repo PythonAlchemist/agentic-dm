@@ -68,6 +68,30 @@ class TestValidation:
         )
         assert any("missing" in p for p in problems)
 
+    def test_unknown_entity_type_is_reported(self):
+        """entity_type: LOCATON (typo) must not load silently -- the seed is a
+        grading answer key, and a bad entity_type there is grade-inverting."""
+        problems = validate_seed(
+            {
+                "nodes": [{"id": "cos:loc:a", "name": "A", "entity_type": "LOCATON"}],
+                "edges": [],
+            }
+        )
+        assert any("LOCATON" in p for p in problems)
+
+    def test_duplicate_node_id_is_reported(self):
+        """A duplicated id silently MERGEs two authored nodes into one."""
+        problems = validate_seed(
+            {
+                "nodes": [
+                    {"id": "cos:npc:a", "name": "A", "entity_type": "NPC"},
+                    {"id": "cos:npc:a", "name": "A Duplicate", "entity_type": "NPC"},
+                ],
+                "edges": [],
+            }
+        )
+        assert any("cos:npc:a" in p for p in problems)
+
 
 @pytest.mark.neo4j
 class TestLoad:

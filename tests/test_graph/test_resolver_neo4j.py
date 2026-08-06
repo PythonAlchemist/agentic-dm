@@ -60,7 +60,18 @@ class TestEntityResolution:
     def test_table_view_never_returns_canon_plane(self, graph):
         seed(graph)
         result = PlaneResolver(CAMPAIGN).entities("table", as_of_session=10)
+        assert result, "fixture produced no table-view entities"
         assert all(e.get("plane") == "campaign" for e in result)
+
+    def test_table_view_entities_never_expose_canon_id(self, graph):
+        """A copy-on-write node's canon_id points at a canon id -- and a leaked id
+        is leaked content. The table view must strip it, even though truth needs
+        it (Critical 2)."""
+        seed(graph)
+        result = PlaneResolver(CAMPAIGN).entities("table", as_of_session=10)
+        ireena = next(e for e in result if e.get("id") == "pytest:npc:ireena@a")
+        assert "canon_id" not in ireena
+        assert ireena.get("plane") == "campaign"
 
     def test_table_view_respects_as_of_session(self, graph):
         seed(graph)
@@ -136,6 +147,45 @@ class TestEdgeResolution:
         ids = {row["id"] for row in result}
         assert "pytest:loc:secret-lair2" not in ids
 
+    def test_table_view_edges_never_expose_unrevealed_endpoint(self, graph):
+        """The edge itself can be revealed while an endpoint never is. Endpoint
+        reveal state must be checked independently of the edge's (Critical 1)."""
+        graph.run(
+            """
+            CREATE (c:Entity {id:$campaign, name:'Table A', entity_type:'CAMPAIGN',
+                              plane:'campaign'})
+            CREATE (a:Entity {id:'pytest:npc:ireena4', name:'Ireena',
+                              entity_type:'NPC', plane:'campaign',
+                              revealed_in_session:1})
+            CREATE (secret:Entity {id:'pytest:npc:strahds-secret-consort',
+                                   name:'Strahds Secret Consort', entity_type:'NPC',
+                                   plane:'campaign'})
+            CREATE (a)-[:BELONGS_TO]->(c)
+            CREATE (secret)-[:BELONGS_TO]->(c)
+            CREATE (a)-[:KNOWS {layer:'social', revealed_in_session:1}]->(secret)
+            """,
+            {"campaign": CAMPAIGN},
+        ).consume()
+        result = PlaneResolver(CAMPAIGN).edges("table", as_of_session=1)
+        touched_ids = {e["source_id"] for e in result} | {e["target_id"] for e in result}
+        assert "pytest:npc:strahds-secret-consort" not in touched_ids
+
+    def test_table_view_edges_never_expose_source_canon_id(self, graph):
+        """A copy-on-write node's canon_id is a canon id -- must not surface via
+        an edge's source_canon_id in the table view (Critical 2)."""
+        seed(graph)
+        graph.run(
+            """
+            MATCH (a:Entity {id:'pytest:npc:ireena@a'})
+            MATCH (b:Entity {id:'pytest:npc:bob'})
+            CREATE (a)-[:KNOWS {layer:'social', revealed_in_session:5}]->(b)
+            """
+        ).consume()
+        result = PlaneResolver(CAMPAIGN).edges("table", as_of_session=10)
+        assert result, "fixture produced no table-view edges"
+        for e in result:
+            assert e["source_canon_id"] is None
+
     def test_truth_view_intersections_finds_layer_crossing_nodes(self, graph):
         """Nothing else exercises intersections() at all -- cover the truth path,
         where the canon-endpoint constraint deliberately does NOT apply."""
@@ -176,6 +226,28 @@ class TestCampaignScoping:
         }
         assert "pytest:npc:mine" in ids
         assert "pytest:npc:theirs" not in ids
+
+    def test_truth_edges_exclude_other_campaigns_on_the_target(self, graph):
+        """Task 7 scoped the source; the target was left unconstrained, so a
+        campaign-plane source's edge to ANOTHER campaign's node leaked that
+        node's id in the truth view (Critical 3)."""
+        graph.run(
+            """
+            CREATE (a:Entity {id:'pytest:campaign:a', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (b:Entity {id:'pytest:campaign:b', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (mine:Entity {id:'pytest:npc:mine3', plane:'campaign'})
+            CREATE (theirs:Entity {id:'pytest:npc:theirs3', plane:'campaign'})
+            CREATE (mine)-[:BELONGS_TO]->(a)
+            CREATE (theirs)-[:BELONGS_TO]->(b)
+            CREATE (mine)-[:ALLIED_WITH {layer:'social'}]->(theirs)
+            """
+        ).consume()
+
+        result = PlaneResolver("pytest:campaign:a").edges("truth", layers=["social"])
+        target_ids = {e["target_id"] for e in result}
+        assert "pytest:npc:theirs3" not in target_ids
 
     def test_table_edges_exclude_other_campaigns(self, graph):
         graph.run(

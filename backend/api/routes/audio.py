@@ -381,8 +381,10 @@ async def confirm_entities(job_id: str):
                                       e.source = 'transcript_extraction',
                                       e.confidence = $conf,
                                       e.first_session = $session_id,
+                                      e.plane = 'campaign',
                                       e.created_at = datetime(),
                                       e.updated_at = datetime()
+                        ON MATCH SET e.plane = coalesce(e.plane, 'campaign')
                         RETURN e.id AS id
                         """,
                         name=entity.normalized_name,

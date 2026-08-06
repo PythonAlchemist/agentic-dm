@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from backend.core.database import neo4j_session
-from backend.graph.schema import EntityType, RelationshipType, LAYER_MAP, GRAPH_SCHEMA
+from backend.graph.schema import GRAPH_SCHEMA, LAYER_MAP, EntityType, RelationshipType
 
 
 class CampaignGraphOps:
