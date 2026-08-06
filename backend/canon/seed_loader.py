@@ -15,10 +15,13 @@ from backend.graph.schema import LAYER_MAP, EntityType, RelationshipType
 SEED_DIR = Path(__file__).parent / "seeds"
 
 # Grading metadata, not graph data. A marked entry is a fact the seed asserts but the
-# named chapter's prose does not state, so a run extracting that chapter must not be
-# scored against it. Stripped before writing -- see `_grading_keys`.
+# seed's own chapter does not state, so a run over that chapter must not be scored
+# against it. Stripped before writing -- see `_GRADING_KEYS`.
+#
+# The axis is chapter numbers rather than a stated/implied/external scheme, because
+# per-chapter golden subsets are what `extractable_subset` exists to produce.
 EXTRACTABLE_FROM = "extractable_from"
-EXTRACTABLE_SOURCES = {"ch2", "backstory"}
+EXTRACTABLE_SOURCES = {"ch1", "ch2"}
 
 # The chapter this seed's unmarked entries are expected to come from.
 DEFAULT_SOURCE = "ch3"
@@ -68,13 +71,18 @@ def validate_seed(data: dict) -> list[str]:
 def extractable_subset(data: dict, source: str = DEFAULT_SOURCE) -> dict:
     """The nodes and edges an extraction run over `source` should be graded against.
 
-    Entries carrying an `extractable_from` marker name a different origin -- chapter 2,
-    or setting backstory -- so a chapter-3 run cannot be expected to produce them.
+    Entries carrying an `extractable_from` marker name a different chapter, so a run
+    over this seed's own chapter cannot be expected to produce them.
     Grading against the whole seed penalises an extractor for correctly reading only
     what its input actually says, and rewards one that invents the rest.
 
     Unmarked entries belong to DEFAULT_SOURCE. Asking for a marked source returns only
-    entries carrying that marker.
+    entries carrying that marker -- NOT that chapter plus everything before it.
+
+    Whether a later chapter's expected set should be cumulative depends on how stage 2
+    feeds its extractor: strict-per-source is right if each run sees one chapter's text,
+    and under-grades every later run if runs see cumulative text. Deliberately left
+    strict until that consumer exists, rather than guessing the semantics here.
     """
     if source == DEFAULT_SOURCE:
         keep = lambda entry: entry.get(EXTRACTABLE_FROM) is None  # noqa: E731

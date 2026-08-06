@@ -106,11 +106,11 @@ class TestSeedUnderResolver:
     def test_seeks_edge_carries_its_motive(self, seeded):
         """The motive property must survive the resolver, not just the edge.
 
-        This asserted "Tatyana" until the seed's provenance pass moved the
-        reincarnation to a backstory-marked IDENTITY_OF edge and reduced this
-        motive to what chapter 3 actually states. The assertion's intent -- a
-        free-text property reaches the caller intact -- is unchanged; only the
-        text it matches against moved.
+        Pinned exactly rather than by substring: a source-material review found
+        that chapter 3 states the Tatyana identity outright in its opening
+        paragraph, so an earlier attempt to trim this motive to "the bites" was
+        wrong and was reverted. An exact assertion makes the next such edit
+        fail loudly instead of drifting.
         """
         edges = PlaneResolver(CAMPAIGN).edges("truth", layers=["narrative"])
         seeks = next(
@@ -119,7 +119,7 @@ class TestSeedUnderResolver:
             and e["target_id"] == "cos:npc:ireena-kolyana"
         )
         assert seeks["props"]["motive"] == (
-            "Has bitten her twice and means to make her his bride."
+            "Believes she is Tatyana reborn and means to make her his bride."
         )
 
     def test_church_is_an_intersection_of_spatial_and_narrative(self, seeded):

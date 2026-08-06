@@ -8,9 +8,15 @@
 #   extraction run must be scored against the unmarked subset only -- see
 #   `extractable_subset()` in seed_loader.py.
 #
-# Allowed marker values:
-#   ch2        stated in chapter 2 (the Tarokka reading and its consequences)
-#   backstory  setting history from the introduction, not in any location's keyed prose
+# Allowed marker values are chapter numbers:
+#   ch1  stated in chapter 1 -- the Tarokka reading, and Strahd's history with Tatyana
+#   ch2  stated in chapter 2 -- the valley's geography and the Vistani
+#
+# NOTE: chapter 3 DOES state that Ireena carries Tatyana's soul and that Strahd means
+# to make her his bride -- both are in its opening paragraph. Only Tatyana's own
+# history (her death, the centuries of rebirth) is chapter 1. Marking the identity
+# edge as out-of-chapter was a review finding: it shrank the key on the most
+# plot-central fact in the file.
 #
 # Without this split, an extractor that correctly reads chapter 3 is penalised for
 # failing to invent Tatyana, and one that hallucinates her scores higher. The marker is
@@ -43,7 +49,9 @@ nodes:
   - id: cos:location:vallaki
     name: Vallaki
     entity_type: LOCATION
-    description: The walled town west of the village.
+    description: >-
+      The town Ismark wants Ireena taken to, beyond the view of Castle Ravenloft.
+      (Its walls and its position west of the village are chapter 2 facts.)
 
   # --- NPCs ---
   - id: cos:npc:kolyan-indirovich
@@ -89,12 +97,11 @@ nodes:
   - id: cos:npc:strahd-von-zarovich
     name: Strahd von Zarovich
     entity_type: NPC
-    aliases: ["the devil Strahd"]
     description: The vampire lord of Barovia.
   - id: cos:npc:tatyana
     name: Tatyana
     entity_type: NPC
-    extractable_from: backstory
+    extractable_from: ch1
     description: The woman Strahd killed for, centuries dead and endlessly reborn.
 
   # --- Narrative ---
@@ -109,7 +116,7 @@ nodes:
   - id: cos:item:tome-of-strahd
     name: Tome of Strahd
     entity_type: ITEM
-    extractable_from: ch2
+    extractable_from: ch1
     description: Strahd's own account of his fall. Location set by the Tarokka reading.
 
 edges:
@@ -120,8 +127,7 @@ edges:
   - {source: cos:location:village-of-barovia, target: cos:location:church-of-barovia, type: CONTAINS}
   - {source: cos:location:village-of-barovia, target: cos:location:vallaki, type: CONNECTED_TO}
   - {source: cos:npc:ireena-kolyana, target: cos:location:burgomasters-mansion, type: LOCATED_IN}
-  - {source: cos:npc:ismark-kolyanovich, target: cos:location:burgomasters-mansion, type: LOCATED_IN, evidence: "his home"}
-  - {source: cos:npc:ismark-kolyanovich, target: cos:location:blood-on-the-vine, type: LOCATED_IN, evidence: "where the party first encounters him"}
+  - {source: cos:npc:ismark-kolyanovich, target: cos:location:blood-on-the-vine, type: LOCATED_IN, evidence: "chapter 3 places his NPC block at the tavern"}
   - {source: cos:npc:donavich, target: cos:location:church-of-barovia, type: LOCATED_IN}
   - {source: cos:npc:doru, target: cos:location:church-of-barovia, type: LOCATED_IN}
   - {source: cos:npc:bildrath-cantemir, target: cos:location:bildraths-mercantile, type: LOCATED_IN}
@@ -141,12 +147,11 @@ edges:
   - source: cos:npc:strahd-von-zarovich
     target: cos:npc:ireena-kolyana
     type: SEEKS
-    motive: Has bitten her twice and means to make her his bride.
+    motive: Believes she is Tatyana reborn and means to make her his bride.
   - source: cos:npc:ireena-kolyana
     target: cos:npc:tatyana
     type: IDENTITY_OF
     nature: reincarnation
-    extractable_from: backstory
     revealed_in_session: null
   - source: cos:npc:donavich
     target: cos:quest:save-doru
@@ -163,7 +168,7 @@ edges:
     type: THREATENS
     evidence: Trades dream pastries for the villagers' children.
   # Canon fan-out: the Tarokka reading collapses this to one per table. The reading
-  # itself is chapter 2, so a chapter-3 extractor is not expected to produce these.
-  - {source: cos:item:tome-of-strahd, target: cos:location:church-of-barovia, type: RESOLVES_TO, extractable_from: ch2}
-  - {source: cos:item:tome-of-strahd, target: cos:location:burgomasters-mansion, type: RESOLVES_TO, extractable_from: ch2}
-  - {source: cos:item:tome-of-strahd, target: cos:location:blood-on-the-vine, type: RESOLVES_TO, extractable_from: ch2}
+  # is in chapter 1, so a chapter-3 extractor is not expected to produce these.
+  - {source: cos:item:tome-of-strahd, target: cos:location:church-of-barovia, type: RESOLVES_TO, extractable_from: ch1}
+  - {source: cos:item:tome-of-strahd, target: cos:location:burgomasters-mansion, type: RESOLVES_TO, extractable_from: ch1}
+  - {source: cos:item:tome-of-strahd, target: cos:location:blood-on-the-vine, type: RESOLVES_TO, extractable_from: ch1}

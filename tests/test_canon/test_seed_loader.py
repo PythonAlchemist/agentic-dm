@@ -185,7 +185,7 @@ class TestLoad:
 class TestExtractionProvenance:
     """The seed is a golden set, so it must distinguish what chapter 3 states from
     what it merely assumes. Grading a chapter-3 run against the whole file penalises
-    a correct extractor and rewards one that invents backstory."""
+    a correct extractor and rewards one that invents facts it never saw."""
 
     def test_markers_are_from_the_known_set(self, seed_data):
         from backend.canon.seed_loader import EXTRACTABLE_FROM, EXTRACTABLE_SOURCES
@@ -194,19 +194,22 @@ class TestExtractionProvenance:
             marker = entry.get(EXTRACTABLE_FROM)
             assert marker is None or marker in EXTRACTABLE_SOURCES, entry
 
-    def test_chapter_three_subset_excludes_backstory_and_ch2(self, seed_data):
+    def test_chapter_three_subset_excludes_other_chapters(self, seed_data):
         subset = extractable_subset(seed_data)
         ids = {n["id"] for n in subset["nodes"]}
 
-        assert "cos:npc:tatyana" not in ids, "Tatyana is backstory, not chapter 3"
-        assert "cos:item:tome-of-strahd" not in ids, "the Tome's sites are chapter 2"
+        assert "cos:npc:tatyana" not in ids, "Tatyana's own history is chapter 1"
+        assert "cos:item:tome-of-strahd" not in ids, "the Tome's sites are chapter 1"
         assert "cos:npc:ireena-kolyana" in ids
         assert "cos:npc:kolyan-indirovich" in ids
 
         types = {e["type"] for e in subset["edges"]}
-        assert "RESOLVES_TO" not in types, "the Tarokka fan-out is chapter 2"
-        assert "IDENTITY_OF" not in types, "the reincarnation is backstory"
+        assert "RESOLVES_TO" not in types, "the Tarokka fan-out is chapter 1"
         assert "GAVE_QUEST" in types
+        assert "IDENTITY_OF" in types, (
+            "chapter 3 states that Ireena carries Tatyana's soul, in its opening "
+            "paragraph -- this edge must stay in the chapter-3 key"
+        )
 
     def test_subset_is_a_strict_subset(self, seed_data):
         subset = extractable_subset(seed_data)
@@ -214,10 +217,10 @@ class TestExtractionProvenance:
         assert len(subset["edges"]) < len(seed_data["edges"])
 
     def test_requesting_a_marked_source_returns_only_that_source(self, seed_data):
-        ch2 = extractable_subset(seed_data, source="ch2")
-        assert {n["id"] for n in ch2["nodes"]} == {"cos:item:tome-of-strahd"}
-        assert all(e["type"] == "RESOLVES_TO" for e in ch2["edges"])
-        assert len(ch2["edges"]) == 3
+        ch1 = extractable_subset(seed_data, source="ch1")
+        assert {n["id"] for n in ch1["nodes"]} == {"cos:item:tome-of-strahd", "cos:npc:tatyana"}
+        assert all(e["type"] == "RESOLVES_TO" for e in ch1["edges"])
+        assert len(ch1["edges"]) == 3
 
     def test_unknown_marker_is_reported(self):
         problems = validate_seed(
@@ -244,7 +247,7 @@ class TestExtractionProvenance:
                     "id": "pytest:npc:marked",
                     "name": "Marked",
                     "entity_type": "NPC",
-                    "extractable_from": "backstory",
+                    "extractable_from": "ch1",
                 }
             ],
             "edges": [],
