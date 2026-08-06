@@ -8,12 +8,17 @@ from backend.canon.page_extractor import PageExtractor
 
 @pytest.fixture
 def pdf_with_images(tmp_path):
-    """A 3-page PDF where each page has one embedded image."""
+    """A 3-page PDF where each page has one DISTINCT embedded image.
+
+    The pages must differ: extract() skips repeated image hashes, because the
+    real corpus is a flipbook export that renders every page twice. Identical
+    fill values here would collapse to a single page and mask that.
+    """
     doc = fitz.open()
-    for _ in range(3):
+    for shade in (40, 128, 220):
         page = doc.new_page(width=200, height=300)
         pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 100, 150))
-        pix.clear_with(128)
+        pix.clear_with(shade)
         page.insert_image(fitz.Rect(0, 0, 100, 150), pixmap=pix)
     path = tmp_path / "with_images.pdf"
     doc.save(path)
@@ -27,7 +32,7 @@ def pdf_without_images(tmp_path):
     doc = fitz.open()
     for _ in range(2):
         page = doc.new_page(width=200, height=300)
-        page.insert_text((50, 50), "hello")
+        page.insert_text((50, 50), f"page {doc.page_count}")
     path = tmp_path / "no_images.pdf"
     doc.save(path)
     doc.close()
@@ -88,3 +93,45 @@ class TestPageExtractor:
         assert len(pages) == 1
         assert pages[0].ext == "png"
         assert pages[0].image_bytes != b"not-a-real-jpx-image"
+
+
+@pytest.fixture
+def pdf_with_repeated_pages(tmp_path):
+    """A flipbook-style PDF: every page image appears twice, consecutively."""
+    doc = fitz.open()
+    for _ in range(3):
+        for _ in range(2):  # each page rendered twice, as AnyFlip exports do
+            page = doc.new_page(width=200, height=300)
+            pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 100, 150))
+            pix.clear_with(128)
+            page.insert_image(fitz.Rect(0, 0, 100, 150), pixmap=pix)
+    path = tmp_path / "flipbook.pdf"
+    doc.save(path)
+    doc.close()
+    return path
+
+
+class TestDuplicatePageSkipping:
+    def test_repeated_images_are_yielded_once(self, pdf_with_repeated_pages):
+        """The real corpus is 509 PDF pages over 258 distinct images. Transcribing
+        both halves doubles cost and double-counts every entity downstream."""
+        pages = list(PageExtractor(pdf_with_repeated_pages).extract())
+
+        assert len({p.sha256 for p in pages}) == len(pages), "duplicate image survived"
+
+    def test_first_occurrence_wins(self, pdf_with_repeated_pages):
+        pages = list(PageExtractor(pdf_with_repeated_pages).extract())
+
+        # All six synthetic pages share one image, so exactly the first survives.
+        assert [p.page_number for p in pages] == [1]
+
+    def test_dedup_can_be_disabled(self, pdf_with_repeated_pages):
+        pages = list(PageExtractor(pdf_with_repeated_pages).extract(dedup=False))
+
+        assert [p.page_number for p in pages] == [1, 2, 3, 4, 5, 6]
+
+    def test_distinct_pages_are_all_kept(self, pdf_without_images):
+        """Rendered pages differ (they carry different text), so none are dropped."""
+        pages = list(PageExtractor(pdf_without_images).extract())
+
+        assert len(pages) == 2

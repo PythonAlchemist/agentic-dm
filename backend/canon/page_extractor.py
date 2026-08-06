@@ -33,13 +33,29 @@ class PageExtractor:
     def page_count(self) -> int:
         return self._doc.page_count
 
-    def extract(self, pages: range | None = None) -> Iterator[PageImage]:
-        """Yield a PageImage for each requested page.
+    def extract(
+        self,
+        pages: range | None = None,
+        dedup: bool = True,
+    ) -> Iterator[PageImage]:
+        """Yield a PageImage for each requested page, skipping repeated images.
+
+        Flipbook exports repeat every page: `data/cos.pdf` has 509 PDF pages but
+        only 258 distinct images, 251 of them exact consecutive pairs. Transcribing
+        both halves costs twice as much and doubles every entity downstream, and
+        because the vision model is non-deterministic the two transcriptions differ
+        in wording -- so text-level dedup will not catch them. The image hash is
+        exact, so this is the only layer where the duplicate is unambiguous.
+
+        The first occurrence wins, keeping its PDF page number. Numbers therefore
+        become non-contiguous, which is honest: they still index the source PDF.
 
         Args:
             pages: 1-indexed page numbers to extract. Defaults to every page.
+            dedup: Skip a page whose image was already yielded by this call.
         """
         wanted = pages if pages is not None else range(1, self.page_count + 1)
+        seen: set[str] = set()
 
         for page_number in wanted:
             page = self._doc[page_number - 1]
@@ -59,13 +75,19 @@ class PageExtractor:
                 data, ext = pix.tobytes("png"), "png"
                 width, height = pix.width, pix.height
 
+            digest = hashlib.sha256(data).hexdigest()
+            if dedup:
+                if digest in seen:
+                    continue
+                seen.add(digest)
+
             yield PageImage(
                 page_number=page_number,
                 image_bytes=data,
                 ext=ext,
                 width=width,
                 height=height,
-                sha256=hashlib.sha256(data).hexdigest(),
+                sha256=digest,
             )
 
     def close(self) -> None:
