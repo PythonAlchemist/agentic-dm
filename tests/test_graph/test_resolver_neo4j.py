@@ -87,3 +87,67 @@ class TestEdgeResolution:
         social_only = PlaneResolver(CAMPAIGN).edges("truth", layers=["narrative"])
         assert all(e["layer"] == "narrative" for e in social_only)
         assert any(e["rel_type"] == "SEEKS" for e in social_only)
+
+    def test_table_view_edges_never_expose_canon_endpoint(self, graph):
+        """The exact leak: a campaign NPC's LOCATED_IN edge to an un-instantiated
+        canon location must not surface that location's id in the table view.
+        Node ids are human-readable (e.g. cos:location:castle-ravenloft:k37), so a
+        leaked id is leaked spoiler content -- constraining only the edge's source
+        plane, as the table branch used to, isn't enough.
+        """
+        graph.run(
+            """
+            CREATE (c:Entity {id:$campaign, name:'Table A', entity_type:'CAMPAIGN',
+                              plane:'campaign'})
+            CREATE (n:Entity {id:'pytest:npc:hireling', name:'Hireling',
+                              entity_type:'NPC', plane:'campaign'})
+            CREATE (n)-[:BELONGS_TO]->(c)
+            CREATE (loc:Entity {id:'pytest:loc:secret-lair', name:'Secret Lair',
+                                entity_type:'LOCATION', plane:'canon'})
+            CREATE (n)-[:LOCATED_IN {layer:'spatial', revealed_in_session:1}]->(loc)
+            """,
+            {"campaign": CAMPAIGN},
+        ).consume()
+        result = PlaneResolver(CAMPAIGN).edges("table", as_of_session=10)
+        touched_ids = {e["source_id"] for e in result} | {e["target_id"] for e in result}
+        assert "pytest:loc:secret-lair" not in touched_ids
+
+    def test_table_view_intersections_never_expose_canon_ids(self, graph):
+        """intersections() derives from edges(), so the same canon leak propagates
+        unless both endpoints are constrained there too."""
+        graph.run(
+            """
+            CREATE (c:Entity {id:$campaign, name:'Table A', entity_type:'CAMPAIGN',
+                              plane:'campaign'})
+            CREATE (n:Entity {id:'pytest:npc:hireling2', name:'Hireling',
+                              entity_type:'NPC', plane:'campaign'})
+            CREATE (other:Entity {id:'pytest:npc:ally', name:'Ally',
+                                  entity_type:'NPC', plane:'campaign'})
+            CREATE (loc:Entity {id:'pytest:loc:secret-lair2', name:'Secret Lair',
+                                entity_type:'LOCATION', plane:'canon'})
+            CREATE (n)-[:BELONGS_TO]->(c)
+            CREATE (other)-[:BELONGS_TO]->(c)
+            CREATE (n)-[:LOCATED_IN {layer:'spatial', revealed_in_session:1}]->(loc)
+            CREATE (other)-[:OBJECTIVE_AT {layer:'narrative', revealed_in_session:1}]->(loc)
+            """,
+            {"campaign": CAMPAIGN},
+        ).consume()
+        result = PlaneResolver(CAMPAIGN).intersections("table", as_of_session=10)
+        ids = {row["id"] for row in result}
+        assert "pytest:loc:secret-lair2" not in ids
+
+    def test_truth_view_intersections_finds_layer_crossing_nodes(self, graph):
+        """Nothing else exercises intersections() at all -- cover the truth path,
+        where the canon-endpoint constraint deliberately does NOT apply."""
+        graph.run(
+            """
+            CREATE (a:Entity {id:'pytest:npc:strahd2', plane:'canon', name:'Strahd'})
+            CREATE (b:Entity {id:'pytest:npc:ireena3', plane:'canon', name:'Ireena'})
+            CREATE (l:Entity {id:'pytest:loc:barovia2', plane:'canon', name:'Barovia'})
+            CREATE (a)-[:SEEKS {layer:'narrative', motive:'believes her Tatyana'}]->(b)
+            CREATE (b)-[:LOCATED_IN {layer:'spatial'}]->(l)
+            """
+        ).consume()
+        result = PlaneResolver(CAMPAIGN).intersections("truth")
+        row = next(r for r in result if r["id"] == "pytest:npc:ireena3")
+        assert row["layers"] == ["narrative", "spatial"]

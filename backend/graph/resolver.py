@@ -82,6 +82,19 @@ RETURN a.id AS source_id, b.id AS target_id, type(r) AS rel_type,
        r.layer AS layer, a.plane AS plane, properties(r) AS props
 """
 
+# Table view: BOTH endpoints must be campaign-plane. Constraining only the source
+# (as truth does) lets a campaign-plane source's edge to an un-instantiated canon
+# target leak that canon node's id -- and node ids are human-readable spoilers
+# (e.g. "cos:location:castle-ravenloft:k37"). Canon must never appear in a table
+# read, at either end of an edge.
+_EDGES_TABLE = """
+MATCH (a:Entity {plane:'campaign'})-[r]->(b:Entity {plane:'campaign'})
+WHERE r.layer IS NOT NULL
+  AND ($layers IS NULL OR r.layer IN $layers)
+RETURN a.id AS source_id, b.id AS target_id, type(r) AS rel_type,
+       r.layer AS layer, a.plane AS plane, properties(r) AS props
+"""
+
 
 class PlaneResolver:
     """The single place two-plane reads go through.
@@ -143,13 +156,18 @@ class PlaneResolver:
 
         with neo4j_session() as session:
             if perspective == "table":
-                rows = session.run(_EDGES, {"layers": layers, "plane": "campaign"})
+                rows = session.run(_EDGES_TABLE, {"layers": layers})
                 return [
                     self._row_to_edge(r)
                     for r in rows
                     if _revealed(r["props"], as_of_session)
                 ]
 
+            # Truth deliberately does NOT constrain the target's plane: a campaign
+            # entity legitimately points at a canon entity it hasn't overridden
+            # (e.g. a table-invented hireling located in a canon town nobody has
+            # touched). That edge is true and generators need it. The asymmetry
+            # with the table branch above is the whole point -- see class docstring.
             canon = [
                 self._row_to_edge(r)
                 for r in session.run(_EDGES, {"layers": layers, "plane": "canon"})
