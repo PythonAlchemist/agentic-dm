@@ -55,5 +55,10 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
 
+[tool.pytest.ini_options]
+markers = [
+    "neo4j: test requires a running Neo4j (docker compose up -d); deselect with -m 'not neo4j'",
+]
+
 [tool.uv.sources]
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }

@@ -50,9 +50,16 @@ class RelationshipType(str, Enum):
 
     # Quest/Narrative
     GAVE_QUEST = "GAVE_QUEST"
-    PURSUING = "PURSUING"
     COMPLETED = "COMPLETED"
     OBJECTIVE_AT = "OBJECTIVE_AT"
+
+    # Narrative layer
+    SEEKS = "SEEKS"  # Agent -> what it wants; carries a free-text `motive`
+    OPPOSES = "OPPOSES"  # Agent -> goal it works against (distinct from HOSTILE_TO)
+    IDENTITY_OF = "IDENTITY_OF"  # Persona -> persona; carries `nature`
+    RESOLVES_TO = "RESOLVES_TO"  # Canon fan-out a table's draw collapses
+    PREREQUISITE_OF = "PREREQUISITE_OF"  # Hard gate
+    THREATENS = "THREATENS"  # Standing danger
 
     # Combat/Events
     KILLED = "KILLED"
@@ -82,6 +89,67 @@ class RelationshipType(str, Enum):
     CONTROLLED_BY = "CONTROLLED_BY"  # Discord bot -> NPC
     IN_COMBAT_WITH = "IN_COMBAT_WITH"  # NPC <-> Combatant
     LAST_SPOKE_TO = "LAST_SPOKE_TO"  # NPC -> PC/Player
+
+
+class Layer(str, Enum):
+    """A surface of the graph. Edges carry exactly one, or none."""
+
+    SPATIAL = "spatial"
+    SOCIAL = "social"
+    NARRATIVE = "narrative"
+
+
+# Every RelationshipType maps to a layer or explicitly to None. None means "not a
+# surface": plane-linking, character-sheet, and runtime edges. A partial map would
+# silently mis-count intersection queries, so tests assert this is total.
+LAYER_MAP: dict[RelationshipType, Layer | None] = {
+    # Spatial
+    RelationshipType.LOCATED_IN: Layer.SPATIAL,
+    RelationshipType.CONTAINS: Layer.SPATIAL,
+    RelationshipType.CONNECTED_TO: Layer.SPATIAL,
+    RelationshipType.TRAVELED_TO: Layer.SPATIAL,
+    # Social
+    RelationshipType.KNOWS: Layer.SOCIAL,
+    RelationshipType.ALLIED_WITH: Layer.SOCIAL,
+    RelationshipType.HOSTILE_TO: Layer.SOCIAL,
+    RelationshipType.ENEMY_OF: Layer.SOCIAL,
+    RelationshipType.MEMBER_OF: Layer.SOCIAL,
+    RelationshipType.SERVES: Layer.SOCIAL,
+    RelationshipType.RELATED_TO: Layer.SOCIAL,
+    RelationshipType.OWNS: Layer.SOCIAL,
+    RelationshipType.GUARDS: Layer.SOCIAL,
+    RelationshipType.WIELDS: Layer.SOCIAL,
+    # Narrative
+    RelationshipType.SEEKS: Layer.NARRATIVE,
+    RelationshipType.OPPOSES: Layer.NARRATIVE,
+    RelationshipType.RESOLVES_TO: Layer.NARRATIVE,
+    RelationshipType.PREREQUISITE_OF: Layer.NARRATIVE,
+    RelationshipType.IDENTITY_OF: Layer.NARRATIVE,
+    RelationshipType.THREATENS: Layer.NARRATIVE,
+    RelationshipType.GAVE_QUEST: Layer.NARRATIVE,
+    RelationshipType.COMPLETED: Layer.NARRATIVE,
+    RelationshipType.OBJECTIVE_AT: Layer.NARRATIVE,
+    # Structural: plane-linking, character sheet, runtime, campaign history
+    RelationshipType.INSTANCE_OF: None,
+    RelationshipType.BELONGS_TO: None,
+    RelationshipType.PLAYS_AS: None,
+    RelationshipType.ATTENDED: None,
+    RelationshipType.HAS_CLASS: None,
+    RelationshipType.HAS_RACE: None,
+    RelationshipType.HAS_SUBCLASS: None,
+    RelationshipType.CONTROLLED_BY: None,
+    RelationshipType.IN_COMBAT_WITH: None,
+    RelationshipType.LAST_SPOKE_TO: None,
+    RelationshipType.KILLED: None,
+    RelationshipType.PARTICIPATED_IN: None,
+    RelationshipType.OCCURRED_AT: None,
+    RelationshipType.OCCURRED_IN: None,
+}
+
+# Campaign edges of these types SHADOW canon edges of the same type from the same
+# source, rather than adding to them. This is the Tarokka collapse: canon fans out to
+# ten candidate sites, a table's draw resolves it to one.
+RESOLVABLE_TYPES: set[RelationshipType] = {RelationshipType.RESOLVES_TO}
 
 
 class Entity(BaseModel):
@@ -226,5 +294,8 @@ GRAPH_SCHEMA = {
         # NPC Discord indexes
         "CREATE INDEX npc_discord_active IF NOT EXISTS FOR (e:Entity) ON (e.discord_active)",
         "CREATE INDEX npc_discord_app_id IF NOT EXISTS FOR (e:Entity) ON (e.discord_application_id)",
+        # Canon/campaign resolver indexes
+        "CREATE INDEX entity_plane IF NOT EXISTS FOR (e:Entity) ON (e.plane)",
+        "CREATE INDEX entity_canon_id IF NOT EXISTS FOR (e:Entity) ON (e.canon_id)",
     ],
 }
