@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from backend.core.database import neo4j_session
-from backend.graph.schema import EntityType, RelationshipType, GRAPH_SCHEMA
+from backend.graph.schema import EntityType, RelationshipType, LAYER_MAP, GRAPH_SCHEMA
 
 
 class CampaignGraphOps:
@@ -54,7 +54,11 @@ class CampaignGraphOps:
             entity_type = entity_type.value
 
         entity_id = entity_id or str(uuid.uuid4())
-        props = properties or {}
+        # The resolver filters on `plane`; an unstamped node is invisible to it.
+        # Default to campaign — canon is written by the seed loader, which passes
+        # plane explicitly.
+        props = dict(properties or {})
+        props.setdefault("plane", "campaign")
         now = datetime.utcnow().isoformat()
 
         query = """
@@ -232,11 +236,21 @@ class CampaignGraphOps:
         Returns:
             Relationship info as dict or None if entities not found
         """
-        if isinstance(relationship_type, RelationshipType):
-            relationship_type = relationship_type.value
+        # Coerce through the enum before interpolating into Cypher. A relationship
+        # type cannot be parameterized, so this is the only thing keeping an
+        # arbitrary caller string out of the query text.
+        rel = RelationshipType(
+            relationship_type.value
+            if isinstance(relationship_type, RelationshipType)
+            else relationship_type
+        )
+        relationship_type = rel.value
 
-        props = properties or {}
+        props = dict(properties or {})
         props["created_at"] = datetime.utcnow().isoformat()
+        layer = LAYER_MAP[rel]
+        if layer is not None:
+            props.setdefault("layer", layer.value)
 
         # Use APOC or dynamic relationship creation
         query = f"""
