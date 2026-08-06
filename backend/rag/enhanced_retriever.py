@@ -30,6 +30,16 @@ class RetrievalResult(BaseModel):
     total_results: int = 0
 
 
+async def _no_vector_results() -> list:
+    """Placeholder awaitable for a disabled vector leg of the gather."""
+    return []
+
+
+async def _no_graph_results() -> tuple[list, list]:
+    """Placeholder awaitable for a disabled graph leg of the gather."""
+    return [], []
+
+
 class EnhancedRetriever:
     """Enhanced retriever with entity-aware hybrid search."""
 
@@ -84,7 +94,7 @@ class EnhancedRetriever:
                 sources=strategy.vector_sources,
             ))
         else:
-            tasks.append(asyncio.coroutine(lambda: [])())
+            tasks.append(_no_vector_results())
 
         if strategy.use_graph:
             # If we have extracted entities, use them for targeted search
@@ -97,7 +107,7 @@ class EnhancedRetriever:
                 limit=strategy.graph_k,
             ))
         else:
-            tasks.append(asyncio.coroutine(lambda: ([], []))())
+            tasks.append(_no_graph_results())
 
         # Execute in parallel
         vector_results, graph_results = await asyncio.gather(*tasks)
