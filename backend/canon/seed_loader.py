@@ -14,7 +14,17 @@ from backend.graph.schema import LAYER_MAP, EntityType, RelationshipType
 
 SEED_DIR = Path(__file__).parent / "seeds"
 
-RESERVED_EDGE_KEYS = {"source", "target", "type"}
+# Grading metadata, not graph data. A marked entry is a fact the seed asserts but the
+# named chapter's prose does not state, so a run extracting that chapter must not be
+# scored against it. Stripped before writing -- see `_grading_keys`.
+EXTRACTABLE_FROM = "extractable_from"
+EXTRACTABLE_SOURCES = {"ch2", "backstory"}
+
+# The chapter this seed's unmarked entries are expected to come from.
+DEFAULT_SOURCE = "ch3"
+
+_GRADING_KEYS = {EXTRACTABLE_FROM}
+RESERVED_EDGE_KEYS = {"source", "target", "type"} | _GRADING_KEYS
 
 
 def validate_seed(data: dict) -> list[str]:
@@ -44,7 +54,37 @@ def validate_seed(data: dict) -> list[str]:
             if e.get(end) not in ids:
                 problems.append(f"edge {end} not declared as a node: {e.get(end)!r}")
 
+    for entry in [*data.get("nodes", []), *data.get("edges", [])]:
+        marker = entry.get(EXTRACTABLE_FROM)
+        if marker is not None and marker not in EXTRACTABLE_SOURCES:
+            problems.append(
+                f"unknown {EXTRACTABLE_FROM} {marker!r} "
+                f"(expected one of {sorted(EXTRACTABLE_SOURCES)}) in {entry}"
+            )
+
     return problems
+
+
+def extractable_subset(data: dict, source: str = DEFAULT_SOURCE) -> dict:
+    """The nodes and edges an extraction run over `source` should be graded against.
+
+    Entries carrying an `extractable_from` marker name a different origin -- chapter 2,
+    or setting backstory -- so a chapter-3 run cannot be expected to produce them.
+    Grading against the whole seed penalises an extractor for correctly reading only
+    what its input actually says, and rewards one that invents the rest.
+
+    Unmarked entries belong to DEFAULT_SOURCE. Asking for a marked source returns only
+    entries carrying that marker.
+    """
+    if source == DEFAULT_SOURCE:
+        keep = lambda entry: entry.get(EXTRACTABLE_FROM) is None  # noqa: E731
+    else:
+        keep = lambda entry: entry.get(EXTRACTABLE_FROM) == source  # noqa: E731
+
+    return {
+        "nodes": [n for n in data.get("nodes", []) if keep(n)],
+        "edges": [e for e in data.get("edges", []) if keep(e)],
+    }
 
 
 def load_seed(path: str | Path, session) -> dict:
@@ -59,7 +99,7 @@ def load_seed(path: str | Path, session) -> dict:
         raise ValueError("invalid seed:\n  " + "\n  ".join(problems))
 
     for node in data["nodes"]:
-        props = {k: v for k, v in node.items() if k != "id"}
+        props = {k: v for k, v in node.items() if k != "id" and k not in _GRADING_KEYS}
         props.setdefault("plane", "canon")
         props.setdefault("source_book", "cos")
         session.run(

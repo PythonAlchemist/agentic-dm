@@ -4,7 +4,12 @@ integrity is worth asserting rather than assuming."""
 import pytest
 import yaml
 
-from backend.canon.seed_loader import SEED_DIR, load_seed, validate_seed
+from backend.canon.seed_loader import (
+    SEED_DIR,
+    extractable_subset,
+    load_seed,
+    validate_seed,
+)
 
 BAROVIA = SEED_DIR / "village-of-barovia.yaml"
 
@@ -175,3 +180,80 @@ class TestLoad:
             "RETURN r.layer AS layer"
         ).single()
         assert stored["layer"] is None
+
+
+class TestExtractionProvenance:
+    """The seed is a golden set, so it must distinguish what chapter 3 states from
+    what it merely assumes. Grading a chapter-3 run against the whole file penalises
+    a correct extractor and rewards one that invents backstory."""
+
+    def test_markers_are_from_the_known_set(self, seed_data):
+        from backend.canon.seed_loader import EXTRACTABLE_FROM, EXTRACTABLE_SOURCES
+
+        for entry in [*seed_data["nodes"], *seed_data["edges"]]:
+            marker = entry.get(EXTRACTABLE_FROM)
+            assert marker is None or marker in EXTRACTABLE_SOURCES, entry
+
+    def test_chapter_three_subset_excludes_backstory_and_ch2(self, seed_data):
+        subset = extractable_subset(seed_data)
+        ids = {n["id"] for n in subset["nodes"]}
+
+        assert "cos:npc:tatyana" not in ids, "Tatyana is backstory, not chapter 3"
+        assert "cos:item:tome-of-strahd" not in ids, "the Tome's sites are chapter 2"
+        assert "cos:npc:ireena-kolyana" in ids
+        assert "cos:npc:kolyan-indirovich" in ids
+
+        types = {e["type"] for e in subset["edges"]}
+        assert "RESOLVES_TO" not in types, "the Tarokka fan-out is chapter 2"
+        assert "IDENTITY_OF" not in types, "the reincarnation is backstory"
+        assert "GAVE_QUEST" in types
+
+    def test_subset_is_a_strict_subset(self, seed_data):
+        subset = extractable_subset(seed_data)
+        assert len(subset["nodes"]) < len(seed_data["nodes"])
+        assert len(subset["edges"]) < len(seed_data["edges"])
+
+    def test_requesting_a_marked_source_returns_only_that_source(self, seed_data):
+        ch2 = extractable_subset(seed_data, source="ch2")
+        assert {n["id"] for n in ch2["nodes"]} == {"cos:item:tome-of-strahd"}
+        assert all(e["type"] == "RESOLVES_TO" for e in ch2["edges"])
+        assert len(ch2["edges"]) == 3
+
+    def test_unknown_marker_is_reported(self):
+        problems = validate_seed(
+            {
+                "nodes": [
+                    {
+                        "id": "cos:npc:a",
+                        "name": "A",
+                        "entity_type": "NPC",
+                        "extractable_from": "chapter_seventeen",
+                    }
+                ],
+                "edges": [],
+            }
+        )
+        assert any("chapter_seventeen" in p for p in problems)
+
+    @pytest.mark.neo4j
+    def test_marker_is_not_written_to_the_graph(self, graph, tmp_path):
+        """The marker describes the answer key, not the world."""
+        doc = {
+            "nodes": [
+                {
+                    "id": "pytest:npc:marked",
+                    "name": "Marked",
+                    "entity_type": "NPC",
+                    "extractable_from": "backstory",
+                }
+            ],
+            "edges": [],
+        }
+        path = tmp_path / "marked.yaml"
+        path.write_text(yaml.safe_dump(doc))
+        load_seed(path, graph)
+
+        row = graph.run(
+            "MATCH (e:Entity {id:'pytest:npc:marked'}) RETURN e.extractable_from AS m"
+        ).single()
+        assert row["m"] is None
