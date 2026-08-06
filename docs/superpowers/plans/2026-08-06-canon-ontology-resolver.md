@@ -1334,6 +1334,191 @@ git commit -m "test(graph): verify resolver against the Barovia seed"
 
 ---
 
+### Task 6: Stamp `plane` and `layer` on the write path
+
+**Why this exists.** Added after Task 1's review. The plan's global constraint says *every
+node carries `plane`*, but `backend/graph/operations.py` contains **zero** occurrences of
+it: an entity created through `POST /api/campaign/entities` lands with no `plane`, and the
+resolver — which filters `plane:'campaign'` — silently never sees it. The same hole exists
+for edges: `create_relationship` sets no `layer`, and the resolver's edge query filters
+`WHERE r.layer IS NOT NULL`, so API-created edges are invisible to every layer traversal.
+
+Without this, the resolver works against the seed and against fixtures and is useless
+against anything a running application produced.
+
+A third issue surfaced while reading the same code: `create_relationship` interpolates
+`relationship_type` directly into Cypher without validating it against the enum. The seed
+loader already guards this by coercing through `RelationshipType(...)`; this method should
+too.
+
+**Files:**
+- Modify: `backend/graph/operations.py`
+- Create: `tests/test_graph/test_write_path_stamps.py`
+
+**Interfaces:**
+- Consumes: `LAYER_MAP`, `RelationshipType` from `backend.graph.schema` (Task 1)
+- Produces: no new public API. `create_entity` and `create_relationship` keep their exact signatures.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/test_graph/test_write_path_stamps.py`:
+
+```python
+"""Entities and edges created through the ops layer must carry the properties the
+resolver filters on, or the resolver cannot see application-created data at all."""
+
+import pytest
+
+from backend.graph.operations import CampaignGraphOps
+from backend.graph.schema import RelationshipType
+
+pytestmark = pytest.mark.neo4j
+
+
+class TestEntityPlaneStamp:
+    def test_created_entity_defaults_to_campaign_plane(self, graph):
+        ops = CampaignGraphOps()
+        created = ops.create_entity(
+            name="Test NPC", entity_type="NPC", entity_id="pytest:npc:stamp"
+        )
+        assert created["plane"] == "campaign"
+
+    def test_explicit_plane_is_respected(self, graph):
+        """The seed loader writes canon; an explicit plane must not be overwritten."""
+        ops = CampaignGraphOps()
+        created = ops.create_entity(
+            name="Canon NPC",
+            entity_type="NPC",
+            entity_id="pytest:npc:canon-stamp",
+            properties={"plane": "canon"},
+        )
+        assert created["plane"] == "canon"
+
+
+class TestRelationshipLayerStamp:
+    def test_created_edge_carries_its_layer(self, graph):
+        ops = CampaignGraphOps()
+        ops.create_entity(name="A", entity_type="NPC", entity_id="pytest:npc:a")
+        ops.create_entity(name="B", entity_type="NPC", entity_id="pytest:npc:b")
+        ops.create_relationship("pytest:npc:a", "pytest:npc:b", RelationshipType.KNOWS)
+
+        row = graph.run(
+            "MATCH (:Entity {id:'pytest:npc:a'})-[r:KNOWS]->() RETURN r.layer AS layer"
+        ).single()
+        assert row["layer"] == "social"
+
+    def test_structural_edge_gets_no_layer(self, graph):
+        """BELONGS_TO is plane-linking, not a surface. It must stay unlayered."""
+        ops = CampaignGraphOps()
+        ops.create_entity(name="A", entity_type="NPC", entity_id="pytest:npc:c")
+        ops.create_entity(name="C", entity_type="CAMPAIGN", entity_id="pytest:camp:x")
+        ops.create_relationship(
+            "pytest:npc:c", "pytest:camp:x", RelationshipType.BELONGS_TO
+        )
+
+        row = graph.run(
+            "MATCH (:Entity {id:'pytest:npc:c'})-[r:BELONGS_TO]->() "
+            "RETURN r.layer AS layer"
+        ).single()
+        assert row["layer"] is None
+
+    def test_unknown_relationship_type_is_rejected(self, graph):
+        """The type is interpolated into Cypher, so it must be validated first."""
+        ops = CampaignGraphOps()
+        ops.create_entity(name="A", entity_type="NPC", entity_id="pytest:npc:d")
+        ops.create_entity(name="B", entity_type="NPC", entity_id="pytest:npc:e")
+
+        with pytest.raises(ValueError):
+            ops.create_relationship(
+                "pytest:npc:d", "pytest:npc:e", "NOT_A_TYPE; DROP DATABASE neo4j"
+            )
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest tests/test_graph/test_write_path_stamps.py -v`
+Expected: FAIL — `KeyError: 'plane'` or equivalent on the entity tests, `None != 'social'`
+on the layer test, and `DID NOT RAISE` on the validation test. Capture the actual output.
+
+- [ ] **Step 3: Stamp `plane` in `create_entity`**
+
+In `backend/graph/operations.py`, in `create_entity` (the `props = properties or {}` line
+is currently line 57), change:
+
+```python
+        props = properties or {}
+```
+
+to:
+
+```python
+        # The resolver filters on `plane`; an unstamped node is invisible to it.
+        # Default to campaign — canon is written by the seed loader, which passes
+        # plane explicitly.
+        props = dict(properties or {})
+        props.setdefault("plane", "campaign")
+```
+
+Copying the dict also stops the method mutating a caller's argument, which the current
+code does via `props["created_at"] = ...` in the sibling method.
+
+- [ ] **Step 4: Validate and stamp in `create_relationship`**
+
+In `create_relationship`, replace:
+
+```python
+        if isinstance(relationship_type, RelationshipType):
+            relationship_type = relationship_type.value
+
+        props = properties or {}
+        props["created_at"] = datetime.utcnow().isoformat()
+```
+
+with:
+
+```python
+        # Coerce through the enum before interpolating into Cypher. A relationship
+        # type cannot be parameterized, so this is the only thing keeping an
+        # arbitrary caller string out of the query text.
+        rel = RelationshipType(
+            relationship_type.value
+            if isinstance(relationship_type, RelationshipType)
+            else relationship_type
+        )
+        relationship_type = rel.value
+
+        props = dict(properties or {})
+        props["created_at"] = datetime.utcnow().isoformat()
+        layer = LAYER_MAP[rel]
+        if layer is not None:
+            props.setdefault("layer", layer.value)
+```
+
+Add `LAYER_MAP` to the existing `from backend.graph.schema import ...` line at the top of
+the file.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `uv run pytest tests/test_graph/test_write_path_stamps.py -v`
+Expected: 5 passed
+
+- [ ] **Step 6: Confirm nothing regressed**
+
+Run: `uv run pytest -q`
+Expected: green. Pay attention to `tests/test_api/` and `tests/test_graph/` — several
+suites create entities through this path, and a stamped `plane` now appears in their
+returned dicts. If a test asserted an exact dict equality it will now fail; report that
+rather than removing the assertion.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/graph/operations.py tests/test_graph/test_write_path_stamps.py
+git commit -m "fix(graph): stamp plane and layer on the write path"
+```
+
+---
+
 ## Verification
 
 Whole suite: `uv run pytest -q` — 236 existing plus roughly 45 new.
