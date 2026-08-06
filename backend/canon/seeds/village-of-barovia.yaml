@@ -1,0 +1,148 @@
+# Curse of Strahd, chapter 3 -- hand-authored canon.
+# Doubles as the golden set for stage 2 extraction: if an extractor cannot recover
+# roughly this from the chapter 3 prose, it is not good enough.
+
+nodes:
+  # --- Locations ---
+  - id: cos:location:village-of-barovia
+    name: Village of Barovia
+    entity_type: LOCATION
+    description: A gloomy village cowed by Strahd, its people numb with despair.
+  - id: cos:location:burgomasters-mansion
+    name: Burgomaster's Mansion
+    entity_type: LOCATION
+    description: Home of the late burgomaster Kolyan Indirovich, and his children.
+  - id: cos:location:bildraths-mercantile
+    name: Bildrath's Mercantile
+    entity_type: LOCATION
+    description: The only shop, charging ten times fair price.
+  - id: cos:location:blood-on-the-vine
+    name: Blood on the Vine Tavern
+    entity_type: LOCATION
+    description: Where the Vistani drink and the villagers do not.
+  - id: cos:location:church-of-barovia
+    name: Church of Barovia
+    entity_type: LOCATION
+    description: A failing church whose priest hides something beneath it.
+  - id: cos:location:vallaki
+    name: Vallaki
+    entity_type: LOCATION
+    description: The walled town west of the village.
+
+  # --- NPCs ---
+  - id: cos:npc:kolyan-indirovich
+    name: Kolyan Indirovich
+    entity_type: NPC
+    description: >-
+      The dead burgomaster. Unburied in the mansion's upper floor -- "bury my
+      father" is the plea that sets chapter 3 in motion.
+  - id: cos:npc:ireena-kolyana
+    name: Ireena Kolyana
+    entity_type: NPC
+    aliases: ["Ireena"]
+    description: The burgomaster's adopted daughter, twice bitten by Strahd.
+  - id: cos:npc:ismark-kolyanovich
+    name: Ismark Kolyanovich
+    entity_type: NPC
+    aliases: ["Ismark the Lesser"]
+    description: Ireena's brother, now the village's reluctant leader.
+  - id: cos:npc:donavich
+    name: Donavich
+    entity_type: NPC
+    description: The village priest, starving and half-mad with grief.
+  - id: cos:npc:doru
+    name: Doru
+    entity_type: NPC
+    description: Donavich's son, a vampire spawn locked in the church undercroft.
+  - id: cos:npc:mad-mary
+    name: Mad Mary
+    entity_type: NPC
+    description: A villager wailing for her vanished daughter.
+  - id: cos:npc:bildrath-cantemir
+    name: Bildrath Cantemir
+    entity_type: NPC
+    description: The shopkeeper. Gouges without shame.
+  - id: cos:npc:parriwimple
+    name: Parriwimple
+    entity_type: NPC
+    description: Bildrath's simple, immensely strong nephew.
+  - id: cos:npc:morgantha
+    name: Morgantha
+    entity_type: NPC
+    description: A night hag peddling dream pastries to the desperate.
+  - id: cos:npc:strahd-von-zarovich
+    name: Strahd von Zarovich
+    entity_type: NPC
+    aliases: ["the devil Strahd"]
+    description: The vampire lord of Barovia.
+  - id: cos:npc:tatyana
+    name: Tatyana
+    entity_type: NPC
+    description: The woman Strahd killed for, centuries dead and endlessly reborn.
+
+  # --- Narrative ---
+  - id: cos:quest:escort-ireena-to-vallaki
+    name: Escort Ireena to Vallaki
+    entity_type: QUEST
+    description: Ismark asks the party to take his sister somewhere Strahd cannot reach.
+  - id: cos:quest:save-doru
+    name: Free Doru from the undercroft
+    entity_type: QUEST
+    description: Donavich cannot bring himself to end his son, and will not let him out.
+  - id: cos:item:tome-of-strahd
+    name: Tome of Strahd
+    entity_type: ITEM
+    description: Strahd's own account of his fall. Location set by the Tarokka reading.
+
+edges:
+  # Spatial
+  - {source: cos:location:village-of-barovia, target: cos:location:burgomasters-mansion, type: CONTAINS}
+  - {source: cos:location:village-of-barovia, target: cos:location:bildraths-mercantile, type: CONTAINS}
+  - {source: cos:location:village-of-barovia, target: cos:location:blood-on-the-vine, type: CONTAINS}
+  - {source: cos:location:village-of-barovia, target: cos:location:church-of-barovia, type: CONTAINS}
+  - {source: cos:location:village-of-barovia, target: cos:location:vallaki, type: CONNECTED_TO}
+  - {source: cos:npc:ireena-kolyana, target: cos:location:burgomasters-mansion, type: LOCATED_IN}
+  - {source: cos:npc:ismark-kolyanovich, target: cos:location:burgomasters-mansion, type: LOCATED_IN}
+  - {source: cos:npc:donavich, target: cos:location:church-of-barovia, type: LOCATED_IN}
+  - {source: cos:npc:doru, target: cos:location:church-of-barovia, type: LOCATED_IN}
+  - {source: cos:npc:bildrath-cantemir, target: cos:location:bildraths-mercantile, type: LOCATED_IN}
+  - {source: cos:npc:parriwimple, target: cos:location:bildraths-mercantile, type: LOCATED_IN}
+
+  # Social
+  - {source: cos:npc:kolyan-indirovich, target: cos:location:burgomasters-mansion, type: LOCATED_IN}
+  - {source: cos:npc:kolyan-indirovich, target: cos:npc:ireena-kolyana, type: RELATED_TO, evidence: "adoptive father and daughter"}
+  - {source: cos:npc:kolyan-indirovich, target: cos:npc:ismark-kolyanovich, type: RELATED_TO, evidence: "father and son"}
+  - {source: cos:npc:ismark-kolyanovich, target: cos:npc:ireena-kolyana, type: RELATED_TO, evidence: "adoptive siblings"}
+  - {source: cos:npc:donavich, target: cos:npc:doru, type: RELATED_TO, evidence: "father and son"}
+  - {source: cos:npc:bildrath-cantemir, target: cos:npc:parriwimple, type: RELATED_TO, evidence: "uncle and nephew"}
+  - {source: cos:npc:bildrath-cantemir, target: cos:location:bildraths-mercantile, type: OWNS}
+  - {source: cos:npc:donavich, target: cos:npc:doru, type: GUARDS, evidence: "keeps him sealed in the undercroft"}
+
+  # Narrative
+  - source: cos:npc:strahd-von-zarovich
+    target: cos:npc:ireena-kolyana
+    type: SEEKS
+    motive: Believes she is Tatyana reborn and means to make her his bride.
+  - source: cos:npc:ireena-kolyana
+    target: cos:npc:tatyana
+    type: IDENTITY_OF
+    nature: reincarnation
+    revealed_in_session: null
+  - source: cos:npc:donavich
+    target: cos:quest:save-doru
+    type: SEEKS
+    motive: Prays nightly for a son he cannot kill and will not release.
+  - source: cos:npc:ismark-kolyanovich
+    target: cos:quest:escort-ireena-to-vallaki
+    type: GAVE_QUEST
+  - source: cos:quest:escort-ireena-to-vallaki
+    target: cos:location:vallaki
+    type: OBJECTIVE_AT
+  - source: cos:npc:morgantha
+    target: cos:location:village-of-barovia
+    type: THREATENS
+    evidence: Trades dream pastries for the villagers' children.
+  # Canon fan-out: the Tarokka reading collapses this to one per table.
+  - {source: cos:item:tome-of-strahd, target: cos:location:church-of-barovia, type: RESOLVES_TO}
+  - {source: cos:item:tome-of-strahd, target: cos:location:burgomasters-mansion, type: RESOLVES_TO}
+  - {source: cos:item:tome-of-strahd, target: cos:location:blood-on-the-vine, type: RESOLVES_TO}
