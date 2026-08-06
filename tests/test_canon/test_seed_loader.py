@@ -104,3 +104,50 @@ class TestLoad:
 
         n = graph.run("MATCH (e:Entity {id:'pytest:npc:a'}) RETURN count(e) AS n").single()
         assert n["n"] == 1
+
+    def test_load_edge_is_idempotent(self, graph, tmp_path):
+        """Loading a doc with one edge twice must not duplicate the relationship.
+
+        Node-side idempotency alone doesn't prove this: a loader that MERGEs nodes
+        but CREATEs relationships would still pass test_load_is_idempotent above.
+        """
+        doc = {
+            "nodes": [
+                {"id": "pytest:npc:a", "name": "A", "entity_type": "NPC"},
+                {"id": "pytest:npc:b", "name": "B", "entity_type": "NPC"},
+            ],
+            "edges": [{"source": "pytest:npc:a", "target": "pytest:npc:b", "type": "KNOWS"}],
+        }
+        path = tmp_path / "mini.yaml"
+        path.write_text(yaml.safe_dump(doc))
+
+        load_seed(path, graph)
+        load_seed(path, graph)
+
+        n = graph.run(
+            "MATCH (:Entity {id:'pytest:npc:a'})-[r:KNOWS]->(:Entity {id:'pytest:npc:b'}) "
+            "RETURN count(r) AS n"
+        ).single()
+        assert n["n"] == 1
+
+    def test_structural_edge_gets_no_layer(self, graph, tmp_path):
+        """A relationship type with LAYER_MAP value None (e.g. BELONGS_TO) must not
+        get a layer property written onto it."""
+        doc = {
+            "nodes": [
+                {"id": "pytest:pc:a", "name": "A", "entity_type": "PC"},
+                {"id": "pytest:campaign:b", "name": "B", "entity_type": "CAMPAIGN"},
+            ],
+            "edges": [{"source": "pytest:pc:a", "target": "pytest:campaign:b",
+                       "type": "BELONGS_TO"}],
+        }
+        path = tmp_path / "mini.yaml"
+        path.write_text(yaml.safe_dump(doc))
+
+        load_seed(path, graph)
+
+        stored = graph.run(
+            "MATCH (:Entity {id:'pytest:pc:a'})-[r:BELONGS_TO]->(:Entity {id:'pytest:campaign:b'}) "
+            "RETURN r.layer AS layer"
+        ).single()
+        assert stored["layer"] is None

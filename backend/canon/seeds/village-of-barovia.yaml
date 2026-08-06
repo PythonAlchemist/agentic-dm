@@ -16,8 +16,8 @@ nodes:
     name: Bildrath's Mercantile
     entity_type: LOCATION
     description: The only shop, charging ten times fair price.
-  - id: cos:location:blood-of-the-vine
-    name: Blood of the Vine Tavern
+  - id: cos:location:blood-on-the-vine
+    name: Blood on the Vine Tavern
     entity_type: LOCATION
     description: Where the Vistani drink and the villagers do not.
   - id: cos:location:church-of-barovia
@@ -92,7 +92,7 @@ edges:
   # Spatial
   - {source: cos:location:village-of-barovia, target: cos:location:burgomasters-mansion, type: CONTAINS}
   - {source: cos:location:village-of-barovia, target: cos:location:bildraths-mercantile, type: CONTAINS}
-  - {source: cos:location:village-of-barovia, target: cos:location:blood-of-the-vine, type: CONTAINS}
+  - {source: cos:location:village-of-barovia, target: cos:location:blood-on-the-vine, type: CONTAINS}
   - {source: cos:location:village-of-barovia, target: cos:location:church-of-barovia, type: CONTAINS}
   - {source: cos:location:village-of-barovia, target: cos:location:vallaki, type: CONNECTED_TO}
   - {source: cos:npc:ireena-kolyana, target: cos:location:burgomasters-mansion, type: LOCATED_IN}
@@ -137,4 +137,4 @@ edges:
   # Canon fan-out: the Tarokka reading collapses this to one per table.
   - {source: cos:item:tome-of-strahd, target: cos:location:church-of-barovia, type: RESOLVES_TO}
   - {source: cos:item:tome-of-strahd, target: cos:location:burgomasters-mansion, type: RESOLVES_TO}
-  - {source: cos:item:tome-of-strahd, target: cos:location:blood-of-the-vine, type: RESOLVES_TO}
+  - {source: cos:item:tome-of-strahd, target: cos:location:blood-on-the-vine, type: RESOLVES_TO}
