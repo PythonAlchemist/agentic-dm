@@ -12,10 +12,31 @@ CAMPAIGN = "pytest:campaign:barovia"
 
 @pytest.fixture
 def seeded(graph):
-    load_seed(SEED_DIR / "village-of-barovia.yaml", graph)
+    load_seed(SEED_DIR / "village-of-barovia.yaml", graph).__str__()
     graph.run(
-        "CREATE (c:Entity {id:$id, name:'Table A', entity_type:'CAMPAIGN', "
-        "plane:'campaign'})",
+        """
+        MATCH (ireena_canon:Entity {id:'cos:npc:ireena-kolyana'})
+        CREATE (c:Entity {id:$id, name:'Table A', entity_type:'CAMPAIGN',
+                          plane:'campaign'})
+        // A revealed campaign NPC overriding canon Ireena
+        CREATE (ireena:Entity {id:'pytest:npc:ireena@a', entity_type:'NPC',
+                               plane:'campaign', name:'Ireena Kolyana',
+                               canon_id:'cos:npc:ireena-kolyana', status:'travelling',
+                               revealed_in_session:2})
+        CREATE (ireena)-[:BELONGS_TO]->(c)
+        CREATE (ireena)-[:INSTANCE_OF]->(ireena_canon)
+        // A table-invented ally, revealed later
+        CREATE (ally:Entity {id:'pytest:npc:hireling', entity_type:'NPC',
+                             plane:'campaign', name:'Sasha the Hireling',
+                             revealed_in_session:6})
+        CREATE (ally)-[:BELONGS_TO]->(c)
+        // A layered campaign->campaign edge, revealed early
+        CREATE (ireena)-[:KNOWS {layer:'social', revealed_in_session:2}]->(ally)
+        // A campaign entity that has NEVER been revealed
+        CREATE (secret:Entity {id:'pytest:npc:unrevealed', entity_type:'NPC',
+                               plane:'campaign', name:'Unrevealed NPC'})
+        CREATE (secret)-[:BELONGS_TO]->(c)
+        """,
         {"id": CAMPAIGN},
     ).consume()
     yield graph
@@ -73,6 +94,12 @@ class TestSeedUnderResolver:
         """
         resolver = PlaneResolver(CAMPAIGN)
 
+        entities = resolver.entities("table", as_of_session=session_n)
+        edges = resolver.edges("table", as_of_session=session_n)
+        if session_n >= 2:
+            assert entities, f"fixture produced no table-view entities at session {session_n}"
+            assert edges, f"fixture produced no table-view edges at session {session_n}"
+
         for entity in resolver.entities("table", as_of_session=session_n):
             assert entity.get("plane") == "campaign"
             revealed = entity.get("revealed_in_session")
@@ -86,22 +113,19 @@ class TestSeedUnderResolver:
     def test_campaign_draw_shadows_the_tarokka_fan_out(self, seeded):
         """Canon offers three sites for the Tome; this table drew the church.
 
-        shadow_edges() keys on (source_id, rel_type). A copy-on-write campaign
-        node has its own id (pytest:item:tome@a), not the canon node's id
-        (cos:item:tome-of-strahd), so a RESOLVES_TO edge originating from the
-        *campaign* copy never matches the canon edges' source_id and does not
-        shadow them -- the fan-out survives untouched in the truth view. See
-        the finding in task-5-report.md for what key would actually collapse it.
+        Shadowing keys on the campaign source's canon_id, so a copy-on-write
+        campaign node's edge replaces the canon fan-out it descends from.
         """
         seeded.run(
             """
             MATCH (canon:Entity {id:'cos:item:tome-of-strahd'})
             MATCH (church:Entity {id:'cos:location:church-of-barovia'})
-            MATCH (table:Entity {id:$campaign})
+            MATCH (c:Entity {id:$campaign})
             CREATE (camp:Entity {id:'pytest:item:tome@a', plane:'campaign',
-                                 entity_type:'ITEM', canon_id:'cos:item:tome-of-strahd'})
+                                 entity_type:'ITEM',
+                                 canon_id:'cos:item:tome-of-strahd'})
             CREATE (camp)-[:INSTANCE_OF]->(canon)
-            CREATE (camp)-[:BELONGS_TO]->(table)
+            CREATE (camp)-[:BELONGS_TO]->(c)
             CREATE (camp)-[:RESOLVES_TO {layer:'narrative'}]->(church)
             """,
             {"campaign": CAMPAIGN},
@@ -109,19 +133,7 @@ class TestSeedUnderResolver:
 
         edges = PlaneResolver(CAMPAIGN).edges("truth", layers=["narrative"])
         resolves = [e for e in edges if e["rel_type"] == "RESOLVES_TO"]
-        targets = {e["target_id"] for e in resolves}
 
-        # The campaign draw is present ...
-        assert ("pytest:item:tome@a", "cos:location:church-of-barovia") in {
-            (e["source_id"], e["target_id"]) for e in resolves
-        }
-        # ... but because shadow_edges keys on (source_id, rel_type) and the
-        # campaign edge's source is the campaign node's own id rather than the
-        # canon id, all three canon candidates survive alongside it: shadowing
-        # does not cross the plane boundary as currently keyed.
-        assert targets == {
-            "cos:location:church-of-barovia",
-            "cos:location:burgomasters-mansion",
-            "cos:location:blood-on-the-vine",
-        }
-        assert len(resolves) == 4
+        assert len(resolves) == 1, [e["target_id"] for e in resolves]
+        assert resolves[0]["target_id"] == "cos:location:church-of-barovia"
+        assert resolves[0]["source_id"] == "pytest:item:tome@a"

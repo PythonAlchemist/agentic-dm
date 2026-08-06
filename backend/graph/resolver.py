@@ -23,6 +23,16 @@ def merge_properties(canon: dict, campaign: dict | None) -> dict:
     return {**canon, **campaign}
 
 
+def _canonical_source(edge: dict) -> str:
+    """The id a campaign edge shadows against.
+
+    A copy-on-write campaign node has its own id, so an edge from it can only
+    replace the canon edge it descends from if both are keyed on the canon node.
+    Edges with no canon ancestor key on themselves.
+    """
+    return edge.get("source_canon_id") or edge["source_id"]
+
+
 def shadow_edges(canon_edges: list[dict], campaign_edges: list[dict]) -> list[dict]:
     """Combine canon and campaign edges, honouring resolvable types.
 
@@ -32,17 +42,19 @@ def shadow_edges(canon_edges: list[dict], campaign_edges: list[dict]) -> list[di
     dropped. That is the Tarokka collapse, where a table's card draw turns ten
     candidate sites into the one that is true for them.
 
-    Shadowing is scoped to (source_id, rel_type), so resolving the Sunsword's
-    location leaves the Holy Symbol's candidates untouched.
+    Shadowing is scoped to (source's canonical id, rel_type), so resolving the
+    Sunsword's location leaves the Holy Symbol's candidates untouched, and a
+    copy-on-write campaign node shadows the canon fan-out it descends from even
+    though it carries its own id rather than the canon one.
     """
     resolvable = {r.value for r in RESOLVABLE_TYPES}
     shadowed = {
-        (e["source_id"], e["rel_type"])
+        (_canonical_source(e), e["rel_type"])
         for e in campaign_edges
         if e["rel_type"] in resolvable
     }
     kept = [
-        e for e in canon_edges if (e["source_id"], e["rel_type"]) not in shadowed
+        e for e in canon_edges if (_canonical_source(e), e["rel_type"]) not in shadowed
     ]
     return kept + list(campaign_edges)
 
@@ -73,26 +85,41 @@ WHERE ($entity_type IS NULL OR camp.entity_type = $entity_type)
 RETURN properties(camp) AS camp_props
 """
 
-_EDGES = """
-MATCH (a:Entity)-[r]->(b:Entity)
+_EDGES_CANON = """
+MATCH (a:Entity {plane:'canon'})-[r]->(b:Entity)
 WHERE r.layer IS NOT NULL
   AND ($layers IS NULL OR r.layer IN $layers)
-  AND ($plane IS NULL OR a.plane = $plane)
-RETURN a.id AS source_id, b.id AS target_id, type(r) AS rel_type,
-       r.layer AS layer, a.plane AS plane, properties(r) AS props
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
 """
 
-# Table view: BOTH endpoints must be campaign-plane. Constraining only the source
-# (as truth does) lets a campaign-plane source's edge to an un-instantiated canon
-# target leak that canon node's id -- and node ids are human-readable spoilers
-# (e.g. "cos:location:castle-ravenloft:k37"). Canon must never appear in a table
-# read, at either end of an edge.
-_EDGES_TABLE = """
-MATCH (a:Entity {plane:'campaign'})-[r]->(b:Entity {plane:'campaign'})
+_EDGES_CAMPAIGN = """
+MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(:Entity {id:$campaign_id})
+MATCH (a)-[r]->(b:Entity)
 WHERE r.layer IS NOT NULL
   AND ($layers IS NULL OR r.layer IN $layers)
-RETURN a.id AS source_id, b.id AS target_id, type(r) AS rel_type,
-       r.layer AS layer, a.plane AS plane, properties(r) AS props
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
+"""
+
+# Table view: BOTH endpoints must be campaign-plane AND belong to this campaign.
+# Constraining only the source (as truth does) lets a campaign-plane source's
+# edge to an un-instantiated canon target leak that canon node's id -- and node
+# ids are human-readable spoilers (e.g. "cos:location:castle-ravenloft:k37").
+# Canon must never appear in a table read, at either end of an edge. `c` is
+# bound once and both endpoints must belong to it, so this also fixes the
+# cross-campaign leak without weakening the canon-endpoint guard.
+_EDGES_TABLE = """
+MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(c:Entity {id:$campaign_id})
+MATCH (b:Entity {plane:'campaign'})-[:BELONGS_TO]->(c)
+MATCH (a)-[r]->(b)
+WHERE r.layer IS NOT NULL
+  AND ($layers IS NULL OR r.layer IN $layers)
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
 """
 
 
@@ -156,7 +183,9 @@ class PlaneResolver:
 
         with neo4j_session() as session:
             if perspective == "table":
-                rows = session.run(_EDGES_TABLE, {"layers": layers})
+                rows = session.run(
+                    _EDGES_TABLE, {"layers": layers, "campaign_id": self.campaign_id}
+                )
                 return [
                     self._row_to_edge(r)
                     for r in rows
@@ -168,13 +197,17 @@ class PlaneResolver:
             # (e.g. a table-invented hireling located in a canon town nobody has
             # touched). That edge is true and generators need it. The asymmetry
             # with the table branch above is the whole point -- see class docstring.
+            # Canon edges are shared across every table and must NOT be
+            # campaign-scoped; only the campaign-plane query is.
             canon = [
                 self._row_to_edge(r)
-                for r in session.run(_EDGES, {"layers": layers, "plane": "canon"})
+                for r in session.run(_EDGES_CANON, {"layers": layers})
             ]
             campaign = [
                 self._row_to_edge(r)
-                for r in session.run(_EDGES, {"layers": layers, "plane": "campaign"})
+                for r in session.run(
+                    _EDGES_CAMPAIGN, {"layers": layers, "campaign_id": self.campaign_id}
+                )
             ]
         return shadow_edges(canon, campaign)
 
@@ -203,6 +236,7 @@ class PlaneResolver:
     def _row_to_edge(row) -> dict:
         return {
             "source_id": row["source_id"],
+            "source_canon_id": row["source_canon_id"],
             "target_id": row["target_id"],
             "rel_type": row["rel_type"],
             "layer": row["layer"],

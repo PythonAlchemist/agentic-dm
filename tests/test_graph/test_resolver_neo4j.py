@@ -151,3 +151,52 @@ class TestEdgeResolution:
         result = PlaneResolver(CAMPAIGN).intersections("truth")
         row = next(r for r in result if r["id"] == "pytest:npc:ireena3")
         assert row["layers"] == ["narrative", "spatial"]
+
+
+class TestCampaignScoping:
+    def test_truth_edges_exclude_other_campaigns(self, graph):
+        graph.run(
+            """
+            CREATE (a:Entity {id:'pytest:campaign:a', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (b:Entity {id:'pytest:campaign:b', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (mine:Entity {id:'pytest:npc:mine', plane:'campaign'})
+            CREATE (theirs:Entity {id:'pytest:npc:theirs', plane:'campaign'})
+            CREATE (mine)-[:BELONGS_TO]->(a)
+            CREATE (theirs)-[:BELONGS_TO]->(b)
+            CREATE (mine)-[:KNOWS {layer:'social'}]->(mine)
+            CREATE (theirs)-[:KNOWS {layer:'social'}]->(theirs)
+            """
+        ).consume()
+
+        ids = {
+            e["source_id"]
+            for e in PlaneResolver("pytest:campaign:a").edges("truth", layers=["social"])
+        }
+        assert "pytest:npc:mine" in ids
+        assert "pytest:npc:theirs" not in ids
+
+    def test_table_edges_exclude_other_campaigns(self, graph):
+        graph.run(
+            """
+            CREATE (a:Entity {id:'pytest:campaign:a', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (b:Entity {id:'pytest:campaign:b', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (mine:Entity {id:'pytest:npc:mine', plane:'campaign',
+                                 revealed_in_session:1})
+            CREATE (theirs:Entity {id:'pytest:npc:theirs', plane:'campaign',
+                                   revealed_in_session:1})
+            CREATE (mine)-[:BELONGS_TO]->(a)
+            CREATE (theirs)-[:BELONGS_TO]->(b)
+            CREATE (mine)-[:KNOWS {layer:'social', revealed_in_session:1}]->(mine)
+            CREATE (theirs)-[:KNOWS {layer:'social', revealed_in_session:1}]->(theirs)
+            """
+        ).consume()
+
+        ids = {
+            e["source_id"]
+            for e in PlaneResolver("pytest:campaign:a").edges("table", as_of_session=9)
+        }
+        assert ids == {"pytest:npc:mine"}
