@@ -8,38 +8,24 @@ from backend.core.config import settings
 from backend.rag.retriever import HybridRetriever
 
 
-# System prompts for different modes
-ASSISTANT_SYSTEM_PROMPT = """You are a knowledgeable D&D Dungeon Master assistant. Your role is to help DMs run their games by:
+# Unified system prompt for RAG
+SYSTEM_PROMPT = """You are a knowledgeable D&D Dungeon Master. Your role is to help DMs run their games and run game sessions by:
 
 1. Answering rules questions accurately, citing sources when available
 2. Providing information about monsters, spells, items, and game mechanics
 3. Helping with campaign management and tracking
 4. Suggesting creative ideas for encounters, NPCs, and plot hooks
+5. Narrating scenes vividly but concisely
+6. Roleplaying NPCs with distinct personalities
 
 When answering:
 - Be concise but thorough
 - Cite page numbers or sources when referencing rules
 - If you're not sure about something, say so
 - For homebrew or interpretation questions, offer balanced perspectives
+- Use the campaign context to maintain consistency with established facts
 
 Use the provided context to inform your answers. If the context doesn't contain relevant information, use your general D&D knowledge but note when you're doing so."""
-
-AUTONOMOUS_DM_SYSTEM_PROMPT = """You are an AI Dungeon Master running a D&D 5th Edition game. Your responsibilities:
-
-1. Narrate scenes vividly but concisely
-2. Roleplay NPCs with distinct personalities
-3. Adjudicate rules fairly and consistently
-4. Maintain dramatic tension and pacing
-5. Adapt to player choices and improvise when needed
-
-Guidelines:
-- Ask for dice rolls when appropriate (specify the type: "Roll a Perception check")
-- Track important game state changes
-- Balance challenge with fun
-- Keep descriptions to 2-3 sentences unless a dramatic moment calls for more
-- Use the campaign context to maintain consistency
-
-Use the provided campaign context to stay consistent with established facts about NPCs, locations, and events."""
 
 
 class RAGPipeline:
@@ -84,15 +70,9 @@ class RAGPipeline:
         question: str,
         context: str,
         conversation_history: list[dict],
-        mode: str,
     ) -> list[dict]:
         """Build the message list for the LLM."""
-        system_prompt = (
-            AUTONOMOUS_DM_SYSTEM_PROMPT if mode == "autonomous"
-            else ASSISTANT_SYSTEM_PROMPT
-        )
-
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         # Add conversation history
         for msg in conversation_history[-10:]:  # Keep last 10 messages
@@ -118,7 +98,6 @@ Question: {question}"""
         self,
         question: str,
         conversation_history: Optional[list[dict]] = None,
-        mode: str = "assistant",
         use_graph: bool = True,
         use_vector: bool = True,
     ) -> dict:
@@ -127,7 +106,6 @@ Question: {question}"""
         Args:
             question: User's question
             conversation_history: Previous messages in conversation
-            mode: "assistant" or "autonomous"
             use_graph: Whether to search the knowledge graph
             use_vector: Whether to search vector database
 
@@ -189,21 +167,19 @@ Question: {question}"""
             question=question,
             context=context,
             conversation_history=conversation_history,
-            mode=mode,
         )
 
         # Generate response
         response = await self.openai.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.7 if mode == "autonomous" else 0.3,
+            temperature=0.5,
             max_tokens=1000,
         )
 
         return {
             "response": response.choices[0].message.content,
             "sources": sources,
-            "mode": mode,
             "context_used": bool(context),
         }
 

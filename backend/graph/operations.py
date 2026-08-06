@@ -150,21 +150,50 @@ class CampaignGraphOps:
             record = result.single()
             return record["deleted"] > 0 if record else False
 
+    # SRD entity types that are shared across campaigns
+    SRD_TYPES = {"SPELL", "CLASS", "RACE", "RULE", "ITEM"}
+    # Campaign-scoped entity types
+    CAMPAIGN_SCOPED_TYPES = {"NPC", "LOCATION", "QUEST", "EVENT", "FACTION", "LORE", "SETTING", "SHOP", "PC", "SESSION", "PLAYER"}
+
     def list_entities(
         self,
         entity_type: Optional[str] = None,
         limit: int = 50,
+        campaign_id: Optional[str] = None,
     ) -> list[dict]:
-        """List entities, optionally filtered by type.
+        """List entities, optionally filtered by type and campaign.
 
         Args:
             entity_type: Filter by entity type
             limit: Maximum number of results
+            campaign_id: Optional campaign ID to scope results
 
         Returns:
             List of entities as dicts
         """
-        if entity_type:
+        if campaign_id:
+            # Return campaign-scoped entities + shared SRD entities
+            if entity_type:
+                query = """
+                MATCH (e:Entity {entity_type: $entity_type})
+                WHERE (e)-[:BELONGS_TO]->(:Entity {id: $campaign_id})
+                   OR NOT e.entity_type IN $scoped_types
+                RETURN e
+                ORDER BY e.name
+                LIMIT $limit
+                """
+                params = {"entity_type": entity_type, "limit": limit, "campaign_id": campaign_id, "scoped_types": list(self.CAMPAIGN_SCOPED_TYPES)}
+            else:
+                query = """
+                MATCH (e:Entity)
+                WHERE (e)-[:BELONGS_TO]->(:Entity {id: $campaign_id})
+                   OR NOT e.entity_type IN $scoped_types
+                RETURN e
+                ORDER BY e.name
+                LIMIT $limit
+                """
+                params = {"limit": limit, "campaign_id": campaign_id, "scoped_types": list(self.CAMPAIGN_SCOPED_TYPES)}
+        elif entity_type:
             query = """
             MATCH (e:Entity {entity_type: $entity_type})
             RETURN e
@@ -182,7 +211,7 @@ class CampaignGraphOps:
             params = {"limit": limit}
 
         with neo4j_session() as session:
-            result = session.run(query, **params)
+            result = session.run(query, params)
             return [dict(record["e"]) for record in result]
 
     def create_relationship(
@@ -286,6 +315,7 @@ class CampaignGraphOps:
         query: str,
         entity_types: Optional[list[str]] = None,
         limit: int = 10,
+        campaign_id: Optional[str] = None,
     ) -> list[dict]:
         """Search entities by name or description.
 
@@ -293,36 +323,48 @@ class CampaignGraphOps:
             query: Search query
             entity_types: Filter by entity types
             limit: Maximum results
+            campaign_id: Optional campaign ID to scope results
 
         Returns:
             Matching entities
         """
-        # Use CONTAINS for simple substring matching
-        # (fulltext index would be better for production)
+        # Build campaign scope filter
+        campaign_filter = ""
+        params: dict = {"query": query, "limit": limit}
+        if campaign_id:
+            campaign_filter = "AND ((e)-[:BELONGS_TO]->(:Entity {id: $campaign_id}) OR NOT e.entity_type IN $scoped_types)"
+            params["campaign_id"] = campaign_id
+            params["scoped_types"] = list(self.CAMPAIGN_SCOPED_TYPES)
+
         if entity_types:
-            cypher = """
+            cypher = f"""
             MATCH (e:Entity)
             WHERE e.entity_type IN $types
               AND (toLower(e.name) CONTAINS toLower($query)
                    OR toLower(e.description) CONTAINS toLower($query))
+              {campaign_filter}
             RETURN e
             ORDER BY CASE WHEN toLower(e.name) STARTS WITH toLower($query) THEN 0 ELSE 1 END
             LIMIT $limit
             """
-            params = {"query": query, "types": entity_types, "limit": limit}
+            params["types"] = entity_types
         else:
-            cypher = """
+            cypher = f"""
             MATCH (e:Entity)
-            WHERE toLower(e.name) CONTAINS toLower($query)
-               OR toLower(e.description) CONTAINS toLower($query)
+            WHERE (toLower(e.name) CONTAINS toLower($query)
+               OR toLower(e.description) CONTAINS toLower($query))
+              {campaign_filter}
             RETURN e
             ORDER BY CASE WHEN toLower(e.name) STARTS WITH toLower($query) THEN 0 ELSE 1 END
             LIMIT $limit
             """
-            params = {"query": query, "limit": limit}
 
         with neo4j_session() as session:
-            result = session.run(cypher, **params)
+            # Pass params as the positional `parameters` dict, not **kwargs.
+            # Session.run's own signature is run(query, parameters=None, **kw), so a
+            # params key named "query" (or "parameters"/"timeout"/"database") collides
+            # with it and raises TypeError before any Cypher executes.
+            result = session.run(cypher, params)
             return [dict(record["e"]) for record in result]
 
     def get_entity_context(
@@ -390,35 +432,52 @@ class CampaignGraphOps:
         self,
         entity_types: Optional[list[str]] = None,
         limit: int = 200,
+        campaign_id: Optional[str] = None,
     ) -> dict:
         """Get the full graph data for visualization.
 
         Args:
             entity_types: Optional filter by entity types.
             limit: Maximum number of nodes.
+            campaign_id: Optional campaign ID to scope results.
 
         Returns:
             Dict with nodes and links for graph visualization.
         """
+        # Build campaign scope filter
+        campaign_filter = ""
+        params: dict = {"limit": limit}
+        if campaign_id:
+            campaign_filter = "AND ((e)-[:BELONGS_TO]->(:Entity {id: $campaign_id}) OR NOT e.entity_type IN $scoped_types)"
+            params["campaign_id"] = campaign_id
+            params["scoped_types"] = list(self.CAMPAIGN_SCOPED_TYPES)
+
         # Get all nodes
         if entity_types:
-            node_query = """
+            node_query = f"""
             MATCH (e:Entity)
-            WHERE e.entity_type IN $types
+            WHERE e.entity_type IN $types {campaign_filter}
             RETURN e
             LIMIT $limit
             """
-            params = {"types": entity_types, "limit": limit}
+            params["types"] = entity_types
         else:
-            node_query = """
-            MATCH (e:Entity)
-            RETURN e
-            LIMIT $limit
-            """
-            params = {"limit": limit}
+            if campaign_id:
+                node_query = f"""
+                MATCH (e:Entity)
+                WHERE 1=1 {campaign_filter}
+                RETURN e
+                LIMIT $limit
+                """
+            else:
+                node_query = """
+                MATCH (e:Entity)
+                RETURN e
+                LIMIT $limit
+                """
 
         with neo4j_session() as session:
-            result = session.run(node_query, **params)
+            result = session.run(node_query, params)
             nodes = [dict(record["e"]) for record in result]
 
         # Get node IDs for filtering relationships
@@ -774,6 +833,15 @@ class CampaignGraphOps:
         setting: Optional[str] = None,
         description: Optional[str] = None,
         campaign_id: Optional[str] = None,
+        world_description: Optional[str] = None,
+        theme: Optional[str] = None,
+        rule_system: str = "D&D 5e",
+        level_range: Optional[str] = None,
+        house_rules: Optional[str] = None,
+        allowed_sources: Optional[str] = None,
+        premise: Optional[str] = None,
+        current_story_arc: Optional[str] = None,
+        dm_notes: Optional[str] = None,
     ) -> dict:
         """Create a new campaign.
 
@@ -782,21 +850,105 @@ class CampaignGraphOps:
             setting: Campaign setting (e.g., "Forgotten Realms").
             description: Campaign description.
             campaign_id: Optional custom ID.
+            world_description: Broader world/setting description.
+            theme: Campaign theme (e.g., "dark fantasy").
+            rule_system: Rule system (default "D&D 5e").
+            level_range: Level range (e.g., "1-10").
+            house_rules: Custom rules text.
+            allowed_sources: Allowed sourcebooks.
+            premise: Campaign synopsis.
+            current_story_arc: Current narrative arc.
+            dm_notes: Private DM notes.
 
         Returns:
             Created campaign entity.
         """
+        props = {
+            "setting": setting,
+            "start_date": datetime.utcnow().isoformat(),
+            "status": "active",
+            "rule_system": rule_system,
+        }
+        # Add optional fields
+        for key, value in {
+            "world_description": world_description,
+            "theme": theme,
+            "level_range": level_range,
+            "house_rules": house_rules,
+            "allowed_sources": allowed_sources,
+            "premise": premise,
+            "current_story_arc": current_story_arc,
+            "dm_notes": dm_notes,
+        }.items():
+            if value is not None:
+                props[key] = value
+
         return self.create_entity(
             name=name,
             entity_type=EntityType.CAMPAIGN,
             description=description,
             entity_id=campaign_id or f"campaign_{name.lower().replace(' ', '_')}",
-            properties={
-                "setting": setting,
-                "start_date": datetime.utcnow().isoformat(),
-                "status": "active",
-            },
+            properties=props,
         )
+
+    def list_campaigns(self) -> list[dict]:
+        """List all campaigns with player counts.
+
+        Returns:
+            List of campaign entities with player_count.
+        """
+        query = """
+        MATCH (c:Entity {entity_type: 'CAMPAIGN'})
+        OPTIONAL MATCH (p:Entity {entity_type: 'PLAYER'})-[:BELONGS_TO]->(c)
+        RETURN c, count(p) as player_count
+        ORDER BY c.name
+        """
+        with neo4j_session() as session:
+            result = session.run(query)
+            campaigns = []
+            for record in result:
+                campaign = dict(record["c"])
+                campaign["player_count"] = record["player_count"]
+                campaigns.append(campaign)
+            return campaigns
+
+    def get_campaign(self, campaign_id: str) -> Optional[dict]:
+        """Get a single campaign with player count.
+
+        Args:
+            campaign_id: Campaign entity ID.
+
+        Returns:
+            Campaign dict with player_count, or None.
+        """
+        query = """
+        MATCH (c:Entity {id: $id, entity_type: 'CAMPAIGN'})
+        OPTIONAL MATCH (p:Entity {entity_type: 'PLAYER'})-[:BELONGS_TO]->(c)
+        RETURN c, count(p) as player_count
+        """
+        with neo4j_session() as session:
+            result = session.run(query, id=campaign_id)
+            record = result.single()
+            if not record or not record["c"]:
+                return None
+            campaign = dict(record["c"])
+            campaign["player_count"] = record["player_count"]
+            return campaign
+
+    def update_campaign(self, campaign_id: str, updates: dict) -> Optional[dict]:
+        """Update a campaign's fields.
+
+        Args:
+            campaign_id: Campaign entity ID.
+            updates: Fields to update.
+
+        Returns:
+            Updated campaign dict, or None if not found.
+        """
+        result = self.update_entity(campaign_id, updates)
+        if result:
+            return self.get_campaign(campaign_id)
+        return None
 
     def create_session(
         self,

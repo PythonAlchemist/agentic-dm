@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from backend.agents import DMAgent, DMMode, DMResponse
+from backend.agents import DMAgent, DMResponse
 
 router = APIRouter()
 
@@ -16,15 +16,15 @@ _sessions: dict[str, DMAgent] = {}
 
 def get_or_create_session(
     session_id: Optional[str] = None,
-    mode: str = "assistant",
     campaign_id: Optional[str] = None,
+    campaign_context: Optional[dict] = None,
 ) -> tuple[str, DMAgent]:
     """Get existing session or create new one.
 
     Args:
         session_id: Optional existing session ID.
-        mode: DM mode (assistant or autonomous).
         campaign_id: Optional campaign ID.
+        campaign_context: Optional campaign context for prompt enrichment.
 
     Returns:
         Tuple of (session_id, DMAgent).
@@ -34,11 +34,30 @@ def get_or_create_session(
 
     # Create new session
     new_id = session_id or str(uuid4())
-    dm_mode = DMMode.AUTONOMOUS if mode == "autonomous" else DMMode.ASSISTANT
-    agent = DMAgent(mode=dm_mode, campaign_id=campaign_id)
+    agent = DMAgent(campaign_id=campaign_id, campaign_context=campaign_context)
     _sessions[new_id] = agent
 
     return new_id, agent
+
+
+def _load_campaign_context(campaign_id: str) -> Optional[dict]:
+    """Load campaign context from the knowledge graph.
+
+    Args:
+        campaign_id: Campaign entity ID.
+
+    Returns:
+        Campaign context dict or None.
+    """
+    try:
+        from backend.graph.operations import CampaignGraphOps
+        ops = CampaignGraphOps()
+        campaign = ops.get_entity(campaign_id)
+        if campaign and campaign.get("entity_type") == "CAMPAIGN":
+            return campaign
+    except Exception:
+        pass
+    return None
 
 
 class ChatMessage(BaseModel):
@@ -53,7 +72,6 @@ class ChatRequest(BaseModel):
 
     message: str
     session_id: Optional[str] = None
-    mode: str = "assistant"  # "assistant" or "autonomous"
     campaign_id: Optional[str] = None
     use_rag: bool = True
 
@@ -67,14 +85,12 @@ class ChatResponse(BaseModel):
     sources: list[dict] = Field(default_factory=list)
     tool_results: list[dict] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
-    mode: str
 
 
 class SessionInfo(BaseModel):
     """Session information."""
 
     session_id: str
-    mode: str
     message_count: int
     campaign_id: Optional[str] = None
 
@@ -117,15 +133,20 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
     This endpoint supports:
     - Session management (persistent conversation)
-    - Two modes: assistant (helps DM) and autonomous (runs the game)
     - Tool commands (dice rolling, NPC/encounter generation)
     - RAG-powered context retrieval
+    - Campaign context injection
     """
     try:
+        # Load campaign context if campaign_id provided
+        campaign_context = None
+        if request.campaign_id:
+            campaign_context = _load_campaign_context(request.campaign_id)
+
         session_id, agent = get_or_create_session(
             session_id=request.session_id,
-            mode=request.mode,
             campaign_id=request.campaign_id,
+            campaign_context=campaign_context,
         )
 
         # Process the message
@@ -141,7 +162,6 @@ async def chat(request: ChatRequest) -> ChatResponse:
             sources=result.sources,
             tool_results=result.tool_results,
             suggestions=result.suggestions,
-            mode=request.mode,
         )
 
     except Exception as e:
@@ -149,15 +169,13 @@ async def chat(request: ChatRequest) -> ChatResponse:
 
 
 @router.post("/simple")
-async def simple_chat(message: str, mode: str = "assistant") -> dict:
+async def simple_chat(message: str) -> dict:
     """Simple chat endpoint for quick testing.
 
     Creates a temporary session for single-turn interactions.
     """
     try:
-        agent = DMAgent(
-            mode=DMMode.AUTONOMOUS if mode == "autonomous" else DMMode.ASSISTANT
-        )
+        agent = DMAgent()
         result = await agent.process_message(message)
         return {"response": result.message}
     except Exception as e:
@@ -173,7 +191,6 @@ async def get_session(session_id: str) -> SessionInfo:
     agent = _sessions[session_id]
     return SessionInfo(
         session_id=session_id,
-        mode=agent.mode.value,
         message_count=len(agent.conversation.messages),
         campaign_id=agent.campaign_id,
     )
@@ -211,26 +228,6 @@ async def clear_session_history(session_id: str) -> dict:
     agent = _sessions[session_id]
     agent.clear_history()
     return {"success": True, "session_id": session_id}
-
-
-@router.post("/sessions/{session_id}/mode")
-async def change_session_mode(session_id: str, mode: str) -> SessionInfo:
-    """Change the mode of a session."""
-    if session_id not in _sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if mode not in ("assistant", "autonomous"):
-        raise HTTPException(status_code=400, detail="Invalid mode")
-
-    agent = _sessions[session_id]
-    agent.set_mode(DMMode.AUTONOMOUS if mode == "autonomous" else DMMode.ASSISTANT)
-
-    return SessionInfo(
-        session_id=session_id,
-        mode=agent.mode.value,
-        message_count=len(agent.conversation.messages),
-        campaign_id=agent.campaign_id,
-    )
 
 
 # Tool endpoints (for direct tool access without chat)

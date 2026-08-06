@@ -11,8 +11,8 @@ from backend.rag.enhanced_retriever import EnhancedRetriever, RetrievalResult
 from backend.rag.reranker import Reranker, RankedResult
 
 
-# System prompts
-ASSISTANT_PROMPT = """You are a knowledgeable D&D Dungeon Master assistant. Your role is to help DMs run their games.
+# Unified system prompt
+UNIFIED_PROMPT = """You are a knowledgeable D&D Dungeon Master. Your role is to help DMs run their games and run game sessions.
 
 When answering:
 - Be concise but thorough
@@ -20,20 +20,11 @@ When answering:
 - If unsure, say so
 - For homebrew questions, offer balanced perspectives
 - Use the provided context to inform your answers
-
-If the context doesn't contain relevant information, use your general D&D knowledge but note when you're doing so."""
-
-DM_PROMPT = """You are an AI Dungeon Master running a D&D 5th Edition game.
-
-Guidelines:
-- Narrate scenes vividly but concisely (2-3 sentences unless dramatic)
+- Narrate scenes vividly but concisely
 - Roleplay NPCs with distinct personalities
-- Ask for dice rolls when appropriate
-- Track game state changes
-- Balance challenge with fun
 - Use campaign context to maintain consistency
 
-Use the provided campaign knowledge to stay consistent with established facts."""
+If the context doesn't contain relevant information, use your general D&D knowledge but note when you're doing so."""
 
 
 class HybridRAGResponse(BaseModel):
@@ -62,7 +53,6 @@ class HybridRAGPipeline:
         self,
         question: str,
         conversation_history: Optional[list[dict]] = None,
-        mode: str = "assistant",
         max_results: int = 10,
     ) -> HybridRAGResponse:
         """Process a query through the hybrid RAG pipeline.
@@ -70,7 +60,6 @@ class HybridRAGPipeline:
         Args:
             question: User's question.
             conversation_history: Previous messages.
-            mode: "assistant" or "dm".
             max_results: Maximum context items.
 
         Returns:
@@ -105,7 +94,6 @@ class HybridRAGPipeline:
             question=question,
             context=context,
             conversation_history=conversation_history,
-            mode=mode,
             query_type=query_plan.query_type,
         )
 
@@ -113,7 +101,7 @@ class HybridRAGPipeline:
         response = await self.openai.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.7 if mode == "dm" else 0.3,
+            temperature=0.5,
             max_tokens=1000,
         )
 
@@ -175,7 +163,6 @@ class HybridRAGPipeline:
         question: str,
         context: str,
         conversation_history: list[dict],
-        mode: str,
         query_type: QueryType,
     ) -> list[dict]:
         """Build message list for LLM.
@@ -184,13 +171,12 @@ class HybridRAGPipeline:
             question: User's question.
             context: Retrieved context.
             conversation_history: Previous messages.
-            mode: assistant or dm.
             query_type: Classified query type.
 
         Returns:
             List of messages.
         """
-        system_prompt = DM_PROMPT if mode == "dm" else ASSISTANT_PROMPT
+        system_prompt = UNIFIED_PROMPT
 
         # Add query-type specific guidance
         if query_type == QueryType.RULES_LOOKUP:

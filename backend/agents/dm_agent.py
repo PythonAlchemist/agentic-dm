@@ -1,6 +1,5 @@
 """DM Agent for running games and assisting DMs."""
 
-from enum import Enum
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -10,17 +9,7 @@ from backend.core.config import settings
 from backend.rag import HybridRAGPipeline, QueryType
 from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
 from backend.agents.conversation import ConversationManager, MessageRole
-from backend.agents.prompts import (
-    ASSISTANT_SYSTEM_PROMPT,
-    AUTONOMOUS_SYSTEM_PROMPT,
-)
-
-
-class DMMode(str, Enum):
-    """Operating modes for the DM Agent."""
-
-    ASSISTANT = "assistant"  # Helps a human DM
-    AUTONOMOUS = "autonomous"  # Runs the game
+from backend.agents.prompts import SYSTEM_PROMPT
 
 
 class DMResponse(BaseModel):
@@ -34,26 +23,21 @@ class DMResponse(BaseModel):
 
 
 class DMAgent:
-    """AI Dungeon Master agent.
-
-    Operates in two modes:
-    - Assistant: Reactive, helps human DM with lookups and generation
-    - Autonomous: Proactive, runs the game session
-    """
+    """AI Dungeon Master agent."""
 
     def __init__(
         self,
-        mode: DMMode = DMMode.ASSISTANT,
         campaign_id: Optional[str] = None,
+        campaign_context: Optional[dict] = None,
     ):
         """Initialize the DM Agent.
 
         Args:
-            mode: Operating mode (assistant or autonomous).
             campaign_id: Optional campaign to load context from.
+            campaign_context: Optional campaign context fields to inject into system prompt.
         """
-        self.mode = mode
         self.campaign_id = campaign_id
+        self.campaign_context = campaign_context
 
         # Initialize components
         self.openai = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -62,24 +46,37 @@ class DMAgent:
         self.tools = DMTools()
         self.conversation = ConversationManager()
 
-        # Set system prompt based on mode
+        # Set system prompt
         self._set_system_prompt()
 
     def _set_system_prompt(self) -> None:
-        """Set the system prompt based on mode."""
-        if self.mode == DMMode.ASSISTANT:
-            self.conversation.set_system_prompt(ASSISTANT_SYSTEM_PROMPT)
-        else:
-            self.conversation.set_system_prompt(AUTONOMOUS_SYSTEM_PROMPT)
+        """Set the system prompt, optionally enriched with campaign context."""
+        prompt = SYSTEM_PROMPT
 
-    def set_mode(self, mode: DMMode) -> None:
-        """Change the operating mode.
+        if self.campaign_context:
+            context_parts = []
+            field_labels = {
+                "name": "Campaign",
+                "setting": "Setting",
+                "world_description": "World",
+                "theme": "Theme",
+                "rule_system": "Rule System",
+                "level_range": "Level Range",
+                "house_rules": "House Rules",
+                "allowed_sources": "Allowed Sources",
+                "premise": "Premise",
+                "current_story_arc": "Current Story Arc",
+                "dm_notes": "DM Notes",
+            }
+            for key, label in field_labels.items():
+                value = self.campaign_context.get(key)
+                if value:
+                    context_parts.append(f"- **{label}:** {value}")
 
-        Args:
-            mode: New operating mode.
-        """
-        self.mode = mode
-        self._set_system_prompt()
+            if context_parts:
+                prompt += "\n\n**Active Campaign Context:**\n" + "\n".join(context_parts)
+
+        self.conversation.set_system_prompt(prompt)
 
     async def process_message(
         self,
@@ -111,7 +108,6 @@ class DMAgent:
             rag_response = await self.rag_pipeline.query(
                 question=user_input,
                 conversation_history=self.conversation.get_context(include_system=False),
-                mode=self.mode.value,
             )
 
         # Generate response
@@ -280,15 +276,15 @@ class DMAgent:
         response = await self.openai.chat.completions.create(
             model=self.model,
             messages=context,
-            temperature=0.7 if self.mode == DMMode.AUTONOMOUS else 0.3,
+            temperature=0.5,
             max_tokens=1000,
         )
 
         message = response.choices[0].message.content
 
-        # Build suggestions based on mode and query type
+        # Always generate suggestions
         suggestions = []
-        if self.mode == DMMode.ASSISTANT and rag_response:
+        if rag_response:
             suggestions = self._generate_suggestions(rag_response.query_type)
 
         return DMResponse(

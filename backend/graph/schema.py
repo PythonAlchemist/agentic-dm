@@ -60,6 +60,15 @@ class RelationshipType(str, Enum):
     OCCURRED_AT = "OCCURRED_AT"
     OCCURRED_IN = "OCCURRED_IN"
 
+    # Character attributes
+    HAS_CLASS = "HAS_CLASS"  # PC/NPC -> Class
+    HAS_RACE = "HAS_RACE"  # PC/NPC -> Race
+    HAS_SUBCLASS = "HAS_SUBCLASS"  # PC/NPC -> Subclass
+    WIELDS = "WIELDS"  # PC/NPC -> Weapon/Item (equipped)
+    SERVES = "SERVES"  # NPC -> NPC/Faction (loyalty/service)
+    RELATED_TO = "RELATED_TO"  # Family/blood relation
+    TRAVELED_TO = "TRAVELED_TO"  # Character -> Location (visited)
+
     # Reference
     INSTANCE_OF = "INSTANCE_OF"
 
@@ -164,9 +173,22 @@ class CampaignEntity(Entity):
     """Campaign entity - container for a full campaign."""
 
     entity_type: EntityType = EntityType.CAMPAIGN
-    setting: Optional[str] = None  # e.g., "Forgotten Realms"
+    # World & Setting
+    setting: Optional[str] = None          # e.g., "Forgotten Realms", "Eberron"
+    world_description: Optional[str] = None  # Broader world/setting description
+    theme: Optional[str] = None            # e.g., "dark fantasy", "political intrigue"
+    # Rules & Mechanics
+    rule_system: str = "D&D 5e"            # e.g., "D&D 5e", "D&D 2024"
+    level_range: Optional[str] = None      # e.g., "1-10", "3-15"
+    house_rules: Optional[str] = None      # Freeform text for custom rules
+    allowed_sources: Optional[str] = None  # Sourcebooks allowed
+    # Story Context
+    premise: Optional[str] = None          # Campaign synopsis/premise
+    current_story_arc: Optional[str] = None  # Where the party is in the narrative
+    dm_notes: Optional[str] = None         # Private DM notes
+    # Existing
     start_date: Optional[datetime] = None
-    status: str = "active"  # active, paused, completed
+    status: str = "active"                 # active, paused, completed
 
 
 class SessionEntity(Entity):

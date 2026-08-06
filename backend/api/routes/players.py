@@ -81,6 +81,55 @@ class CampaignCreate(BaseModel):
     name: str
     setting: Optional[str] = None
     description: Optional[str] = None
+    world_description: Optional[str] = None
+    theme: Optional[str] = None
+    rule_system: str = "D&D 5e"
+    level_range: Optional[str] = None
+    house_rules: Optional[str] = None
+    allowed_sources: Optional[str] = None
+    premise: Optional[str] = None
+    current_story_arc: Optional[str] = None
+    dm_notes: Optional[str] = None
+
+
+class CampaignUpdate(BaseModel):
+    """Campaign update model."""
+
+    name: Optional[str] = None
+    setting: Optional[str] = None
+    description: Optional[str] = None
+    world_description: Optional[str] = None
+    theme: Optional[str] = None
+    rule_system: Optional[str] = None
+    level_range: Optional[str] = None
+    house_rules: Optional[str] = None
+    allowed_sources: Optional[str] = None
+    premise: Optional[str] = None
+    current_story_arc: Optional[str] = None
+    dm_notes: Optional[str] = None
+    status: Optional[str] = None
+
+
+class CampaignResponse(BaseModel):
+    """Campaign response model."""
+
+    id: str
+    name: str
+    entity_type: Optional[str] = None
+    description: Optional[str] = None
+    setting: Optional[str] = None
+    world_description: Optional[str] = None
+    theme: Optional[str] = None
+    rule_system: Optional[str] = None
+    level_range: Optional[str] = None
+    house_rules: Optional[str] = None
+    allowed_sources: Optional[str] = None
+    premise: Optional[str] = None
+    current_story_arc: Optional[str] = None
+    dm_notes: Optional[str] = None
+    start_date: Optional[str] = None
+    status: Optional[str] = None
+    player_count: int = 0
 
 
 class SessionCreate(BaseModel):
@@ -288,16 +337,76 @@ async def set_active_character(
 # ===================
 
 
-@router.post("/campaigns")
-async def create_campaign(campaign: CampaignCreate) -> dict:
+@router.get("/campaigns", response_model=list[CampaignResponse])
+async def list_campaigns() -> list[CampaignResponse]:
+    """List all campaigns."""
+    try:
+        ops = get_graph_ops()
+        campaigns = ops.list_campaigns()
+        return [CampaignResponse(**c) for c in campaigns]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/campaigns/{campaign_id}", response_model=CampaignResponse)
+async def get_campaign(campaign_id: str) -> CampaignResponse:
+    """Get a single campaign by ID."""
+    try:
+        ops = get_graph_ops()
+        campaign = ops.get_campaign(campaign_id)
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        return CampaignResponse(**campaign)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/campaigns", response_model=CampaignResponse)
+async def create_campaign(campaign: CampaignCreate) -> CampaignResponse:
     """Create a new campaign."""
     try:
         ops = get_graph_ops()
-        return ops.create_campaign(
+        created = ops.create_campaign(
             name=campaign.name,
             setting=campaign.setting,
             description=campaign.description,
+            world_description=campaign.world_description,
+            theme=campaign.theme,
+            rule_system=campaign.rule_system,
+            level_range=campaign.level_range,
+            house_rules=campaign.house_rules,
+            allowed_sources=campaign.allowed_sources,
+            premise=campaign.premise,
+            current_story_arc=campaign.current_story_arc,
+            dm_notes=campaign.dm_notes,
         )
+        # Return with player_count
+        result = ops.get_campaign(created["id"])
+        return CampaignResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/campaigns/{campaign_id}", response_model=CampaignResponse)
+async def update_campaign(campaign_id: str, update: CampaignUpdate) -> CampaignResponse:
+    """Update a campaign."""
+    try:
+        ops = get_graph_ops()
+        campaign = ops.get_campaign(campaign_id)
+        if not campaign:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+        if update_data:
+            updated = ops.update_campaign(campaign_id, update_data)
+        else:
+            updated = campaign
+
+        return CampaignResponse(**updated)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

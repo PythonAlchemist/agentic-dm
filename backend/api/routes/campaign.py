@@ -32,7 +32,7 @@ class EntityBase(BaseModel):
 class EntityCreate(EntityBase):
     """Entity creation model."""
 
-    pass
+    campaign_id: Optional[str] = None
 
 
 class EntityResponse(EntityBase):
@@ -56,11 +56,12 @@ class RelationshipCreate(BaseModel):
 async def list_entities(
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),
     limit: int = Query(50, ge=1, le=200),
+    campaign_id: Optional[str] = Query(None, description="Filter by campaign"),
 ) -> dict:
     """List campaign entities."""
     try:
         ops = get_graph_ops()
-        entities = ops.list_entities(entity_type=entity_type, limit=limit)
+        entities = ops.list_entities(entity_type=entity_type, limit=limit, campaign_id=campaign_id)
         return {"entities": entities, "total": len(entities)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -83,7 +84,11 @@ async def get_entity(entity_id: str) -> EntityResponse:
 
 @router.post("/entities", response_model=EntityResponse)
 async def create_entity(entity: EntityCreate) -> EntityResponse:
-    """Create a new campaign entity."""
+    """Create a new campaign entity.
+
+    If campaign_id is provided, auto-creates a BELONGS_TO relationship
+    for campaign-scoped entity types.
+    """
     try:
         ops = get_graph_ops()
         created = ops.create_entity(
@@ -92,6 +97,15 @@ async def create_entity(entity: EntityCreate) -> EntityResponse:
             description=entity.description,
             properties=entity.properties,
         )
+
+        # Auto-link to campaign if campaign_id provided and entity type is campaign-scoped
+        if entity.campaign_id and entity.entity_type in ops.CAMPAIGN_SCOPED_TYPES:
+            ops.create_relationship(
+                source_id=created["id"],
+                target_id=entity.campaign_id,
+                relationship_type="BELONGS_TO",
+            )
+
         return EntityResponse(**created)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -138,12 +152,13 @@ async def search_graph(
     q: str = Query(..., description="Search query"),
     entity_types: Optional[str] = Query(None, description="Comma-separated entity types"),
     limit: int = Query(10, ge=1, le=50),
+    campaign_id: Optional[str] = Query(None, description="Filter by campaign"),
 ) -> dict:
     """Search the campaign knowledge graph."""
     try:
         ops = get_graph_ops()
         types = entity_types.split(",") if entity_types else None
-        results = ops.search(query=q, entity_types=types, limit=limit)
+        results = ops.search(query=q, entity_types=types, limit=limit, campaign_id=campaign_id)
         return {"query": q, "results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -153,6 +168,7 @@ async def search_graph(
 async def get_full_graph(
     entity_types: Optional[str] = Query(None, description="Comma-separated entity types"),
     limit: int = Query(200, ge=1, le=500),
+    campaign_id: Optional[str] = Query(None, description="Filter by campaign"),
 ) -> dict:
     """Get the full graph for visualization.
 
@@ -161,6 +177,6 @@ async def get_full_graph(
     try:
         ops = get_graph_ops()
         types = entity_types.split(",") if entity_types else None
-        return ops.get_full_graph(entity_types=types, limit=limit)
+        return ops.get_full_graph(entity_types=types, limit=limit, campaign_id=campaign_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

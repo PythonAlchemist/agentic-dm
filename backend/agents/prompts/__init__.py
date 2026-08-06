@@ -1,14 +1,11 @@
 """DM Agent prompts."""
 
 from backend.agents.prompts.assistant import (
-    ASSISTANT_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
     RULES_LOOKUP_PROMPT,
     ENCOUNTER_PROMPT,
     NPC_PROMPT,
     SESSION_RECAP_PROMPT,
-)
-from backend.agents.prompts.autonomous import (
-    AUTONOMOUS_SYSTEM_PROMPT,
     SCENE_DESCRIPTION_PROMPT,
     COMBAT_NARRATION_PROMPT,
     NPC_DIALOGUE_PROMPT,
@@ -17,14 +14,11 @@ from backend.agents.prompts.autonomous import (
 )
 
 __all__ = [
-    # Assistant mode
-    "ASSISTANT_SYSTEM_PROMPT",
+    "SYSTEM_PROMPT",
     "RULES_LOOKUP_PROMPT",
     "ENCOUNTER_PROMPT",
     "NPC_PROMPT",
     "SESSION_RECAP_PROMPT",
-    # Autonomous mode
-    "AUTONOMOUS_SYSTEM_PROMPT",
     "SCENE_DESCRIPTION_PROMPT",
     "COMBAT_NARRATION_PROMPT",
     "NPC_DIALOGUE_PROMPT",
