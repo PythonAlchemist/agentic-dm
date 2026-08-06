@@ -108,7 +108,6 @@ edges:
   - {source: cos:npc:bildrath-cantemir, target: cos:npc:parriwimple, type: RELATED_TO, evidence: "uncle and nephew"}
   - {source: cos:npc:bildrath-cantemir, target: cos:location:bildraths-mercantile, type: OWNS}
   - {source: cos:npc:donavich, target: cos:npc:doru, type: GUARDS, evidence: "keeps him sealed in the undercroft"}
-  - {source: cos:npc:strahd-von-zarovich, target: cos:npc:ireena-kolyana, type: HOSTILE_TO}
 
   # Narrative
   - source: cos:npc:strahd-von-zarovich
