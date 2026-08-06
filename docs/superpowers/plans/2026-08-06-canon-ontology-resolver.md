@@ -1519,6 +1519,288 @@ git commit -m "fix(graph): stamp plane and layer on the write path"
 
 ---
 
+### Task 7: Campaign scoping, cross-plane shadowing, and non-vacuous reveal tests
+
+**Why this exists.** Task 5's integration work and review found three interacting defects,
+all originating in this plan's own reference code. They share a module and the third's
+tests are what prove the first two, so they are fixed together.
+
+**(A) `edges()` is not campaign-scoped — a cross-campaign leak.** `_EDGES` and
+`_EDGES_TABLE` filter on `plane` but never on the campaign, so
+`PlaneResolver("campaign_a").edges(...)` returns campaign B's edges. This affects **both**
+perspectives. Two tables' private state bleeding together is a worse failure than the canon
+leak fixed in Task 3.
+
+**(B) Resolvable shadowing does not work across the plane boundary.** `shadow_edges` keys
+on `source_id`, but under copy-on-write a campaign node has its own id
+(`pytest:item:tome@a`), never the canon id (`cos:item:tome-of-strahd`) the canon edges use.
+Verified live: the truth view returns 4 `RESOLVES_TO` edges (the table's draw plus all 3
+canon candidates) instead of 1. The Tarokka collapse — the concrete mechanic resolvable
+types exist to serve — has been inert since it was written.
+
+**(C) Three reveal tests pass vacuously.** `test_table_view_hides_the_unrevealed_identity`,
+`test_table_view_returns_nothing_from_canon`, and all six parametrized cases of
+`test_table_view_never_leaks_across_any_session` loop over **empty** result sets. The
+`seeded` fixture creates one campaign node and nothing with `revealed_in_session` set, so
+there is no data to filter and a regression deleting the reveal filter entirely would pass.
+The parametrized test is the one the plan calls "the invariant the whole design rests on".
+
+**Files:**
+- Modify: `backend/graph/resolver.py`
+- Modify: `tests/test_graph/test_resolver_integration.py`
+- Modify: `tests/test_graph/test_resolver_neo4j.py`
+
+**Interfaces:**
+- Consumes: `merge_properties`, `shadow_edges`, `PlaneResolver` (Tasks 2–3); `load_seed`, `SEED_DIR` (Task 4)
+- Produces: no signature changes. `shadow_edges` keeps `(canon_edges, campaign_edges) -> list[dict]`; `PlaneResolver`'s three methods keep their signatures.
+
+- [ ] **Step 1: Fix (C) first — give the reveal tests real data**
+
+The vacuity fix comes first because it is what proves (A) and (B) afterwards. In
+`tests/test_graph/test_resolver_integration.py`, extend the `seeded` fixture so the
+campaign plane actually contains something:
+
+```python
+@pytest.fixture
+def seeded(graph):
+    load_seed(SEED_DIR / "village-of-barovia.yaml", graph).__str__()
+    graph.run(
+        """
+        CREATE (c:Entity {id:$id, name:'Table A', entity_type:'CAMPAIGN',
+                          plane:'campaign'})
+        // A revealed campaign NPC overriding canon Ireena
+        CREATE (ireena:Entity {id:'pytest:npc:ireena@a', entity_type:'NPC',
+                               plane:'campaign', name:'Ireena Kolyana',
+                               canon_id:'cos:npc:ireena-kolyana', status:'travelling',
+                               revealed_in_session:2})
+        CREATE (ireena)-[:BELONGS_TO]->(c)
+        CREATE (ireena)-[:INSTANCE_OF]->(:Entity {id:'cos:npc:ireena-kolyana'})
+        // A table-invented ally, revealed later
+        CREATE (ally:Entity {id:'pytest:npc:hireling', entity_type:'NPC',
+                             plane:'campaign', name:'Sasha the Hireling',
+                             revealed_in_session:6})
+        CREATE (ally)-[:BELONGS_TO]->(c)
+        // A layered campaign->campaign edge, revealed early
+        CREATE (ireena)-[:KNOWS {layer:'social', revealed_in_session:2}]->(ally)
+        // A campaign entity that has NEVER been revealed
+        CREATE (secret:Entity {id:'pytest:npc:unrevealed', entity_type:'NPC',
+                               plane:'campaign', name:'Unrevealed NPC'})
+        CREATE (secret)-[:BELONGS_TO]->(c)
+        """,
+        {"id": CAMPAIGN},
+    ).consume()
+    yield graph
+    graph.run("MATCH (e:Entity) WHERE e.id STARTS WITH 'cos:' DETACH DELETE e").consume()
+```
+
+Note the `.consume()` calls — an earlier task established that with `neo4j==6.0.2` an
+unconsumed write is not reliably visible to a read on a different session, and the resolver
+opens its own.
+
+Then add a guard so vacuity cannot recur silently. Insert at the top of the parametrized
+property test, before its loops:
+
+```python
+        entities = resolver.entities("table", as_of_session=session_n)
+        edges = resolver.edges("table", as_of_session=session_n)
+        if session_n >= 2:
+            assert entities, f"fixture produced no table-view entities at session {session_n}"
+            assert edges, f"fixture produced no table-view edges at session {session_n}"
+```
+
+Without that guard the test can silently return to asserting nothing. With it, an empty
+result set is itself a failure for any session at or after the first reveal.
+
+- [ ] **Step 2: Run to confirm the reveal tests now have data and still pass**
+
+Run: `uv run pytest tests/test_graph/test_resolver_integration.py -v`
+Expected: the parametrized cases at `session_n` 0 and 1 pass with empty sets (nothing is
+revealed yet, correctly), and 2/5/12/99 pass with real data. If any case at
+`session_n >= 2` now FAILS, that is a genuine table-view bug the vacuous test was hiding —
+report it before changing anything else.
+
+- [ ] **Step 3: Write the failing tests for (A) — the cross-campaign leak**
+
+Append to `tests/test_graph/test_resolver_neo4j.py`:
+
+```python
+class TestCampaignScoping:
+    def test_truth_edges_exclude_other_campaigns(self, graph):
+        graph.run(
+            """
+            CREATE (a:Entity {id:'pytest:campaign:a', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (b:Entity {id:'pytest:campaign:b', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (mine:Entity {id:'pytest:npc:mine', plane:'campaign'})
+            CREATE (theirs:Entity {id:'pytest:npc:theirs', plane:'campaign'})
+            CREATE (mine)-[:BELONGS_TO]->(a)
+            CREATE (theirs)-[:BELONGS_TO]->(b)
+            CREATE (mine)-[:KNOWS {layer:'social'}]->(mine)
+            CREATE (theirs)-[:KNOWS {layer:'social'}]->(theirs)
+            """
+        ).consume()
+
+        ids = {
+            e["source_id"]
+            for e in PlaneResolver("pytest:campaign:a").edges("truth", layers=["social"])
+        }
+        assert "pytest:npc:mine" in ids
+        assert "pytest:npc:theirs" not in ids
+
+    def test_table_edges_exclude_other_campaigns(self, graph):
+        graph.run(
+            """
+            CREATE (a:Entity {id:'pytest:campaign:a', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (b:Entity {id:'pytest:campaign:b', plane:'campaign',
+                              entity_type:'CAMPAIGN'})
+            CREATE (mine:Entity {id:'pytest:npc:mine', plane:'campaign',
+                                 revealed_in_session:1})
+            CREATE (theirs:Entity {id:'pytest:npc:theirs', plane:'campaign',
+                                   revealed_in_session:1})
+            CREATE (mine)-[:BELONGS_TO]->(a)
+            CREATE (theirs)-[:BELONGS_TO]->(b)
+            CREATE (mine)-[:KNOWS {layer:'social', revealed_in_session:1}]->(mine)
+            CREATE (theirs)-[:KNOWS {layer:'social', revealed_in_session:1}]->(theirs)
+            """
+        ).consume()
+
+        ids = {
+            e["source_id"]
+            for e in PlaneResolver("pytest:campaign:a").edges("table", as_of_session=9)
+        }
+        assert ids == {"pytest:npc:mine"}
+```
+
+- [ ] **Step 4: Run to verify (A) fails**
+
+Run: `uv run pytest tests/test_graph/test_resolver_neo4j.py::TestCampaignScoping -v`
+Expected: FAIL — both assert that the other campaign's node is absent, and it is present.
+Capture the actual output showing `pytest:npc:theirs` in the result.
+
+- [ ] **Step 5: Fix (A) — scope the edge queries by campaign**
+
+In `backend/graph/resolver.py`, canon edges are shared and must NOT be campaign-filtered;
+campaign edges must be. Replace the edge query constants:
+
+```python
+_EDGES_CANON = """
+MATCH (a:Entity {plane:'canon'})-[r]->(b:Entity)
+WHERE r.layer IS NOT NULL
+  AND ($layers IS NULL OR r.layer IN $layers)
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
+"""
+
+_EDGES_CAMPAIGN = """
+MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(:Entity {id:$campaign_id})
+MATCH (a)-[r]->(b:Entity)
+WHERE r.layer IS NOT NULL
+  AND ($layers IS NULL OR r.layer IN $layers)
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
+"""
+
+_EDGES_TABLE = """
+MATCH (a:Entity {plane:'campaign'})-[:BELONGS_TO]->(c:Entity {id:$campaign_id})
+MATCH (b:Entity {plane:'campaign'})-[:BELONGS_TO]->(c)
+MATCH (a)-[r]->(b)
+WHERE r.layer IS NOT NULL
+  AND ($layers IS NULL OR r.layer IN $layers)
+RETURN a.id AS source_id, coalesce(a.canon_id, a.id) AS source_canon_id,
+       b.id AS target_id, type(r) AS rel_type, r.layer AS layer,
+       a.plane AS plane, properties(r) AS props
+"""
+```
+
+`_EDGES_TABLE` binds `c` once and requires **both** endpoints to belong to it, preserving
+Task 3's fix (both endpoints on the campaign plane) while adding campaign scoping.
+
+Update `edges()` so the truth path runs `_EDGES_CANON` and `_EDGES_CAMPAIGN` (passing
+`campaign_id` to the latter) and the table path runs `_EDGES_TABLE` with both `layers` and
+`campaign_id`. Add `source_canon_id` to `_row_to_edge`'s output dict.
+
+- [ ] **Step 6: Write the failing test for (B) — cross-plane shadowing**
+
+In `tests/test_graph/test_resolver_integration.py`, replace the body of
+`test_campaign_draw_shadows_the_tarokka_fan_out` (currently asserting the broken behaviour,
+4 edges) with the corrected expectation, and update its docstring so it no longer documents
+the defect as intended:
+
+```python
+    def test_campaign_draw_shadows_the_tarokka_fan_out(self, seeded):
+        """Canon offers three sites for the Tome; this table drew the church.
+
+        Shadowing keys on the campaign source's canon_id, so a copy-on-write
+        campaign node's edge replaces the canon fan-out it descends from.
+        """
+        seeded.run(
+            """
+            MATCH (canon:Entity {id:'cos:item:tome-of-strahd'})
+            MATCH (church:Entity {id:'cos:location:church-of-barovia'})
+            MATCH (c:Entity {id:$campaign})
+            CREATE (camp:Entity {id:'pytest:item:tome@a', plane:'campaign',
+                                 entity_type:'ITEM',
+                                 canon_id:'cos:item:tome-of-strahd'})
+            CREATE (camp)-[:INSTANCE_OF]->(canon)
+            CREATE (camp)-[:BELONGS_TO]->(c)
+            CREATE (camp)-[:RESOLVES_TO {layer:'narrative'}]->(church)
+            """,
+            {"campaign": CAMPAIGN},
+        ).consume()
+
+        edges = PlaneResolver(CAMPAIGN).edges("truth", layers=["narrative"])
+        resolves = [e for e in edges if e["rel_type"] == "RESOLVES_TO"]
+
+        assert len(resolves) == 1, [e["target_id"] for e in resolves]
+        assert resolves[0]["target_id"] == "cos:location:church-of-barovia"
+        assert resolves[0]["source_id"] == "pytest:item:tome@a"
+```
+
+- [ ] **Step 7: Run to verify (B) fails**
+
+Run: `uv run pytest tests/test_graph/test_resolver_integration.py::TestSeedUnderResolver::test_campaign_draw_shadows_the_tarokka_fan_out -v`
+Expected: FAIL with 4 targets where 1 is expected. Capture the output.
+
+- [ ] **Step 8: Fix (B) — key shadowing on the canonical source**
+
+In `backend/graph/resolver.py`, change `shadow_edges` to key on the canonical source,
+falling back to the edge's own source when there is no canon ancestor:
+
+```python
+def _canonical_source(edge: dict) -> str:
+    """The id a campaign edge shadows against.
+
+    A copy-on-write campaign node has its own id, so an edge from it can only
+    replace the canon edge it descends from if both are keyed on the canon node.
+    Edges with no canon ancestor key on themselves.
+    """
+    return edge.get("source_canon_id") or edge["source_id"]
+```
+
+and use `_canonical_source(e)` in place of `e["source_id"]` in both the shadow-set
+comprehension and the `kept` filter. The `.get` fallback keeps Task 2's pure tests passing
+unchanged — their fixtures have no `source_canon_id` — so **do not edit those tests**. If
+any of them fails, stop and report; that would mean the fallback is wrong.
+
+- [ ] **Step 9: Run the full suite**
+
+Run: `uv run pytest -q` then `uv run pytest -q -m "not neo4j"`
+Expected: both green. Report the counts.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add backend/graph/resolver.py tests/test_graph/test_resolver_integration.py \
+        tests/test_graph/test_resolver_neo4j.py
+git commit -m "fix(graph): scope edges by campaign and shadow across the plane boundary"
+```
+
+---
+
 ## Verification
 
 Whole suite: `uv run pytest -q` — 236 existing plus roughly 45 new.
