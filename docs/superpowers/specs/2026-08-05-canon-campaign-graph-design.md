@@ -1,7 +1,17 @@
 # Layered Canon & Campaign Knowledge Graph
 
 **Date**: 2026-08-05
-**Status**: Approved, not yet implemented
+**Status**: Approved. Stages 0–3 (corpus ingestion) built and merged; stage 1 of the graph
+work is specified in
+[2026-08-06-canon-ontology-resolver-design.md](2026-08-06-canon-ontology-resolver-design.md).
+
+> **Partly superseded.** The stage 1 spec amends this document in five places, after the
+> corpus was actually read: the narrative vocabulary is restructured around agents' wants
+> (`MOTIVATES` dropped for `SEEKS`, `OPPOSES` and `IDENTITY_OF` added), "one node per
+> entity" becomes "one node per persona the table can know independently" to close a
+> spoiler leak through `aliases`, `OWNS`/`GUARDS` gain a layer, `RESOLVES_TO` covers five
+> Tarokka fan-outs rather than three, and the resolver drops its legacy branch because the
+> graph was wiped. Where the two conflict, the stage 1 spec governs.
 
 ## Problem
 
@@ -63,8 +73,13 @@ the query "which nodes have both spatial and narrative edges."
 
 ### 1. Shared nodes, layered edges
 
-One node per entity. Every relationship carries a `layer` property. Traversing a surface
-means filtering edges by layer.
+One node per **persona the table can know independently** — amended from "one node per
+entity" by the stage 1 spec. Collapsing Rictavio and Van Richten onto one node with an
+`aliases` list leaks the reveal into the table view, because the resolver merges properties.
+Secret identities are `IDENTITY_OF` edges carrying their own `revealed_in_session` instead.
+
+Every relationship carries a `layer` property. Traversing a surface means filtering edges by
+layer.
 
 Rejected: layer-local nodes joined by bridge edges (the textbook multiplex formalism).
 It matches the "separate surfaces" metaphor more literally, but costs 2–3× the nodes and
@@ -132,12 +147,15 @@ graph, an inherited default is a spoiler leak waiting to happen — better to fa
 |---|---|
 | `spatial` | `CONTAINS`, `CONNECTED_TO`, `LOCATED_IN` |
 | `social` | `KNOWS`, `RELATED_TO`, `SERVES`, `MEMBER_OF`, `ALLIED_WITH`, `HOSTILE_TO` |
-| `narrative` | `MOTIVATES`, `RESOLVES_TO`, `PREREQUISITE_OF`, `THREATENS` |
+| `narrative` | ~~`MOTIVATES`~~, `RESOLVES_TO`, `PREREQUISITE_OF`, `THREATENS` — **superseded**: see the stage 1 spec for the revised set |
 
-### New relationship types
+### New relationship types — superseded
 
-Four, all narrative-layer: `MOTIVATES`, `RESOLVES_TO`, `PREREQUISITE_OF`, `THREATENS`.
-Spatial and social are already covered by the existing enum.
+This section proposed four narrative types: `MOTIVATES`, `RESOLVES_TO`, `PREREQUISITE_OF`,
+`THREATENS`. Written before the book had been read, it modelled plot as machinery. The
+corpus shows the plot is a web of agents with stated wants, so the stage 1 spec drops
+`MOTIVATES` for `SEEKS`, adds `OPPOSES` and `IDENTITY_OF`, and makes the type→layer map
+total (this section also omitted `OWNS` and `GUARDS` entirely).
 
 ### New entity types
 
