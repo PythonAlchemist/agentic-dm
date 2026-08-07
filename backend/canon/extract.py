@@ -17,7 +17,13 @@ from openai import AsyncOpenAI
 
 from backend.canon.models import CandidateEdge, CandidateNode, ExtractionUnit
 from backend.core.config import settings
-from backend.graph.schema import CANON_ENTITY_TYPES, LAYER_MAP, EntityType, Layer
+from backend.graph.schema import (
+    CANON_ENTITY_TYPES,
+    LAYER_MAP,
+    RELATIONSHIP_GLOSS,
+    Layer,
+    RelationshipType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +45,23 @@ _LAYER_GUIDANCE = {
     ),
 }
 
+# Quests are never named as nouns in the prose -- the book says "Ismark asks for
+# their aid in escorting Ireena to Vallaki", never "Escort Ireena to Vallaki". The
+# model must coin the name, which is the highest fabrication risk in this pipeline,
+# so this guidance is narrative-only and paired with `anchor_quests` below, which
+# mechanically discards any coined quest nothing else in the chapter points at.
+_NARRATIVE_EXTRA = """
+Emit a QUEST node when a section describes a task the party is asked to undertake
+or an objective the adventure sets. Name it as a short imperative verb phrase
+("Escort Ireena to Vallaki", "Free Doru from the undercroft"). Link every QUEST
+you emit with GAVE_QUEST from whoever asks it, and/or OBJECTIVE_AT to where it
+is pursued.
+
+Worked contrast -- these two are easy to invert:
+"Ireena carries the soul of Tatyana" is IDENTITY_OF (one being, two lives).
+"Doru is Donavich's son" is RELATED_TO (two beings, one family).
+"""
+
 
 def layer_vocabulary(layer: Layer) -> list[str]:
     """The relationship types belonging to a layer, from LAYER_MAP.
@@ -51,15 +74,21 @@ def layer_vocabulary(layer: Layer) -> list[str]:
 
 def _prompt(unit: ExtractionUnit, layer: Layer) -> str:
     vocab = layer_vocabulary(layer)
-    entity_types = sorted(t.value for t in EntityType)
+    glosses = "\n".join(
+        f"- {RELATIONSHIP_GLOSS[RelationshipType(v)]}" for v in vocab
+    )
+    entity_types = sorted(t.value for t in CANON_ENTITY_TYPES)
+    extra = _NARRATIVE_EXTRA if layer is Layer.NARRATIVE else ""
     return f"""\
 Extract {layer.value}-layer canon from this passage of a D&D sourcebook.
 
 {_LAYER_GUIDANCE[layer]}
 
-Use ONLY these relationship types: {", ".join(vocab)}
-Use ONLY these entity types: {", ".join(entity_types)}
+Use ONLY these relationship types:
+{glosses}
 
+Use ONLY these entity types: {", ".join(entity_types)}
+{extra}
 Rules:
 - Extract only what the passage states. Do not infer from outside knowledge.
 - Name entities as the passage names them. Do not invent ids.
