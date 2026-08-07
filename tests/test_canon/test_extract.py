@@ -12,7 +12,7 @@ import pytest
 
 from backend.canon.extract import CandidateExtractor, layer_vocabulary
 from backend.canon.models import ExtractionUnit
-from backend.graph.schema import Layer
+from backend.graph.schema import RELATIONSHIP_GLOSS, Layer, RelationshipType
 
 
 def unit(markdown: str = "## E1\n\nBildrath sells overpriced rope.") -> ExtractionUnit:
@@ -57,6 +57,18 @@ class TestLayerVocabulary:
         assert not vocabs[0] & vocabs[1]
         assert not vocabs[1] & vocabs[2]
         assert not vocabs[0] & vocabs[2]
+
+
+class TestRelationshipGloss:
+    def test_every_layer_type_has_a_gloss(self):
+        """A relationship type added to a layer must fail this until it is
+        glossed -- iterates the layers and layer_vocabulary rather than a
+        hardcoded count, so this stays true as LAYER_MAP grows."""
+        for layer in Layer:
+            for value in layer_vocabulary(layer):
+                assert RelationshipType(value) in RELATIONSHIP_GLOSS, (
+                    f"{value} ({layer.value}) has no entry in RELATIONSHIP_GLOSS"
+                )
 
 
 class TestExtractUnit:
