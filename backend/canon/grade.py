@@ -91,12 +91,36 @@ def _find_collisions(golden_nodes: list[dict]) -> list[str]:
     return collisions
 
 
+def _matching_golden_ids(name: str, golden_nodes: list[dict]) -> set[str]:
+    """Every golden node id that `name` loosely matches.
+
+    Used both to score a candidate node and to judge whether an edge endpoint
+    string is inherently ambiguous against the golden set, independent of
+    whether that exact string was ever extracted as a `CandidateNode`.
+    """
+    hits: set[str] = set()
+    for entry in golden_nodes:
+        entry_id = entry.get("id", entry.get("name", ""))
+        if any(names_match(name, acc) for acc in _golden_node_names(entry)):
+            hits.add(entry_id)
+    return hits
+
+
 def grade(
     nodes: list[CandidateNode],
     edges: list[CandidateEdge],
     golden: dict,
 ) -> GradeReport:
-    """Score candidates against a golden subset."""
+    """Score candidates against a golden subset.
+
+    Two recall numbers are reported for both nodes and edges. The loose one
+    (`node_recall`, `edge_recall`) credits a golden entry from ANY candidate
+    that loosely matches it, even one that also matches a different entry --
+    which inflates recall silently, since `names_match` is a token-subset
+    match ("Ireena" matches both the NPC and a quest named after her). The
+    unambiguous one only credits a golden entry when some candidate matches
+    it and nothing else; this is an honest lower bound.
+    """
     golden_nodes = golden.get("nodes", [])
     golden_edges = golden.get("edges", [])
 
@@ -129,9 +153,28 @@ def grade(
         if len(ids) > 1
     ]
 
+    # A golden entry counts toward the unambiguous number only if some
+    # candidate matched it and ONLY it (candidate_hits[cand] has size 1).
+    unambiguously_credited_ids = {
+        entry_id for cand, ids in candidate_hits.items() if len(ids) == 1 for entry_id in ids
+    }
+    missing_nodes_unambiguous = sum(
+        1
+        for entry in golden_nodes
+        if entry.get("id", entry.get("name", "")) not in unambiguously_credited_ids
+    )
+
     missing_edges: list[str] = []
     matched_edge_indices: set[int] = set()
+    # candidate edge index -> golden edge labels it satisfied, so a candidate
+    # edge that satisfies more than one golden edge (endpoint ambiguity, edge
+    # side) can be surfaced.
+    edge_hits: dict[int, set[str]] = {}
+    # (golden edge label, candidate edge index) for every credit, so the
+    # unambiguous number can check both edge-side and endpoint-side ambiguity.
+    credit_pairs: list[tuple[str, int]] = []
     for entry in golden_edges:
+        label = f"{entry['source']} -{entry['type']}-> {entry['target']}"
         sources = by_id.get(entry["source"], set())
         targets = by_id.get(entry["target"], set())
         hit = False
@@ -142,9 +185,11 @@ def grade(
                 names_match(e.target_name, t) for t in targets
             ):
                 matched_edge_indices.add(i)
+                edge_hits.setdefault(i, set()).add(label)
+                credit_pairs.append((label, i))
                 hit = True
         if not hit:
-            missing_edges.append(f"{entry['source']} -{entry['type']}-> {entry['target']}")
+            missing_edges.append(label)
 
     unmatched_edges = [
         f"{e.source_name} -{e.rel_type}-> {e.target_name}"
@@ -152,14 +197,46 @@ def grade(
         if i not in matched_edge_indices
     ]
 
+    def _endpoint_ambiguous(e: CandidateEdge) -> bool:
+        return (
+            len(_matching_golden_ids(e.source_name, golden_nodes)) > 1
+            or len(_matching_golden_ids(e.target_name, golden_nodes)) > 1
+        )
+
+    multi_matched_edge_collisions = [
+        f"{edges[i].source_name} -{edges[i].rel_type}-> {edges[i].target_name} "
+        f"matches {', '.join(sorted(labels))}"
+        for i, labels in sorted(edge_hits.items())
+        if len(labels) > 1
+    ]
+    ambiguous_endpoint_labels = sorted(
+        {label for label, i in credit_pairs if _endpoint_ambiguous(edges[i])}
+    )
+    edge_collisions = multi_matched_edge_collisions + [
+        f"{label} credited via ambiguous endpoint match" for label in ambiguous_endpoint_labels
+    ]
+
+    unambiguously_credited_labels = {
+        label
+        for label, i in credit_pairs
+        if len(edge_hits.get(i, set())) == 1 and not _endpoint_ambiguous(edges[i])
+    }
+
     return GradeReport(
         node_recall=_recall(len(golden_nodes) - len(missing_nodes), len(golden_nodes)),
         edge_recall=_recall(len(golden_edges) - len(missing_edges), len(golden_edges)),
+        node_recall_unambiguous=_recall(
+            len(golden_nodes) - missing_nodes_unambiguous, len(golden_nodes)
+        ),
+        edge_recall_unambiguous=_recall(
+            len(unambiguously_credited_labels), len(golden_edges)
+        ),
         missing_nodes=missing_nodes,
         missing_edges=missing_edges,
         unmatched_nodes=unmatched_nodes,
         unmatched_edges=unmatched_edges,
         collisions=_find_collisions(golden_nodes) + node_collisions,
+        edge_collisions=edge_collisions,
     )
 
 

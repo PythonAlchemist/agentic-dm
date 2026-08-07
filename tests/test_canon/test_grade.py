@@ -221,3 +221,102 @@ class TestSubsetMatchingInGrade:
         report = grade([cnode("Strahd")], [], g)
 
         assert report.collisions, "an ambiguous candidate must be surfaced"
+
+
+class TestUnambiguousNodeRecall:
+    """This is the guard against the inflation class of defect: `node_recall`
+    credits a golden entry from ANY candidate that loosely matches, including one
+    that also matches another entry. `node_recall_unambiguous` must not."""
+
+    def test_single_word_candidates_score_high_loose_but_near_zero_unambiguous_recall(self):
+        """Reproduces the measured defect: a degenerate extractor emitting only
+        words that appear in golden names scores node_recall == 1.0 while
+        crediting no entry unambiguously."""
+        g = golden(
+            nodes=[
+                gnode("Village Ireena"),
+                gnode("Village Vallaki"),
+                gnode("Ireena Vallaki"),
+            ]
+        )
+        candidates = [cnode("Village"), cnode("Ireena"), cnode("Vallaki")]
+        report = grade(candidates, [], g)
+
+        assert report.node_recall == 1.0
+        assert report.node_recall_unambiguous == 0.0
+
+    def test_an_unambiguous_match_counts_toward_unambiguous_recall(self):
+        g = golden(nodes=[gnode("Ireena"), gnode("Ismark")])
+        report = grade([cnode("Ireena"), cnode("Ismark")], [], g)
+
+        assert report.node_recall_unambiguous == 1.0
+
+    def test_collision_does_not_move_recall_but_does_move_unambiguous_recall(self):
+        """A candidate matching two entries loosely still doesn't hurt the loose
+        number (see TestCollisions), but it must not count as unambiguous
+        evidence for either."""
+        g = golden(nodes=[gnode("Strahd von Zarovich"), gnode("Strahd Zombie")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.node_recall == 1.0
+        assert report.node_recall_unambiguous == 0.0
+
+
+class TestEdgeCollisions:
+    def test_candidate_edge_matching_multiple_golden_edges_is_a_collision(self):
+        """Two golden nodes sharing a token make one candidate edge satisfy both
+        golden edges at once -- exactly the endpoint ambiguity that inflates
+        node recall, but on the edge side."""
+        g = golden(
+            nodes=[gnode("Ireena Kolyana"), gnode("Ireena the Cursed"), gnode("Target")],
+            edges=[
+                gedge("cos:npc:ireena kolyana", "cos:npc:target", "SEEKS"),
+                gedge("cos:npc:ireena the cursed", "cos:npc:target", "SEEKS"),
+            ],
+        )
+        report = grade([], [cedge("Ireena", "Target", "SEEKS")], g)
+
+        assert report.edge_collisions, "one candidate satisfying two golden edges must be flagged"
+
+    def test_golden_edge_credited_via_ambiguous_endpoint_is_a_collision(self):
+        """Only one golden edge here -- the ambiguity is that "Ireena" also
+        names a second, unrelated golden node with no edge of its own."""
+        g = golden(
+            nodes=[gnode("Ireena"), gnode("Ireena the Vampire", entity_type="QUEST"),
+                   gnode("Target")],
+            edges=[gedge("cos:npc:ireena", "cos:npc:target", "SEEKS")],
+        )
+        report = grade([], [cedge("Ireena", "Target", "SEEKS")], g)
+
+        assert report.edge_collisions, "an ambiguous endpoint match must be surfaced"
+
+    def test_unambiguous_edge_match_is_not_a_collision(self):
+        g = golden(
+            nodes=[gnode("A"), gnode("B")],
+            edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
+        )
+        report = grade([], [cedge("A", "B", "KNOWS")], g)
+
+        assert report.edge_collisions == []
+
+
+class TestUnambiguousEdgeRecall:
+    def test_unambiguous_edge_match_counts(self):
+        g = golden(
+            nodes=[gnode("A"), gnode("B")],
+            edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
+        )
+        report = grade([], [cedge("A", "B", "KNOWS")], g)
+
+        assert report.edge_recall_unambiguous == 1.0
+
+    def test_ambiguous_endpoint_match_does_not_count_toward_unambiguous_recall(self):
+        g = golden(
+            nodes=[gnode("Ireena"), gnode("Ireena the Vampire", entity_type="QUEST"),
+                   gnode("Target")],
+            edges=[gedge("cos:npc:ireena", "cos:npc:target", "SEEKS")],
+        )
+        report = grade([], [cedge("Ireena", "Target", "SEEKS")], g)
+
+        assert report.edge_recall == 1.0
+        assert report.edge_recall_unambiguous == 0.0

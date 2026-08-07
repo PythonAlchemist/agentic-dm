@@ -98,8 +98,11 @@ class GradeReport:
 
     node_recall: float
     edge_recall: float
+    node_recall_unambiguous: float
+    edge_recall_unambiguous: float
     missing_nodes: list[str]
     missing_edges: list[str]
     unmatched_nodes: list[str]
     unmatched_edges: list[str]
     collisions: list[str]
+    edge_collisions: list[str]
