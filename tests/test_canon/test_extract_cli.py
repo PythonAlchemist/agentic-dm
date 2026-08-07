@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 import backend.scripts.extract_canon as extract_canon
-from backend.canon.models import Chapter
+from backend.canon.models import CandidateNode, Chapter
 from backend.scripts.extract_canon import _gradeable_subset, _known_sources, find_chapter
 
 
@@ -203,3 +203,31 @@ class TestRejectedEntityTypeReporting:
         await extract_canon.run("Chapter 3", None, None, None)
 
         assert "unknown entity_type" not in capsys.readouterr().out
+
+
+class TestDroppedQuestReporting:
+    """anchor_quests runs at chapter level, after all layer passes and the
+    derived structural edges are merged in -- see run()."""
+
+    @pytest.mark.asyncio
+    async def test_printed_when_nonzero(self, monkeypatch, capsys):
+        orphan_quest = CandidateNode(name="Free Doru", entity_type="QUEST")
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _fake_extractor(nodes=[orphan_quest])
+        )
+
+        summary = await extract_canon.run("Chapter 3", None, None, None)
+
+        assert "dropped 1 unanchored QUEST nodes" in capsys.readouterr().out
+        assert summary["dropped_quests"] == 1
+        assert summary["nodes"] == 0
+
+    @pytest.mark.asyncio
+    async def test_not_printed_when_zero(self, monkeypatch, capsys):
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
+
+        await extract_canon.run("Chapter 3", None, None, None)
+
+        assert "unanchored QUEST" not in capsys.readouterr().out

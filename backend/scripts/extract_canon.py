@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
-from backend.canon.extract import CandidateExtractor
+from backend.canon.extract import CandidateExtractor, anchor_quests
 from backend.canon.grade import grade
 from backend.canon.models import Chapter, Section
 from backend.canon.page_extractor import PageExtractor
@@ -163,6 +163,13 @@ async def run(
     print(f"  {len(derived)} derived structural edges")
     edges = edges + derived
 
+    # Applied at chapter level, after all three layer passes are merged: a quest
+    # coined by the narrative pass may be anchored by an entity the social pass
+    # found, so a per-unit or per-layer filter would discard it wrongly.
+    nodes, edges, dropped_quests = anchor_quests(nodes, edges)
+    if dropped_quests:
+        print(f"  dropped {dropped_quests} unanchored QUEST nodes")
+
     if out_path:
         if failed and out_path.exists():
             print(
@@ -183,6 +190,7 @@ async def run(
         "edges": len(edges),
         "failed": failed,
         "rejected_entity_types": rejected_entity_types,
+        "dropped_quests": dropped_quests,
     }
 
     if golden is not None:

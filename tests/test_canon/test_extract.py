@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.canon.extract import CandidateExtractor, layer_vocabulary
-from backend.canon.models import ExtractionUnit
+from backend.canon.extract import CandidateExtractor, anchor_quests, layer_vocabulary
+from backend.canon.models import CandidateEdge, CandidateNode, ExtractionUnit
 from backend.graph.schema import RELATIONSHIP_GLOSS, Layer, RelationshipType
 
 
@@ -240,3 +240,67 @@ class TestPerSectionProvenance:
 
         assert nodes[0].section_heading == "E5. Church"
         assert nodes[0].section_index == 4
+
+
+def cand_node(name: str, entity_type: str = "NPC") -> CandidateNode:
+    return CandidateNode(name=name, entity_type=entity_type)
+
+
+def cand_edge(source: str, target: str, rel_type: str) -> CandidateEdge:
+    return CandidateEdge(source_name=source, target_name=target, rel_type=rel_type)
+
+
+class TestAnchorQuests:
+    """See task-9 brief section 4b: a coined quest name is the one candidate
+    the source text never states literally, so a QUEST node only survives
+    when some other extracted entity points at it via an ANCHORING_TYPES edge."""
+
+    def test_quest_with_gave_quest_edge_from_extracted_npc_survives(self):
+        nodes = [cand_node("Ismark", "NPC"), cand_node("Escort Ireena to Vallaki", "QUEST")]
+        edges = [cand_edge("Ismark", "Escort Ireena to Vallaki", "GAVE_QUEST")]
+
+        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+
+        assert surviving_nodes == nodes
+        assert surviving_edges == edges
+        assert dropped == 0
+
+    def test_orphan_quest_is_dropped_along_with_its_edges(self):
+        """The quest has an edge, but its other endpoint ("Undercroft") was
+        never itself extracted as a candidate node, so it does not anchor."""
+        ismark = cand_node("Ismark", "NPC")
+        nodes = [ismark, cand_node("Free Doru from the undercroft", "QUEST")]
+        edges = [cand_edge("Free Doru from the undercroft", "Undercroft", "OBJECTIVE_AT")]
+
+        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+
+        assert surviving_nodes == [ismark]
+        assert surviving_edges == []
+        assert dropped == 1
+
+    def test_quest_anchored_only_by_another_quest_is_dropped(self):
+        nodes = [
+            cand_node("Escort Ireena to Vallaki", "QUEST"),
+            cand_node("Free Doru from the undercroft", "QUEST"),
+        ]
+        edges = [
+            cand_edge(
+                "Escort Ireena to Vallaki", "Free Doru from the undercroft", "SEEKS"
+            )
+        ]
+
+        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+
+        assert surviving_nodes == []
+        assert surviving_edges == []
+        assert dropped == 2
+
+    def test_non_quest_node_is_never_touched(self):
+        nodes = [cand_node("Bildrath", "NPC")]
+        edges = [cand_edge("Bildrath", "Bildrath's Mercantile", "OWNS")]
+
+        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+
+        assert surviving_nodes == nodes
+        assert surviving_edges == edges
+        assert dropped == 0

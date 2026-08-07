@@ -204,3 +204,50 @@ class CandidateExtractor:
         ]
 
         return nodes, edges
+
+
+ANCHORING_TYPES = frozenset({"GAVE_QUEST", "OBJECTIVE_AT", "SEEKS", "COMPLETED", "RESOLVES_TO"})
+
+
+def anchor_quests(
+    nodes: list[CandidateNode], edges: list[CandidateEdge]
+) -> tuple[list[CandidateNode], list[CandidateEdge], int]:
+    """Drop QUEST nodes that no extracted entity points at, and their dangling edges.
+
+    A coined quest name is the one candidate the source text never states literally,
+    so it is the one most likely to be invented. A quest that no NPC gives, no place
+    hosts, and nobody seeks is not a quest the book describes. Requiring an anchor
+    bounds fabrication mechanically instead of trusting the model's restraint.
+
+    Returns the surviving nodes, the surviving edges, and the number of quests dropped.
+    """
+
+    def fold(name: str) -> str:
+        return name.strip().casefold()
+
+    quest_names = {fold(n.name) for n in nodes if n.entity_type == "QUEST"}
+    non_quest_names = {fold(n.name) for n in nodes if n.entity_type != "QUEST"}
+
+    anchored: set[str] = set()
+    for e in edges:
+        if e.rel_type not in ANCHORING_TYPES:
+            continue
+        source, target = fold(e.source_name), fold(e.target_name)
+        if source in quest_names and target in non_quest_names:
+            anchored.add(source)
+        if target in quest_names and source in non_quest_names:
+            anchored.add(target)
+
+    dropped_names = quest_names - anchored
+    surviving_nodes = [
+        n for n in nodes if not (n.entity_type == "QUEST" and fold(n.name) in dropped_names)
+    ]
+    surviving_edges = [
+        e
+        for e in edges
+        if fold(e.source_name) not in dropped_names and fold(e.target_name) not in dropped_names
+    ]
+    dropped_count = sum(
+        1 for n in nodes if n.entity_type == "QUEST" and fold(n.name) in dropped_names
+    )
+    return surviving_nodes, surviving_edges, dropped_count
