@@ -1300,6 +1300,195 @@ git commit -m "feat(canon): add extraction CLI with golden-set grading"
 
 ---
 
+### Task 5: Subset matching, so recall measures extraction rather than naming
+
+**Why this exists.** Task 4's chapter-3 run scored node recall 0.67 and edge recall 0.12,
+and the miss lists show the cause is the matcher, not the extractor. From the unmatched
+candidates:
+
+| Golden expects | Extractor produced | Matched |
+|---|---|---|
+| `Strahd von Zarovich` | `Strahd` (×6) | no |
+| `Church of Barovia` | `Church`, `The Church` | no |
+| `Village of Barovia` | `Barovia` (×6) | no |
+| `Ismark Kolyanovich` | `Ismark` (×3) | no |
+
+`normalize_name` folds case, punctuation, articles and whitespace, then compares for
+**exact equality**, so a shorter form never matches a longer one. The spec set out to avoid
+"recall as a measure of naming luck rather than extraction quality"; the matcher as built
+is that failure. Edge recall is worse because an edge needs both endpoints to match, so
+endpoint failures compound multiplicatively.
+
+**Not in scope here:** two misses are genuine corpus defects — the transcription reads
+`Blood of the Vine Tavern` where the book says "on", and `Morgatha` where it says
+"Morgantha". Those are vision-transcription errors in proper nouns, recorded for stage 2b's
+resolution work. Do not paper over them by making the matcher fuzzy enough to absorb typos;
+that would hide real extraction errors too.
+
+**Files:**
+- Modify: `backend/canon/grade.py`
+- Modify: `tests/test_canon/test_grade.py`
+
+**Interfaces:**
+- Consumes: `CandidateNode`, `CandidateEdge`, `GradeReport` (unchanged)
+- Produces: `names_match(candidate: str, golden: str) -> bool`. `normalize_name` and `grade` keep their signatures.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/test_canon/test_grade.py`:
+
+```python
+class TestSubsetMatching:
+    """A shorter name the passage actually used must match the key's fuller form.
+
+    The extractor writes what the book writes. Chapter 3 says "Strahd" far more
+    often than "Strahd von Zarovich", and grading the former as a miss measures
+    naming convention rather than whether the entity was found.
+    """
+
+    def test_shorter_candidate_matches_longer_golden(self):
+        assert names_match("Strahd", "Strahd von Zarovich")
+        assert names_match("Church", "Church of Barovia")
+        assert names_match("Barovia", "Village of Barovia")
+        assert names_match("Ismark", "Ismark Kolyanovich")
+
+    def test_longer_candidate_matches_shorter_golden(self):
+        """Direction must not matter -- the extractor may be more specific."""
+        assert names_match("Ireena Kolyana", "Ireena")
+
+    def test_articles_are_still_folded(self):
+        assert names_match("The Church", "Church of Barovia")
+
+    def test_unrelated_names_do_not_match(self):
+        assert not names_match("Ismark", "Ireena")
+        assert not names_match("Bildrath", "Parriwimple")
+
+    def test_a_shared_generic_token_is_not_enough(self):
+        """"Village of Barovia" and "Village of Krezk" share a token and are
+        different places. Subset matching must not collapse them."""
+        assert not names_match("Village of Krezk", "Village of Barovia")
+
+    def test_typos_do_not_match(self):
+        """Deliberate: a transcription typo is a real defect, not naming variance.
+
+        Making the matcher fuzzy enough to absorb "Morgatha" -> "Morgantha" would
+        also hide genuine extraction errors.
+        """
+        assert not names_match("Morgatha", "Morgantha")
+        assert not names_match("Blood of the Vine Tavern", "Blood on the Vine Tavern")
+
+
+class TestSubsetMatchingInGrade:
+    def test_recall_counts_a_shorter_candidate(self):
+        g = golden(nodes=[gnode("Strahd von Zarovich")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.node_recall == 1.0
+        assert report.unmatched_nodes == []
+
+    def test_edge_endpoints_use_subset_matching_too(self):
+        g = golden(
+            nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
+            edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
+        )
+        report = grade([], [cedge("Strahd", "Ireena", "SEEKS")], g)
+
+        assert report.edge_recall == 1.0
+
+    def test_an_ambiguous_candidate_is_reported_as_a_collision(self):
+        """If a short name matches two golden entries, that is ambiguity, and the
+        harness must say so rather than silently crediting one."""
+        g = golden(nodes=[gnode("Strahd von Zarovich"), gnode("Strahd Zombie")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.collisions, "an ambiguous candidate must be surfaced"
+```
+
+Add `names_match` to the existing import from `backend.canon.grade`.
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest tests/test_canon/test_grade.py::TestSubsetMatching -v`
+Expected: FAIL with `ImportError: cannot import name 'names_match'`. Capture the output.
+
+- [ ] **Step 3: Implement subset matching**
+
+In `backend/canon/grade.py`, add below `normalize_name`:
+
+```python
+def names_match(candidate: str, golden: str) -> bool:
+    """True when a candidate name refers to the same entity as a golden name.
+
+    Exact folded equality is too strict: the extractor writes what the passage
+    writes, and chapter 3 says "Strahd" far more often than "Strahd von
+    Zarovich". Grading the former as a miss measures naming convention rather
+    than whether the entity was found.
+
+    So one name also matches the other when its tokens are a subset -- "strahd"
+    within "strahd von zarovich", "church" within "church of barovia". Subset,
+    not substring: "Village of Krezk" and "Village of Barovia" share a token but
+    neither contains the other, so they correctly do not match.
+
+    Deliberately NOT fuzzy. A typo like "Morgatha" for "Morgantha" is a real
+    defect -- a transcription error or an extraction error -- and absorbing it
+    here would hide the class of problem this harness exists to surface.
+    """
+    a, b = normalize_name(candidate), normalize_name(golden)
+    if a == b:
+        return True
+    if not a or not b:
+        return False
+
+    a_tokens, b_tokens = set(a.split()), set(b.split())
+    return a_tokens < b_tokens or b_tokens < a_tokens
+```
+
+Then replace exact-equality comparisons in `grade` with `names_match`:
+
+- Node matching: instead of intersecting `candidate_names` with the golden's acceptable
+  set, a golden entry is hit when **any** candidate matches **any** of its acceptable
+  names. Track which candidates were consumed so `unmatched_nodes` stays correct.
+- Edge matching: resolve each golden endpoint id to its acceptable names as now, but
+  compare endpoints with `names_match` rather than set membership.
+- **Ambiguity goes to `collisions`.** If one candidate name matches more than one golden
+  node id, append a line naming the candidate and the ids it matched. This reuses the
+  diagnostic added in the previous fix round and is why that field exists.
+
+Keep `_find_collisions`'s existing golden-vs-golden detection; ambiguous candidates are an
+additional source of collision entries, not a replacement.
+
+- [ ] **Step 4: Run the new tests**
+
+Run: `uv run pytest tests/test_canon/test_grade.py -v`
+Expected: all pass, including the pre-existing tests. If a pre-existing test now fails,
+**report it rather than editing it** — subset matching is a behaviour change and an
+existing assertion contradicting it is information, not an obstacle.
+
+- [ ] **Step 5: Run the whole suite**
+
+Run: `uv run pytest -q`
+Expected: green. Report the count.
+
+- [ ] **Step 6: Re-run chapter 3 and report the new numbers**
+
+```bash
+SP=/private/tmp/claude-501/-Users-csinger-projects-agentic-dm/52a0dd1b-7233-44b1-b4e8-ed61a72765e5/scratchpad
+uv run python -m backend.scripts.extract_canon "Chapter 3" --grade ch3 -o "$SP/ch3-candidates-v2.json"
+```
+
+Report both recall figures, the full miss list, and any collisions, verbatim. **Do not tune
+the extraction prompt** — that decision remains the controller's, and this run exists to
+separate matcher error from extractor error, not to chase a number.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/canon/grade.py tests/test_canon/test_grade.py
+git commit -m "fix(canon): match names by token subset so recall measures extraction"
+```
+
+---
+
 ## Verification
 
 Whole suite: `uv run pytest -q` — 316 existing plus ~42 new.
