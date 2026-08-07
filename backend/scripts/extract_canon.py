@@ -8,6 +8,7 @@ score, which keeps a tuning run from being able to corrupt anything.
 import argparse
 import asyncio
 import json
+import re
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -24,10 +25,19 @@ from backend.canon.models import Chapter
 from backend.canon.page_extractor import PageExtractor
 from backend.canon.sections import pack_sections, split_sections
 from backend.canon.seed_loader import SEED_DIR, extractable_subset
+from backend.canon.structure import structural_edges
 from backend.core.config import settings
 from backend.graph.schema import Layer
 
 DEFAULT_PDF = Path("data/cos.pdf")
+
+_CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
+
+
+def chapter_place(chapter: Chapter) -> str | None:
+    """The place a chapter is about, or None if it is not about a place."""
+    stripped = _CHAPTER_PREFIX.sub("", chapter.title).strip()
+    return stripped or None
 
 
 def load_chapters(pdf_path: Path = DEFAULT_PDF, book_slug: str = "cos") -> list[Chapter]:
@@ -67,11 +77,16 @@ async def run(
     out_path: Path | None,
 ) -> dict:
     chapter = find_chapter(load_chapters(), chapter_title)
-    units = pack_sections(split_sections(chapter))
+    sections = split_sections(chapter)
+    units = pack_sections(sections)
     print(f"{chapter.title}: {len(units)} units")
 
     nodes, edges = await CandidateExtractor().extract_units(units, layers=layers)
     print(f"  {len(nodes)} candidate nodes, {len(edges)} candidate edges")
+
+    derived = structural_edges(sections, nodes, chapter_place(chapter))
+    print(f"  {len(derived)} derived structural edges")
+    edges = edges + derived
 
     if out_path:
         out_path.write_text(
