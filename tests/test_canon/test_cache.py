@@ -68,13 +68,21 @@ class TestGetBest:
         """The source PDF repeats every page, and the two transcriptions differ.
 
         Keeping whichever came first discarded better-structured text: chapter 3
-        lost two keyed sections that way.
+        lost two keyed sections that way. The richer transcript here opens
+        directly on a heading -- no blank line before it -- which a naive
+        "\\n## " substring count misses entirely. A page-number-order or naive
+        length tiebreak would wrongly prefer the poorer transcript below, since
+        it is padded long enough to win on length alone if its one real heading
+        ties the richer page's undercounted total.
         """
         cache = TranscriptCache(tmp_path)
         cache.put(
             PageTranscript(
                 page_number=80,
-                markdown="Some prose with no headings at all.",
+                markdown=(
+                    "## E1. Bildrath's Mercantile\n\nProse.\n\n"
+                    "## E2. Blood on the Vine Tavern\n\nMore."
+                ),
                 image_sha256="a" * 64,
                 model="gpt-4o",
             )
@@ -82,7 +90,11 @@ class TestGetBest:
         cache.put(
             PageTranscript(
                 page_number=81,
-                markdown="## E1. Bildrath's Mercantile\n\nProse.\n\n## E2. Tavern\n\nMore.",
+                markdown=(
+                    "Some prose with only one heading and no structure otherwise, "
+                    "padded long enough that a naive length tiebreak would wrongly "
+                    "prefer it.\n\n## E1. Only Heading\n\n" + ("filler " * 20)
+                ),
                 image_sha256="a" * 64,
                 model="gpt-4o",
             )
@@ -91,7 +103,7 @@ class TestGetBest:
         best = cache.get_best([80, 81], "a" * 64)
 
         assert best is not None
-        assert best.page_number == 81
+        assert best.page_number == 80
 
     def test_falls_back_to_length_when_structure_ties(self, tmp_path):
         cache = TranscriptCache(tmp_path)
@@ -108,3 +120,35 @@ class TestGetBest:
         cache.put(PageTranscript(5, "body", "d" * 64, "gpt-4o"))
 
         assert cache.get_best([5], "d" * 64).page_number == 5
+
+    def test_headings_inside_a_fenced_code_block_do_not_count(self, tmp_path):
+        """A `##` inside a fenced code block is example text, not a real heading.
+
+        Page 80 has one genuine heading plus two `##` lines fenced off as a code
+        sample, padded long enough to win on length if the fenced lines were
+        wrongly counted as structure. Page 81 has two genuine headings and must
+        still win.
+        """
+        cache = TranscriptCache(tmp_path)
+        cache.put(
+            PageTranscript(
+                page_number=80,
+                markdown=(
+                    "## Real Heading\n\nProse before a long example.\n\n"
+                    "```\n## Not a heading\n## Also not a heading\n```\n"
+                    + ("padding " * 20)
+                ),
+                image_sha256="f" * 64,
+                model="gpt-4o",
+            )
+        )
+        cache.put(
+            PageTranscript(
+                page_number=81,
+                markdown="## Real Heading\n\nShort.\n\n## Another Real Heading\n\nShort.",
+                image_sha256="f" * 64,
+                model="gpt-4o",
+            )
+        )
+
+        assert cache.get_best([80, 81], "f" * 64).page_number == 81

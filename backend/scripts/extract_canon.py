@@ -21,11 +21,11 @@ from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
 from backend.canon.extract import CandidateExtractor
 from backend.canon.grade import grade
-from backend.canon.models import Chapter
+from backend.canon.models import Chapter, Section
 from backend.canon.page_extractor import PageExtractor
 from backend.canon.sections import split_sections, units_from_sections
 from backend.canon.seed_loader import SEED_DIR, extractable_subset
-from backend.canon.structure import structural_edges
+from backend.canon.structure import place_of_section, structural_edges
 from backend.core.config import settings
 from backend.graph.schema import Layer
 
@@ -34,8 +34,17 @@ DEFAULT_PDF = Path("data/cos.pdf")
 _CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
 
 
-def chapter_place(chapter: Chapter) -> str | None:
-    """The place a chapter is about, or None if it is not about a place."""
+def chapter_place(chapter: Chapter, sections: list[Section]) -> str | None:
+    """The place a chapter is about, or None if it demonstrably has no rooms.
+
+    A title alone is not evidence: Chapter 1, "Into the Mists", keys its
+    sections to Tarokka card results ("1. The Tome of Strahd"), not rooms, and
+    treating its title as a containing place would invent one. Only a chapter
+    with at least one letter-keyed section -- see `place_of_section` -- is
+    trusted to be about a physical place.
+    """
+    if not any(place_of_section(s) for s in sections):
+        return None
     stripped = _CHAPTER_PREFIX.sub("", chapter.title).strip()
     return stripped or None
 
@@ -94,7 +103,7 @@ async def run(
     nodes, edges = await CandidateExtractor().extract_units(units, layers=layers)
     print(f"  {len(nodes)} candidate nodes, {len(edges)} candidate edges")
 
-    derived = structural_edges(sections, nodes, chapter_place(chapter))
+    derived = structural_edges(sections, nodes, chapter_place(chapter, sections))
     print(f"  {len(derived)} derived structural edges")
     edges = edges + derived
 

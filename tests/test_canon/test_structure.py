@@ -42,8 +42,11 @@ class TestPlaceOfSection:
         assert place_of_section(section("Approaching the Village")) is None
         assert place_of_section(section("(preamble)")) is None
 
-    def test_a_bare_number_prefix_also_counts(self):
-        assert place_of_section(section("12. Old Bonegrinder")) == "Old Bonegrinder"
+    def test_a_bare_number_prefix_is_not_a_keyed_room(self):
+        """Chapter 1's Tarokka card list and Appendix B's Death House rooms are
+        the book's only bare-number keys, and neither names a physical room --
+        a letter prefix is what distinguishes a genuine keyed room."""
+        assert place_of_section(section("12. Old Bonegrinder")) is None
 
 
 class TestStructuralEdges:

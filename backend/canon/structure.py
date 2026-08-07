@@ -13,8 +13,10 @@ import re
 
 from backend.canon.models import CandidateEdge, CandidateNode, Section
 
-# "E1. Bildrath's Mercantile", "E5g. Undercroft", "12. Old Bonegrinder"
-_KEYED = re.compile(r"^[A-Z]?\d+[a-z]?\.\s*(.+)$")
+# "E1. Bildrath's Mercantile", "E5g. Undercroft". A letter prefix is required:
+# the book's only bare-number keys are chapter 1's Tarokka card list and
+# Appendix B's Death House rooms, neither of which name a physical room.
+_KEYED = re.compile(r"^[A-Z]\d+[a-z]?\.\s*(.+)$")
 
 STRUCTURAL_EVIDENCE = "derived from document structure"
 
