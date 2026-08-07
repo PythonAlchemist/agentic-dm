@@ -72,7 +72,7 @@ Return JSON:
   "edges": [{{"source_name": ..., "target_name": ..., "rel_type": ..., "evidence": ...}}]}}
 
 Chapter: {unit.chapter_title}
-Section(s): {", ".join(unit.headings)}
+Section: {unit.heading}
 
 ---
 {unit.markdown}
@@ -142,7 +142,7 @@ class CandidateExtractor:
         layer: Layer,
     ) -> tuple[list[CandidateNode], list[CandidateEdge]]:
         allowed = set(layer_vocabulary(layer))
-        heading = unit.headings[0] if unit.headings else ""
+        heading = unit.heading
 
         nodes = [
             CandidateNode(

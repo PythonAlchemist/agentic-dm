@@ -7,7 +7,7 @@ own author chose.
 """
 
 from backend.canon.models import Chapter
-from backend.canon.sections import _count, pack_sections, split_sections, units_from_sections
+from backend.canon.sections import split_sections, units_from_sections
 
 
 def chapter(markdown: str) -> Chapter:
@@ -60,65 +60,6 @@ class TestSplitSections:
         assert split_sections(chapter("   \n\n  ")) == []
 
 
-class TestPackSections:
-    def test_small_sections_combine(self):
-        sections = split_sections(
-            chapter("## A\n\nshort.\n\n## B\n\nshort.\n\n## C\n\nshort.")
-        )
-        units = pack_sections(sections, max_tokens=1500)
-
-        assert len(units) == 1
-        assert units[0].headings == ["A", "B", "C"]
-
-    def test_oversized_section_stands_alone(self):
-        big = "word " * 3000
-        sections = split_sections(chapter(f"## Small\n\ntiny.\n\n## Big\n\n{big}"))
-        units = pack_sections(sections, max_tokens=1500)
-
-        assert len(units) == 2
-        assert units[0].headings == ["Small"]
-        assert units[1].headings == ["Big"]
-        assert units[1].token_count > 1500
-
-    def test_packing_loses_no_section(self):
-        sections = split_sections(
-            chapter("".join(f"## S{i}\n\n{'word ' * 200}\n\n" for i in range(10)))
-        )
-        units = pack_sections(sections, max_tokens=1500)
-
-        packed = [h for u in units for h in u.headings]
-        assert packed == [s.heading for s in sections]
-
-    def test_packing_duplicates_no_section(self):
-        sections = split_sections(
-            chapter("".join(f"## S{i}\n\n{'word ' * 200}\n\n" for i in range(10)))
-        )
-        units = pack_sections(sections, max_tokens=1500)
-
-        packed = [h for u in units for h in u.headings]
-        assert len(packed) == len(set(packed))
-
-    def test_units_carry_their_token_count(self):
-        units = pack_sections(split_sections(chapter("## A\n\nsome words here.")))
-
-        assert units[0].token_count > 0
-
-    def test_empty_input_yields_no_units(self):
-        assert pack_sections([]) == []
-
-    def test_packs_to_the_exact_token_budget_in_one_unit(self):
-        """Boundary: batch_tokens landing exactly on max_tokens must not split."""
-        sections = split_sections(
-            chapter("## A\n\nsome words here.\n\n## B\n\nmore words there.")
-        )
-        exact_budget = sum(_count(s.markdown) for s in sections)
-
-        units = pack_sections(sections, max_tokens=exact_budget)
-
-        assert len(units) == 1
-        assert units[0].headings == ["A", "B"]
-
-
 class TestUnitsFromSections:
     def test_one_unit_per_section(self):
         sections = split_sections(
@@ -126,7 +67,7 @@ class TestUnitsFromSections:
         )
         units = units_from_sections(sections)
 
-        assert [u.headings for u in units] == [["A"], ["B"], ["C"]]
+        assert [u.heading for u in units] == ["A", "B", "C"]
 
     def test_each_unit_carries_its_own_token_count(self):
         units = units_from_sections(split_sections(chapter("## A\n\nsome words here.")))
@@ -139,4 +80,4 @@ class TestUnitsFromSections:
         )
         units = units_from_sections(sections)
 
-        assert [u.headings[0] for u in units] == [s.heading for s in sections]
+        assert [u.heading for u in units] == [s.heading for s in sections]

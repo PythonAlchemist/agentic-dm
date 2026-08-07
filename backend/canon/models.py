@@ -53,11 +53,11 @@ class Section:
 
 @dataclass
 class ExtractionUnit:
-    """One or more contiguous sections, sized to fit a single extraction pass."""
+    """One section, sized to fit a single extraction pass."""
 
     chapter_slug: str
     chapter_title: str
-    headings: list[str]
+    heading: str
     markdown: str
     token_count: int
 

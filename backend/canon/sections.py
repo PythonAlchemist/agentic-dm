@@ -18,7 +18,6 @@ from backend.canon.models import Chapter, ExtractionUnit, Section
 _H2 = re.compile(r"^##\s+(?!#)(.+?)\s*$", re.MULTILINE)
 
 PREAMBLE_HEADING = "(preamble)"
-DEFAULT_MAX_TOKENS = 1500
 
 _encoder = tiktoken.encoding_for_model("gpt-4")
 
@@ -73,52 +72,9 @@ def units_from_sections(sections: list[Section]) -> list[ExtractionUnit]:
         ExtractionUnit(
             chapter_slug=s.chapter_slug,
             chapter_title=s.chapter_title,
-            headings=[s.heading],
+            heading=s.heading,
             markdown=s.markdown,
             token_count=_count(s.markdown),
         )
         for s in sections
     ]
-
-
-def pack_sections(
-    sections: list[Section],
-    max_tokens: int = DEFAULT_MAX_TOKENS,
-) -> list[ExtractionUnit]:
-    """Group contiguous sections into units under a token budget.
-
-    Section sizes vary by two orders of magnitude, so one-call-per-section would
-    waste calls on 14-token stubs. A section larger than the budget stands alone
-    rather than being split -- splitting mid-section is what this design avoids.
-    """
-    units: list[ExtractionUnit] = []
-    batch: list[Section] = []
-    batch_tokens = 0
-
-    def flush() -> None:
-        nonlocal batch, batch_tokens
-        if not batch:
-            return
-        units.append(
-            ExtractionUnit(
-                chapter_slug=batch[0].chapter_slug,
-                chapter_title=batch[0].chapter_title,
-                headings=[s.heading for s in batch],
-                markdown="\n\n".join(s.markdown for s in batch),
-                token_count=batch_tokens,
-            )
-        )
-        batch = []
-        batch_tokens = 0
-
-    for section in sections:
-        tokens = _count(section.markdown)
-        if batch and batch_tokens + tokens > max_tokens:
-            flush()
-        batch.append(section)
-        batch_tokens += tokens
-        if batch_tokens >= max_tokens:
-            flush()
-
-    flush()
-    return units

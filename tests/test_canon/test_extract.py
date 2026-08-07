@@ -19,7 +19,7 @@ def unit(markdown: str = "## E1\n\nBildrath sells overpriced rope.") -> Extracti
     return ExtractionUnit(
         chapter_slug="chapter-3-the-village-of-barovia",
         chapter_title="Chapter 3: The Village of Barovia",
-        headings=["E1"],
+        heading="E1",
         markdown=markdown,
         token_count=12,
     )
@@ -167,7 +167,7 @@ class TestPerSectionProvenance:
         one_section = ExtractionUnit(
             chapter_slug="chapter-3-the-village-of-barovia",
             chapter_title="Chapter 3: The Village of Barovia",
-            headings=["E5. Church"],
+            heading="E5. Church",
             markdown="## E5. Church\n\nDonavich prays here.",
             token_count=9,
         )
