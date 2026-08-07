@@ -81,3 +81,15 @@ class TestUnitsFromSections:
         units = units_from_sections(sections)
 
         assert [u.heading for u in units] == [s.heading for s in sections]
+
+    def test_each_unit_carries_its_own_section_index(self):
+        """If a unit's section_index silently defaulted or collapsed to 0,
+        structure.py would attribute every candidate from every section but
+        the first to section 0 -- a fabricated LOCATED_IN naming the wrong
+        room, inside the one module documented as unable to hallucinate."""
+        sections = split_sections(
+            chapter("".join(f"## S{i}\n\nbody {i}.\n\n" for i in range(4)))
+        )
+        units = units_from_sections(sections)
+
+        assert [u.section_index for u in units] == [s.index for s in sections]

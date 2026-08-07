@@ -216,6 +216,18 @@ def grade(
         f"{label} credited via ambiguous endpoint match" for label in ambiguous_endpoint_labels
     ]
 
+    # A golden edge counts toward edge_recall_unambiguous only if BOTH hold:
+    # the crediting candidate edge satisfies exactly one golden edge (not,
+    # say, two golden edges of the same type sharing an ambiguous endpoint --
+    # see multi_matched_edge_collisions above), AND neither of its endpoint
+    # names is itself ambiguous against the full golden node set (the
+    # "donavich -SEEKS-> save-doru" case, where the endpoint alone is
+    # globally ambiguous even though this one edge match is not). Requiring
+    # both makes this a lower bound of a lower bound: a real edge can fail
+    # this check purely because its endpoint NAME is reused elsewhere in the
+    # golden set, with no fault in the edge extraction itself. Read a low
+    # edge_recall_unambiguous as "the ruler is conservative here", not
+    # directly as an extraction-quality signal.
     unambiguously_credited_labels = {
         label
         for label, i in credit_pairs

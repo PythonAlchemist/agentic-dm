@@ -105,6 +105,22 @@ class TestStructuralEdges:
         assert all(e.layer == "spatial" for e in edges)
         assert all("structure" in e.evidence for e in edges)
 
+    def test_derived_edges_carry_their_section_provenance(self):
+        """The section a derived edge came from is mechanically known -- it
+        must not ship the -1 sentinel that means "unknown"; stage 2b needs
+        this exactly where §7's section_index fix was meant to help."""
+        sections = [section("E5. Church", index=2)]
+        nodes = [node("Donavich", heading="E5. Church", section_index=2)]
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        contains = next(e for e in edges if e.rel_type == "CONTAINS")
+        assert contains.section_index == 2
+        assert contains.section_heading == "E5. Church"
+
+        located = next(e for e in edges if e.rel_type == "LOCATED_IN")
+        assert located.section_index == 2
+        assert located.section_heading == "E5. Church"
+
     def test_edges_are_deduplicated(self):
         """The same node name can appear more than once in the same section --
         on the real chapter-3 run, three layer passes extract the same node
@@ -135,7 +151,15 @@ class TestSectionIndexIsTheKey:
         headed "Actions" -- `(chapter_slug, heading)` is not a unique key.
         Keying on section_index (not heading text) means a node from one
         "Treasure" section is never resolved against a different "Treasure"
-        section's identity, even when they share a heading."""
+        section's identity, even when they share a heading.
+
+        NOTE: `place_of_section` is a pure function of heading text, so this
+        specific fixture (both "Treasure" sections keyed and identical)
+        computes the same place either way and does not by itself
+        discriminate heading-keying from index-keying under mutation -- see
+        `test_a_node_resolves_against_its_own_section_index_not_its_heading`
+        below for the fixture that does.
+        """
         sections = [
             section("T1. Treasure", index=0),
             section("Interlude", index=1),
@@ -152,3 +176,20 @@ class TestSectionIndexIsTheKey:
             ("Gold Coins", "Treasure"),
             ("Silver Chalice", "Treasure"),
         }, "both nodes must be independently located, not merged into one"
+
+    def test_a_node_resolves_against_its_own_section_index_not_its_heading(self):
+        """A shadowed duplicate heading must not resolve a node to the WRONG
+        section's place. Donavich's `section_heading` happens to read "E5.
+        Church" (stale/duplicate text), but his real section is index 1,
+        "Prose Interlude" -- unkeyed, no place. Keying the lookup on
+        `node.section_heading` instead of `node.section_index` would find
+        section 0's "Church" via the heading text and wrongly emit
+        Donavich -LOCATED_IN-> Church, even though his actual section names
+        no place at all. This is the failure the brief describes: a shadowed
+        duplicate heading resolving to the wrong section's place.
+        """
+        sections = [section("E5. Church", index=0), section("Prose Interlude", index=1)]
+        nodes = [node("Donavich", heading="E5. Church", section_index=1)]
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []

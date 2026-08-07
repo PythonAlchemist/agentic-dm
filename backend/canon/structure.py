@@ -54,7 +54,14 @@ def structural_edges(
     by_index = {s.index: place_of_section(s) for s in sections}
     edges: list[CandidateEdge] = []
 
-    def add(source: str, target: str, rel_type: str) -> None:
+    def add(
+        source: str,
+        target: str,
+        rel_type: str,
+        *,
+        section_index: int = -1,
+        section_heading: str = "",
+    ) -> None:
         edges.append(
             CandidateEdge(
                 source_name=source,
@@ -63,13 +70,19 @@ def structural_edges(
                 evidence=STRUCTURAL_EVIDENCE,
                 layer="spatial",
                 chapter_slug=sections[0].chapter_slug if sections else "",
+                section_index=section_index,
+                section_heading=section_heading,
             )
         )
 
     if chapter_place:
-        for place in by_index.values():
+        for s in sections:
+            place = by_index[s.index]
             if place:
-                add(chapter_place, place, "CONTAINS")
+                add(
+                    chapter_place, place, "CONTAINS",
+                    section_index=s.index, section_heading=s.heading,
+                )
 
     for node in nodes:
         place = by_index.get(node.section_index)
@@ -79,7 +92,10 @@ def structural_edges(
         # names the same place the heading does.
         if node.entity_type == "LOCATION":
             continue
-        add(node.name, place, "LOCATED_IN")
+        add(
+            node.name, place, "LOCATED_IN",
+            section_index=node.section_index, section_heading=node.section_heading,
+        )
 
     seen: set[tuple[str, str, str]] = set()
     unique: list[CandidateEdge] = []

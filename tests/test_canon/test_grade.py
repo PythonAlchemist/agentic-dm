@@ -113,6 +113,23 @@ class TestEdgeRecall:
 
         assert report.edge_recall == 1.0
 
+    def test_unmatched_edges_are_listed_not_scored(self):
+        """Fabrication is most likely among the ~139 extracted edges, not the
+        ~166 nodes -- the real chapter-3 run contains "Ireena Kolyana
+        -GUARDS-> Castle Ravenloft". The report must carry the candidate
+        edges that scored no golden match so a human can spot-check them; an
+        extra candidate edge must not reduce edge_recall either."""
+        g = golden(edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
+                   nodes=[gnode("A"), gnode("B")])
+        report = grade(
+            [],
+            [cedge("A", "B", "KNOWS"), cedge("Ireena Kolyana", "Castle Ravenloft", "GUARDS")],
+            g,
+        )
+
+        assert report.edge_recall == 1.0
+        assert report.unmatched_edges == ["Ireena Kolyana -GUARDS-> Castle Ravenloft"]
+
 
 class TestCollisions:
     def test_two_golden_names_folding_to_the_same_form_are_flagged(self):
@@ -250,6 +267,28 @@ class TestUnambiguousNodeRecall:
         report = grade([cnode("Ireena"), cnode("Ismark")], [], g)
 
         assert report.node_recall_unambiguous == 1.0
+
+    def test_an_entry_with_both_an_ambiguous_and_unambiguous_witness_counts(self):
+        """A single unambiguous witness is enough to credit an entry -- this
+        does NOT require every matching candidate to be unambiguous, only
+        that at least one is. "Ireena" is ambiguous (matches both the NPC and
+        the quest named after her), but "Ireena Kolyana" matches the NPC
+        alone, so the NPC entry is credited. The quest has no unambiguous
+        witness at all, so only half of the two entries count.
+
+        Pinned so a future "require ALL matching candidates to be
+        unambiguous" rewrite is caught immediately.
+        """
+        g = golden(
+            nodes=[
+                gnode("Ireena Kolyana"),
+                gnode("Escort Ireena to Vallaki", entity_type="QUEST"),
+            ]
+        )
+        report = grade([cnode("Ireena"), cnode("Ireena Kolyana")], [], g)
+
+        assert report.node_recall == 1.0
+        assert report.node_recall_unambiguous == 0.5
 
     def test_collision_does_not_move_recall_but_does_move_unambiguous_recall(self):
         """A candidate matching two entries loosely still doesn't hurt the loose
