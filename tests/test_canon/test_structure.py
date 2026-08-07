@@ -83,8 +83,14 @@ class TestStructuralEdges:
         assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []
 
     def test_no_chapter_place_means_no_contains_edges(self):
-        """Appendix D has no containing place; inventing one would be a fabrication."""
-        sections = [section("Baba Lysaga")]
+        """Appendix D has no containing place; inventing one would be a fabrication.
+
+        The section below IS keyed (unlike the old fixture's "Baba Lysaga"),
+        so `by_heading`'s own per-section None cannot be what blocks CONTAINS
+        here -- only the `chapter_place` guard itself can be. This is the
+        anti-fabrication property Task 6 exists for.
+        """
+        sections = [section("D1. Baba Lysaga's Hut")]
         edges = structural_edges(sections, [], None)
 
         assert [e for e in edges if e.rel_type == "CONTAINS"] == []
@@ -97,11 +103,24 @@ class TestStructuralEdges:
         assert all("structure" in e.evidence for e in edges)
 
     def test_edges_are_deduplicated(self):
-        """Two NPCs in one section must not produce two identical CONTAINS edges."""
+        """The same node name can appear more than once in the same section --
+        on the real chapter-3 run, three layer passes extract the same node
+        name from the same section repeatedly, and 41 raw candidates dedup to
+        19. Two DISTINCT node names (the old fixture) can never exercise this:
+        three distinct edges are trivially already unique."""
         sections = [section("E5. Church")]
-        nodes = [node("Donavich", heading="E5. Church"),
-                 node("Doru", heading="E5. Church")]
+        nodes = [
+            node("Donavich", heading="E5. Church"),
+            node("Donavich", heading="E5. Church"),
+            node("Doru", heading="E5. Church"),
+        ]
         edges = structural_edges(sections, nodes, "Village of Barovia")
 
+        located = [e for e in edges if e.rel_type == "LOCATED_IN"]
+        assert len(located) == 2, "the repeated Donavich mention must collapse to one edge"
+        assert {(e.source_name, e.target_name) for e in located} == {
+            ("Donavich", "Church"),
+            ("Doru", "Church"),
+        }
         seen = [(e.source_name, e.target_name, e.rel_type) for e in edges]
         assert len(seen) == len(set(seen))

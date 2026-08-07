@@ -32,14 +32,19 @@ class TestChapterPlace:
         assert chapter_place(ch1, sections) is None
 
     def test_a_card_style_chapter_yields_no_contains_edges(self):
-        """No place means structural_edges must not invent a CONTAINS parent."""
+        """No place means structural_edges must not invent a CONTAINS parent,
+        even when the chapter DOES have a keyed section -- otherwise this only
+        proves the unrelated by-heading None guard (every section is unkeyed),
+        not the chapter_place guard itself. This is the exact anti-fabrication
+        property Task 6 exists for."""
         ch1 = chapter(
             "chapter-1-into-the-mists",
             "Chapter 1: Into the Mists",
-            "## 1. The Tome of Strahd\n\nBody.",
+            "## E1. A Keyed Area\n\nBody.",
         )
         sections = split_sections(ch1)
-        edges = structural_edges(sections, [], chapter_place(ch1, sections))
+
+        edges = structural_edges(sections, [], None)
 
         assert [e for e in edges if e.rel_type == "CONTAINS"] == []
 
