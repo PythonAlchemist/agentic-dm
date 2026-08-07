@@ -30,6 +30,33 @@ def normalize_name(name: str) -> str:
     return _ARTICLE.sub("", folded)
 
 
+def names_match(candidate: str, golden: str) -> bool:
+    """True when a candidate name refers to the same entity as a golden name.
+
+    Exact folded equality is too strict: the extractor writes what the passage
+    writes, and chapter 3 says "Strahd" far more often than "Strahd von
+    Zarovich". Grading the former as a miss measures naming convention rather
+    than whether the entity was found.
+
+    So one name also matches the other when its tokens are a subset -- "strahd"
+    within "strahd von zarovich", "church" within "church of barovia". Subset,
+    not substring: "Village of Krezk" and "Village of Barovia" share a token but
+    neither contains the other, so they correctly do not match.
+
+    Deliberately NOT fuzzy. A typo like "Morgatha" for "Morgantha" is a real
+    defect -- a transcription error or an extraction error -- and absorbing it
+    here would hide the class of problem this harness exists to surface.
+    """
+    a, b = normalize_name(candidate), normalize_name(golden)
+    if a == b:
+        return True
+    if not a or not b:
+        return False
+
+    a_tokens, b_tokens = set(a.split()), set(b.split())
+    return a_tokens < b_tokens or b_tokens < a_tokens
+
+
 def _golden_node_names(entry: dict) -> set[str]:
     """Every name a candidate may legitimately use for this golden node."""
     names = {entry.get("name", "")}
@@ -79,43 +106,50 @@ def grade(
     candidate_names = {normalize_name(c.name) for c in nodes}
 
     missing_nodes: list[str] = []
-    matched_names: set[str] = set()
+    # normalized candidate name -> golden ids it matched, so ambiguity (one
+    # candidate matching more than one golden entry) can be surfaced below.
+    candidate_hits: dict[str, set[str]] = {}
     for entry in golden_nodes:
+        entry_id = entry.get("id", entry.get("name", ""))
         acceptable = _golden_node_names(entry)
-        hit = acceptable & candidate_names
-        if hit:
-            matched_names |= hit
-        else:
+        hit = False
+        for cand in candidate_names:
+            if any(names_match(cand, acc) for acc in acceptable):
+                candidate_hits.setdefault(cand, set()).add(entry_id)
+                hit = True
+        if not hit:
             missing_nodes.append(entry.get("name", entry["id"]))
 
+    matched_names = set(candidate_hits)
     unmatched_nodes = [c.name for c in nodes if normalize_name(c.name) not in matched_names]
 
-    candidate_edges = {
-        (normalize_name(e.source_name), normalize_name(e.target_name), e.rel_type)
-        for e in edges
-    }
+    node_collisions = [
+        f"{cand} matches {', '.join(sorted(ids))}"
+        for cand, ids in sorted(candidate_hits.items())
+        if len(ids) > 1
+    ]
 
     missing_edges: list[str] = []
-    matched_edges: set[tuple[str, str, str]] = set()
+    matched_edge_indices: set[int] = set()
     for entry in golden_edges:
         sources = by_id.get(entry["source"], set())
         targets = by_id.get(entry["target"], set())
-        hits = {
-            (s, t, entry["type"])
-            for s in sources
-            for t in targets
-            if (s, t, entry["type"]) in candidate_edges
-        }
-        if hits:
-            matched_edges |= hits
-        else:
+        hit = False
+        for i, e in enumerate(edges):
+            if e.rel_type != entry["type"]:
+                continue
+            if any(names_match(e.source_name, s) for s in sources) and any(
+                names_match(e.target_name, t) for t in targets
+            ):
+                matched_edge_indices.add(i)
+                hit = True
+        if not hit:
             missing_edges.append(f"{entry['source']} -{entry['type']}-> {entry['target']}")
 
     unmatched_edges = [
         f"{e.source_name} -{e.rel_type}-> {e.target_name}"
-        for e in edges
-        if (normalize_name(e.source_name), normalize_name(e.target_name), e.rel_type)
-        not in matched_edges
+        for i, e in enumerate(edges)
+        if i not in matched_edge_indices
     ]
 
     return GradeReport(
@@ -125,7 +159,7 @@ def grade(
         missing_edges=missing_edges,
         unmatched_nodes=unmatched_nodes,
         unmatched_edges=unmatched_edges,
-        collisions=_find_collisions(golden_nodes),
+        collisions=_find_collisions(golden_nodes) + node_collisions,
     )
 
 

@@ -6,7 +6,7 @@ candidate is usually a legitimate entity the key omits. Scoring precision here
 would punish an extractor for being thorough.
 """
 
-from backend.canon.grade import grade, normalize_name
+from backend.canon.grade import grade, names_match, normalize_name
 from backend.canon.models import CandidateEdge, CandidateNode
 
 
@@ -155,3 +155,69 @@ class TestAgainstTheRealSeed:
         assert report.node_recall == 0.0
         assert len(report.missing_nodes) == len(subset["nodes"])
         assert "Ireena Kolyana" in report.missing_nodes
+
+
+class TestSubsetMatching:
+    """A shorter name the passage actually used must match the key's fuller form.
+
+    The extractor writes what the book writes. Chapter 3 says "Strahd" far more
+    often than "Strahd von Zarovich", and grading the former as a miss measures
+    naming convention rather than whether the entity was found.
+    """
+
+    def test_shorter_candidate_matches_longer_golden(self):
+        assert names_match("Strahd", "Strahd von Zarovich")
+        assert names_match("Church", "Church of Barovia")
+        assert names_match("Barovia", "Village of Barovia")
+        assert names_match("Ismark", "Ismark Kolyanovich")
+
+    def test_longer_candidate_matches_shorter_golden(self):
+        """Direction must not matter -- the extractor may be more specific."""
+        assert names_match("Ireena Kolyana", "Ireena")
+
+    def test_articles_are_still_folded(self):
+        assert names_match("The Church", "Church of Barovia")
+
+    def test_unrelated_names_do_not_match(self):
+        assert not names_match("Ismark", "Ireena")
+        assert not names_match("Bildrath", "Parriwimple")
+
+    def test_a_shared_generic_token_is_not_enough(self):
+        """"Village of Barovia" and "Village of Krezk" share a token and are
+        different places. Subset matching must not collapse them."""
+        assert not names_match("Village of Krezk", "Village of Barovia")
+
+    def test_typos_do_not_match(self):
+        """Deliberate: a transcription typo is a real defect, not naming variance.
+
+        Making the matcher fuzzy enough to absorb "Morgatha" -> "Morgantha" would
+        also hide genuine extraction errors.
+        """
+        assert not names_match("Morgatha", "Morgantha")
+        assert not names_match("Blood of the Vine Tavern", "Blood on the Vine Tavern")
+
+
+class TestSubsetMatchingInGrade:
+    def test_recall_counts_a_shorter_candidate(self):
+        g = golden(nodes=[gnode("Strahd von Zarovich")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.node_recall == 1.0
+        assert report.unmatched_nodes == []
+
+    def test_edge_endpoints_use_subset_matching_too(self):
+        g = golden(
+            nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
+            edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
+        )
+        report = grade([], [cedge("Strahd", "Ireena", "SEEKS")], g)
+
+        assert report.edge_recall == 1.0
+
+    def test_an_ambiguous_candidate_is_reported_as_a_collision(self):
+        """If a short name matches two golden entries, that is ambiguity, and the
+        harness must say so rather than silently crediting one."""
+        g = golden(nodes=[gnode("Strahd von Zarovich"), gnode("Strahd Zombie")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.collisions, "an ambiguous candidate must be surfaced"
