@@ -10,7 +10,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.canon.extract import CandidateExtractor, anchor_quests, layer_vocabulary
+from backend.canon.extract import (
+    EXTRACTION_SEED,
+    CandidateExtractor,
+    anchor_quests,
+    layer_vocabulary,
+)
 from backend.canon.models import CandidateEdge, CandidateNode, ExtractionUnit
 from backend.graph.schema import RELATIONSHIP_GLOSS, Layer, RelationshipType
 
@@ -116,6 +121,26 @@ class TestExtractUnit:
         prompt = json.dumps(client.chat.completions.create.call_args.kwargs["messages"])
         assert "CONTAINS" in prompt
         assert "SEEKS" not in prompt, "a spatial pass must not see narrative types"
+
+    @pytest.mark.asyncio
+    async def test_sampling_is_pinned_by_default(self):
+        """The graded path must not be sampled at the API's default
+        temperature 1.0 -- see EXTRACTION_SEED."""
+        client = make_client({"nodes": [], "edges": []})
+        await CandidateExtractor(client=client).extract_unit(unit(), Layer.SPATIAL)
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["temperature"] == 0.0
+        assert kwargs["seed"] == EXTRACTION_SEED
+
+    @pytest.mark.asyncio
+    async def test_temperature_is_overridable_for_a_future_bulk_mode(self):
+        client = make_client({"nodes": [], "edges": []})
+        await CandidateExtractor(client=client, temperature=0.7).extract_unit(
+            unit(), Layer.SPATIAL
+        )
+
+        assert client.chat.completions.create.call_args.kwargs["temperature"] == 0.7
 
     @pytest.mark.asyncio
     async def test_edges_of_the_wrong_layer_are_dropped(self):

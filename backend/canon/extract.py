@@ -29,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 EXTRACTION_MODEL = "gpt-4o-mini"
 
+# Fixed so the graded path's variance is small enough for recall to gate a
+# decision -- OpenAI does not guarantee bit-identical output at temperature 0
+# even with a seed pinned, but this removes "sampled at the API's default
+# temperature 1.0" as a source of run-to-run recall swing. A future bulk mode
+# may want to vary temperature deliberately; the graded path must not.
+EXTRACTION_SEED = 20260806
+
 _LAYER_GUIDANCE = {
     Layer.SPATIAL: (
         "Physical arrangement only: what contains what, what connects to what, "
@@ -116,9 +123,11 @@ class CandidateExtractor:
         client: AsyncOpenAI | None = None,
         model: str | None = None,
         concurrency: int = 6,
+        temperature: float = 0.0,
     ):
         self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = model or EXTRACTION_MODEL
+        self.temperature = temperature
         self._semaphore = asyncio.Semaphore(concurrency)
         # Nodes dropped by the entity_type filter in `_parse` -- see section 1
         # of the task-9 brief. Surfaced by the CLI, never dropped silently.
@@ -143,6 +152,8 @@ class CandidateExtractor:
                     model=self.model,
                     messages=[{"role": "user", "content": _prompt(unit, layer)}],
                     response_format={"type": "json_object"},
+                    temperature=self.temperature,
+                    seed=EXTRACTION_SEED,
                 )
             payload = json.loads(response.choices[0].message.content or "{}")
         except Exception as exc:  # one unit must not abort a chapter
