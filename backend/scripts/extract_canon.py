@@ -146,7 +146,8 @@ async def run(
     units = units_from_sections(sections)
     print(f"{chapter.title}: {len(units)} units")
 
-    nodes, edges, failed = await CandidateExtractor().extract_units(units, layers=layers)
+    extractor = CandidateExtractor()
+    nodes, edges, failed = await extractor.extract_units(units, layers=layers)
     print(f"  {len(nodes)} candidate nodes, {len(edges)} candidate edges")
     total_calls = len(units) * len(layers or list(Layer))
     if failed:
@@ -154,6 +155,9 @@ async def run(
             f"\n  !! {failed} of {total_calls} extraction calls FAILED -- "
             "results below are incomplete, not a low-quality passage !!\n"
         )
+    rejected_entity_types = extractor.rejected_entity_types
+    if rejected_entity_types:
+        print(f"  rejected {rejected_entity_types} nodes with an unknown entity_type")
 
     derived = structural_edges(sections, nodes, chapter_place(chapter, sections))
     print(f"  {len(derived)} derived structural edges")
@@ -174,7 +178,12 @@ async def run(
             )
             print(f"  wrote {out_path}")
 
-    summary: dict = {"nodes": len(nodes), "edges": len(edges), "failed": failed}
+    summary: dict = {
+        "nodes": len(nodes),
+        "edges": len(edges),
+        "failed": failed,
+        "rejected_entity_types": rejected_entity_types,
+    }
 
     if golden is not None:
         report = grade(nodes, edges, golden)

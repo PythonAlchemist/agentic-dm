@@ -97,12 +97,12 @@ def _one_section_chapter() -> Chapter:
     )
 
 
-def _fake_extractor(nodes=None, edges=None, failed=0):
+def _fake_extractor(nodes=None, edges=None, failed=0, rejected_entity_types=0):
     """Stands in for CandidateExtractor: canned results, no network call."""
 
     class _Fake:
         def __init__(self, *a, **kw):
-            pass
+            self.rejected_entity_types = rejected_entity_types
 
         async def extract_units(self, units, layers=None):
             return nodes or [], edges or [], failed
@@ -177,3 +177,29 @@ class TestExtractionFailureSignaling:
         asyncio.run(extract_canon.run("Chapter 3", None, None, out_path))
 
         assert out_path.read_text() != '{"stale": true}'
+
+
+class TestRejectedEntityTypeReporting:
+    """Section 5 of the task-9 brief: rejected counts must be printed before
+    the scores whenever non-zero, and never silently swallowed."""
+
+    @pytest.mark.asyncio
+    async def test_printed_when_nonzero(self, monkeypatch, capsys):
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _fake_extractor(rejected_entity_types=3)
+        )
+
+        summary = await extract_canon.run("Chapter 3", None, None, None)
+
+        assert "rejected 3 nodes with an unknown entity_type" in capsys.readouterr().out
+        assert summary["rejected_entity_types"] == 3
+
+    @pytest.mark.asyncio
+    async def test_not_printed_when_zero(self, monkeypatch, capsys):
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
+
+        await extract_canon.run("Chapter 3", None, None, None)
+
+        assert "unknown entity_type" not in capsys.readouterr().out

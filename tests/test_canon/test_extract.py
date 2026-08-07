@@ -132,6 +132,24 @@ class TestExtractUnit:
         assert failed is False, "a clean response with an off-vocabulary edge is not a failure"
 
     @pytest.mark.asyncio
+    async def test_nodes_with_an_unknown_entity_type_are_dropped(self):
+        """Mirrors test_edges_of_the_wrong_layer_are_dropped: a model that
+        ignores the offered entity types (measured on chapter 3: 3 nodes
+        typed ROOM, which is not a member of CANON_ENTITY_TYPES) must not
+        smuggle a campaign-runtime or mechanical type into canon."""
+        client = make_client(
+            {"nodes": [{"name": "Cellar", "entity_type": "ROOM"}], "edges": []}
+        )
+        extractor = CandidateExtractor(client=client)
+        nodes, _, failed = await extractor.extract_unit(unit(), Layer.SPATIAL)
+
+        assert nodes == []
+        assert failed is False, (
+            "a clean response with an off-vocabulary entity_type is not a failure"
+        )
+        assert extractor.rejected_entity_types == 1
+
+    @pytest.mark.asyncio
     async def test_malformed_json_yields_nothing_and_is_a_failure(self):
         """A response the extractor cannot parse must not be indistinguishable
         from "the passage legitimately said nothing" -- the caller needs to

@@ -17,7 +17,7 @@ from openai import AsyncOpenAI
 
 from backend.canon.models import CandidateEdge, CandidateNode, ExtractionUnit
 from backend.core.config import settings
-from backend.graph.schema import LAYER_MAP, EntityType, Layer
+from backend.graph.schema import CANON_ENTITY_TYPES, LAYER_MAP, EntityType, Layer
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,9 @@ class CandidateExtractor:
         self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = model or EXTRACTION_MODEL
         self._semaphore = asyncio.Semaphore(concurrency)
+        # Nodes dropped by the entity_type filter in `_parse` -- see section 1
+        # of the task-9 brief. Surfaced by the CLI, never dropped silently.
+        self.rejected_entity_types = 0
 
     async def extract_unit(
         self,
@@ -154,15 +157,17 @@ class CandidateExtractor:
                 failed += 1
         return nodes, edges, failed
 
-    @staticmethod
     def _parse(
+        self,
         payload: dict,
         unit: ExtractionUnit,
         layer: Layer,
     ) -> tuple[list[CandidateNode], list[CandidateEdge]]:
-        allowed = set(layer_vocabulary(layer))
+        allowed_rel_types = set(layer_vocabulary(layer))
+        allowed_entity_types = {t.value for t in CANON_ENTITY_TYPES}
         heading = unit.heading
 
+        raw_nodes = [n for n in payload.get("nodes", []) if str(n.get("name", "")).strip()]
         nodes = [
             CandidateNode(
                 name=str(n.get("name", "")).strip(),
@@ -173,9 +178,12 @@ class CandidateExtractor:
                 section_heading=heading,
                 section_index=unit.section_index,
             )
-            for n in payload.get("nodes", [])
-            if str(n.get("name", "")).strip()
+            for n in raw_nodes
+            # A model that ignores its offered types must not smuggle in a
+            # campaign-runtime or mechanical one -- mirrors the edge filter below.
+            if str(n.get("entity_type", "")).strip() in allowed_entity_types
         ]
+        self.rejected_entity_types += len(raw_nodes) - len(nodes)
 
         edges = [
             CandidateEdge(
@@ -190,7 +198,7 @@ class CandidateExtractor:
             )
             for e in payload.get("edges", [])
             # A model that ignores its vocabulary must not smuggle another layer in.
-            if str(e.get("rel_type", "")).strip() in allowed
+            if str(e.get("rel_type", "")).strip() in allowed_rel_types
             and str(e.get("source_name", "")).strip()
             and str(e.get("target_name", "")).strip()
         ]
