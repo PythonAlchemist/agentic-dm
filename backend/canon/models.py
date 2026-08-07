@@ -102,3 +102,4 @@ class GradeReport:
     missing_edges: list[str]
     unmatched_nodes: list[str]
     unmatched_edges: list[str]
+    collisions: list[str]

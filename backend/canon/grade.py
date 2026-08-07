@@ -37,6 +37,33 @@ def _golden_node_names(entry: dict) -> set[str]:
     return {normalize_name(n) for n in names if n}
 
 
+def _find_collisions(golden_nodes: list[dict]) -> list[str]:
+    """Golden node entries whose normalized names overlap.
+
+    Loose matching is deliberate (see `normalize_name`), but a collision between
+    two distinct golden entries would inflate recall silently -- a candidate
+    naming either entity would count as a match for both. This does not change
+    matching behaviour; it only surfaces the ambiguity for a human to look at.
+    """
+    # normalized name -> {entry id -> the raw name/alias strings that fold to it}
+    claimants: dict[str, dict[str, set[str]]] = {}
+    for entry in golden_nodes:
+        entry_id = entry.get("id", entry.get("name", ""))
+        raw_names = [entry.get("name", ""), *(entry.get("aliases", []) or [])]
+        for raw in raw_names:
+            if not raw:
+                continue
+            normalized = normalize_name(raw)
+            claimants.setdefault(normalized, {}).setdefault(entry_id, set()).add(raw)
+
+    collisions: list[str] = []
+    for normalized, by_entry in sorted(claimants.items()):
+        if len(by_entry) > 1:
+            labels = sorted({raw for raws in by_entry.values() for raw in raws})
+            collisions.append(f"{normalized} <- {', '.join(labels)}")
+    return collisions
+
+
 def grade(
     nodes: list[CandidateNode],
     edges: list[CandidateEdge],
@@ -98,6 +125,7 @@ def grade(
         missing_edges=missing_edges,
         unmatched_nodes=unmatched_nodes,
         unmatched_edges=unmatched_edges,
+        collisions=_find_collisions(golden_nodes),
     )
 
 

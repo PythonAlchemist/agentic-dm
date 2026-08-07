@@ -102,6 +102,45 @@ class TestEdgeRecall:
 
         assert report.edge_recall == 0.0
 
+    def test_edge_endpoint_reachable_only_via_alias(self):
+        """A candidate edge naming an endpoint by its alias must still match --
+        `by_id` values come from `_golden_node_names`, which folds in aliases."""
+        g = golden(
+            edges=[gedge("cos:npc:ismark kolyanovich", "cos:npc:b", "KNOWS")],
+            nodes=[gnode("Ismark Kolyanovich", aliases=["Ismark the Lesser"]), gnode("B")],
+        )
+        report = grade([], [cedge("Ismark the Lesser", "B", "KNOWS")], g)
+
+        assert report.edge_recall == 1.0
+
+
+class TestCollisions:
+    def test_two_golden_names_folding_to_the_same_form_are_flagged(self):
+        g = golden(nodes=[gnode("The Vine"), gnode("Vine")])
+        report = grade([], [], g)
+
+        assert report.collisions != []
+        assert any("vine" in c for c in report.collisions)
+
+    def test_no_collisions_when_golden_names_are_distinct(self):
+        g = golden(nodes=[gnode("Ireena"), gnode("Ismark")])
+        report = grade([], [], g)
+
+        assert report.collisions == []
+
+    def test_collision_between_a_name_and_anothers_alias_is_caught(self):
+        g = golden(nodes=[gnode("Vine"), gnode("Blood on the Vine", aliases=["The Vine"])])
+        report = grade([], [], g)
+
+        assert report.collisions != []
+        assert any("vine" in c for c in report.collisions)
+
+    def test_collision_does_not_move_recall(self):
+        g = golden(nodes=[gnode("The Vine"), gnode("Vine")])
+        report = grade([cnode("Vine")], [], g)
+
+        assert report.node_recall == 1.0
+
 
 class TestAgainstTheRealSeed:
     def test_grades_against_the_chapter_three_subset(self):
