@@ -1789,6 +1789,259 @@ git commit -m "feat(canon): derive spatial containment from document structure"
 
 ---
 
+### Task 7: Exact provenance, and pick the better of two transcriptions
+
+**Why this exists.** Task 6's run raised edge recall only 0.28 → 0.32, and its diagnosis
+found two upstream causes. Neither is a defect in the structural derivation itself.
+
+**(A) Provenance is wrong for any packed unit.** `CandidateExtractor._parse` stamps every
+node with `unit.headings[0]` — the *first* heading of a packed batch. Chapter 3's third
+unit is `['Roleplaying Ireena', 'E5. Church']`, so Donavich and Doru, extracted from the
+Church section, are attributed to "Roleplaying Ireena". Structural derivation cannot find
+their place, and stage 2b's resolution would inherit the same wrong provenance.
+
+Packing exists to avoid spending a call on a 14-token stub. At `gpt-4o-mini` prices the
+whole corpus is ~500 sections × 3 layers ≈ $0.11, so the optimisation costs far more in
+provenance accuracy than it saves. **One section per extraction unit.**
+
+**(B) The duplicate-page fix silently discarded better transcriptions.** The source PDF
+contains every page twice, and `PageExtractor` now skips repeats by image hash, keeping the
+first. But the two pages of a pair carry *different* transcriptions — the vision model is
+non-deterministic — and the discarded one is sometimes better structured. Chapter 3 lost
+`E1. Bildrath's Mercantile` and `E2. Blood on the Vine Tavern` as sections this way; it now
+has only two keyed sections where it had four.
+
+Both transcriptions are already cached, so choosing the richer one costs nothing.
+
+**Files:**
+- Modify: `backend/canon/cache.py`
+- Modify: `backend/canon/extract.py`
+- Modify: `backend/scripts/extract_canon.py`
+- Modify: `tests/test_canon/test_cache.py`
+- Modify: `tests/test_canon/test_extract.py`
+
+**Interfaces:**
+- Produces: `TranscriptCache.get_best(page_numbers: list[int], sha256: str) -> PageTranscript | None`; `units_from_sections(sections: list[Section]) -> list[ExtractionUnit]` in `backend/canon/sections.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_canon/test_extract.py`:
+
+```python
+class TestPerSectionProvenance:
+    @pytest.mark.asyncio
+    async def test_candidates_carry_the_units_own_heading(self):
+        """A unit spans one section, so its heading is unambiguous."""
+        client = make_client(
+            {"nodes": [{"name": "Donavich", "entity_type": "NPC"}], "edges": []}
+        )
+        one_section = ExtractionUnit(
+            chapter_slug="chapter-3-the-village-of-barovia",
+            chapter_title="Chapter 3: The Village of Barovia",
+            headings=["E5. Church"],
+            markdown="## E5. Church\n\nDonavich prays here.",
+            token_count=9,
+        )
+        nodes, _ = await CandidateExtractor(client=client).extract_unit(
+            one_section, Layer.SOCIAL
+        )
+
+        assert nodes[0].section_heading == "E5. Church"
+```
+
+Append to `tests/test_canon/test_sections.py`:
+
+```python
+class TestUnitsFromSections:
+    def test_one_unit_per_section(self):
+        sections = split_sections(
+            chapter("## A\n\nshort.\n\n## B\n\nshort.\n\n## C\n\nshort.")
+        )
+        units = units_from_sections(sections)
+
+        assert [u.headings for u in units] == [["A"], ["B"], ["C"]]
+
+    def test_each_unit_carries_its_own_token_count(self):
+        units = units_from_sections(split_sections(chapter("## A\n\nsome words here.")))
+
+        assert units[0].token_count > 0
+
+    def test_no_section_is_lost(self):
+        sections = split_sections(
+            chapter("".join(f"## S{i}\n\nbody {i}.\n\n" for i in range(6)))
+        )
+        units = units_from_sections(sections)
+
+        assert [u.headings[0] for u in units] == [s.heading for s in sections]
+```
+
+Append to `tests/test_canon/test_cache.py`:
+
+```python
+class TestGetBest:
+    def test_prefers_the_transcript_with_more_structure(self, tmp_path):
+        """The source PDF repeats every page, and the two transcriptions differ.
+
+        Keeping whichever came first discarded better-structured text: chapter 3
+        lost two keyed sections that way.
+        """
+        cache = TranscriptCache(tmp_path)
+        cache.put(
+            PageTranscript(
+                page_number=80,
+                markdown="Some prose with no headings at all.",
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
+        cache.put(
+            PageTranscript(
+                page_number=81,
+                markdown="## E1. Bildrath's Mercantile\n\nProse.\n\n## E2. Tavern\n\nMore.",
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
+
+        best = cache.get_best([80, 81], "a" * 64)
+
+        assert best is not None
+        assert best.page_number == 81
+
+    def test_falls_back_to_length_when_structure_ties(self, tmp_path):
+        cache = TranscriptCache(tmp_path)
+        cache.put(PageTranscript(80, "short", "b" * 64, "gpt-4o"))
+        cache.put(PageTranscript(81, "considerably longer prose here", "b" * 64, "gpt-4o"))
+
+        assert cache.get_best([80, 81], "b" * 64).page_number == 81
+
+    def test_returns_none_when_nothing_is_cached(self, tmp_path):
+        assert TranscriptCache(tmp_path).get_best([1, 2], "c" * 64) is None
+
+    def test_a_single_page_still_works(self, tmp_path):
+        cache = TranscriptCache(tmp_path)
+        cache.put(PageTranscript(5, "body", "d" * 64, "gpt-4o"))
+
+        assert cache.get_best([5], "d" * 64).page_number == 5
+```
+
+Add `units_from_sections` and `ExtractionUnit` to the relevant imports.
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `uv run pytest tests/test_canon/test_cache.py::TestGetBest tests/test_canon/test_sections.py::TestUnitsFromSections -v`
+Expected: FAIL — `get_best` and `units_from_sections` do not exist. Capture the output.
+
+- [ ] **Step 3: Add `get_best` to the cache**
+
+In `backend/canon/cache.py`:
+
+```python
+    def get_best(self, page_numbers: list[int], sha256: str) -> PageTranscript | None:
+        """The richest cached transcript among pages sharing one image.
+
+        The source PDF repeats every page, and because the vision model is
+        non-deterministic the two transcriptions of one image differ. Taking
+        whichever came first discarded structure: chapter 3 lost two keyed
+        sections that way. Prefer more markdown headings, then more text.
+        """
+        candidates = [
+            t for n in page_numbers if (t := self.get(n, sha256)) is not None
+        ]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda t: (t.markdown.count("\n## "), len(t.markdown)),
+        )
+```
+
+- [ ] **Step 4: Add `units_from_sections`**
+
+In `backend/canon/sections.py`:
+
+```python
+def units_from_sections(sections: list[Section]) -> list[ExtractionUnit]:
+    """One extraction unit per section, so a candidate's provenance is exact.
+
+    Packing several sections into one call saves a few cents across the corpus
+    and costs the ability to say which section a candidate came from -- which
+    structural derivation and stage 2b's resolution both depend on. At
+    gpt-4o-mini prices that is a bad trade.
+    """
+    return [
+        ExtractionUnit(
+            chapter_slug=s.chapter_slug,
+            chapter_title=s.chapter_title,
+            headings=[s.heading],
+            markdown=s.markdown,
+            token_count=_count(s.markdown),
+        )
+        for s in sections
+    ]
+```
+
+`pack_sections` stays — it is tested and may be wanted for a cheaper bulk mode — but the
+CLI stops using it. Note that in your report so the final review can decide whether to keep
+it.
+
+- [ ] **Step 5: Use both in the CLI**
+
+In `backend/scripts/extract_canon.py`:
+- `load_chapters` currently calls `cache.get(page.page_number, page.sha256)` per page. Since
+  `PageExtractor.extract()` now skips duplicates, it only ever sees one page number per
+  image. Change it to extract with `dedup=False`, group page numbers by `sha256` in order,
+  and call `cache.get_best(numbers, sha256)` once per distinct image. The result is one
+  transcript per real page, chosen for richness.
+- Replace `pack_sections(split_sections(chapter))` with `units_from_sections(sections)`.
+
+- [ ] **Step 6: Run the tests**
+
+Run: `uv run pytest tests/test_canon/ -v`
+Expected: all pass. If a pre-existing test fails, report it rather than editing it.
+
+- [ ] **Step 7: Re-check chapter 3's structure, free**
+
+```bash
+uv run python -c "
+from backend.scripts.extract_canon import load_chapters, find_chapter
+from backend.canon.sections import split_sections
+ch3 = find_chapter(load_chapters(), 'Chapter 3')
+for s in split_sections(ch3):
+    print(' ', s.heading)
+"
+```
+
+Expected: more keyed `E<n>.` sections than the two it had. Report the list. If it is still
+two, say so — that would mean the better transcription never had them either, which is a
+different problem.
+
+- [ ] **Step 8: Re-run chapter 3 and report**
+
+```bash
+SP=/private/tmp/claude-501/-Users-csinger-projects-agentic-dm/52a0dd1b-7233-44b1-b4e8-ed61a72765e5/scratchpad
+uv run python -m backend.scripts.extract_canon "Chapter 3" --grade ch3 -o "$SP/ch3-candidates-v4.json"
+```
+
+Report both recall figures, the derived-edge count, and the remaining misses by relationship
+type. **Do not tune the extraction prompt.**
+
+Note recall varies between identical runs — node recall was 0.89 then 0.83 on unchanged
+code, because the extractor is non-deterministic. Treat a single run as ±1 node, and do not
+read a small movement as signal.
+
+- [ ] **Step 9: Run the whole suite and commit**
+
+```bash
+uv run pytest -q
+git add backend/canon/cache.py backend/canon/sections.py backend/canon/extract.py \
+        backend/scripts/extract_canon.py tests/test_canon/test_cache.py \
+        tests/test_canon/test_sections.py tests/test_canon/test_extract.py
+git commit -m "fix(canon): exact per-section provenance, and prefer the richer transcript"
+```
+
+---
+
 ## Verification
 
 Whole suite: `uv run pytest -q` — 316 existing plus ~42 new.
