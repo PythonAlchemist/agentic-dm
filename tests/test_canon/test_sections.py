@@ -6,10 +6,8 @@ the next becomes two partial extractions. Sections split on the seams the book's
 own author chose.
 """
 
-import pytest
-
 from backend.canon.models import Chapter
-from backend.canon.sections import pack_sections, split_sections
+from backend.canon.sections import _count, pack_sections, split_sections
 
 
 def chapter(markdown: str) -> Chapter:
@@ -107,3 +105,15 @@ class TestPackSections:
 
     def test_empty_input_yields_no_units(self):
         assert pack_sections([]) == []
+
+    def test_packs_to_the_exact_token_budget_in_one_unit(self):
+        """Boundary: batch_tokens landing exactly on max_tokens must not split."""
+        sections = split_sections(
+            chapter("## A\n\nsome words here.\n\n## B\n\nmore words there.")
+        )
+        exact_budget = sum(_count(s.markdown) for s in sections)
+
+        units = pack_sections(sections, max_tokens=exact_budget)
+
+        assert len(units) == 1
+        assert units[0].headings == ["A", "B"]
