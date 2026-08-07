@@ -20,12 +20,15 @@ def section(heading: str, index: int = 0) -> Section:
     )
 
 
-def node(name: str, entity_type: str = "NPC", heading: str = "") -> CandidateNode:
+def node(
+    name: str, entity_type: str = "NPC", heading: str = "", section_index: int = 0
+) -> CandidateNode:
     return CandidateNode(
         name=name,
         entity_type=entity_type,
         chapter_slug="chapter-3-the-village-of-barovia",
         section_heading=heading,
+        section_index=section_index,
     )
 
 
@@ -86,7 +89,7 @@ class TestStructuralEdges:
         """Appendix D has no containing place; inventing one would be a fabrication.
 
         The section below IS keyed (unlike the old fixture's "Baba Lysaga"),
-        so `by_heading`'s own per-section None cannot be what blocks CONTAINS
+        so the per-section None in `by_index` cannot be what blocks CONTAINS
         here -- only the `chapter_place` guard itself can be. This is the
         anti-fabrication property Task 6 exists for.
         """
@@ -124,3 +127,28 @@ class TestStructuralEdges:
         }
         seen = [(e.source_name, e.target_name, e.rel_type) for e in edges]
         assert len(seen) == len(set(seen))
+
+
+class TestSectionIndexIsTheKey:
+    def test_duplicate_headings_in_one_chapter_do_not_merge_their_entities(self):
+        """Chapter 4 has four sections headed "Treasure"; Appendix D has three
+        headed "Actions" -- `(chapter_slug, heading)` is not a unique key.
+        Keying on section_index (not heading text) means a node from one
+        "Treasure" section is never resolved against a different "Treasure"
+        section's identity, even when they share a heading."""
+        sections = [
+            section("T1. Treasure", index=0),
+            section("Interlude", index=1),
+            section("T1. Treasure", index=2),
+        ]
+        nodes = [
+            node("Gold Coins", heading="T1. Treasure", section_index=0),
+            node("Silver Chalice", heading="T1. Treasure", section_index=2),
+        ]
+        edges = structural_edges(sections, nodes, "Death House")
+
+        located = [e for e in edges if e.rel_type == "LOCATED_IN"]
+        assert {(e.source_name, e.target_name) for e in located} == {
+            ("Gold Coins", "Treasure"),
+            ("Silver Chalice", "Treasure"),
+        }, "both nodes must be independently located, not merged into one"

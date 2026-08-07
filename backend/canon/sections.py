@@ -73,6 +73,7 @@ def units_from_sections(sections: list[Section]) -> list[ExtractionUnit]:
             chapter_slug=s.chapter_slug,
             chapter_title=s.chapter_title,
             heading=s.heading,
+            section_index=s.index,
             markdown=s.markdown,
             token_count=_count(s.markdown),
         )

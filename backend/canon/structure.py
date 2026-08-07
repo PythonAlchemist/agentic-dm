@@ -47,7 +47,11 @@ def structural_edges(
     edges: inventing a parent would be a fabrication, which is exactly what this
     module exists to avoid.
     """
-    by_heading = {s.heading: place_of_section(s) for s in sections}
+    # Keyed on section_index, not heading text: `(chapter_slug, heading)` is
+    # not a unique key -- duplicate H2 headings occur within a chapter (four
+    # sections named "Treasure" in Chapter 4, three named "Actions" in
+    # Appendix D), and a heading-keyed dict silently keeps only the last.
+    by_index = {s.index: place_of_section(s) for s in sections}
     edges: list[CandidateEdge] = []
 
     def add(source: str, target: str, rel_type: str) -> None:
@@ -63,12 +67,12 @@ def structural_edges(
         )
 
     if chapter_place:
-        for place in by_heading.values():
+        for place in by_index.values():
             if place:
                 add(chapter_place, place, "CONTAINS")
 
     for node in nodes:
-        place = by_heading.get(node.section_heading)
+        place = by_index.get(node.section_index)
         if not place:
             continue
         # A place is not located in itself, and a section's own location node

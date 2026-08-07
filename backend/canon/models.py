@@ -58,6 +58,7 @@ class ExtractionUnit:
     chapter_slug: str
     chapter_title: str
     heading: str
+    section_index: int
     markdown: str
     token_count: int
 
@@ -72,6 +73,10 @@ class CandidateNode:
     layer: str = ""
     chapter_slug: str = ""
     section_heading: str = ""
+    # `(chapter_slug, section_heading)` is not a unique key -- duplicate H2
+    # headings occur within a chapter (four "Treasure" sections in Chapter 4,
+    # three "Actions" sections in Appendix D). `section_index` is.
+    section_index: int = -1
 
 
 @dataclass
@@ -85,6 +90,7 @@ class CandidateEdge:
     layer: str = ""
     chapter_slug: str = ""
     section_heading: str = ""
+    section_index: int = -1
 
 
 @dataclass

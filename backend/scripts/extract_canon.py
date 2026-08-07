@@ -8,6 +8,7 @@ score, which keeps a tuning run from being able to corrupt anything.
 import argparse
 import asyncio
 import json
+import logging
 import re
 import sys
 from dataclasses import asdict
@@ -24,7 +25,7 @@ from backend.canon.grade import grade
 from backend.canon.models import Chapter, Section
 from backend.canon.page_extractor import PageExtractor
 from backend.canon.sections import split_sections, units_from_sections
-from backend.canon.seed_loader import SEED_DIR, extractable_subset
+from backend.canon.seed_loader import DEFAULT_SOURCE, EXTRACTABLE_FROM, SEED_DIR, extractable_subset
 from backend.canon.structure import place_of_section, structural_edges
 from backend.core.config import settings
 from backend.graph.schema import Layer
@@ -32,6 +33,44 @@ from backend.graph.schema import Layer
 DEFAULT_PDF = Path("data/cos.pdf")
 
 _CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
+
+
+def _known_sources(data: dict) -> list[str]:
+    """Every `--grade` value this seed can actually answer.
+
+    DEFAULT_SOURCE (unmarked entries) is always answerable. Beyond that, only
+    the `extractable_from` markers actually present in the seed -- not the
+    full schema-valid set in `EXTRACTABLE_SOURCES`, some of which may not yet
+    have any entries -- so the error message never claims a source is usable
+    when it would itself return empty.
+    """
+    markers = {
+        entry.get(EXTRACTABLE_FROM)
+        for entry in [*data.get("nodes", []), *data.get("edges", [])]
+        if entry.get(EXTRACTABLE_FROM)
+    }
+    return sorted({DEFAULT_SOURCE, *markers})
+
+
+def _gradeable_subset(data: dict, source: str) -> dict:
+    """The golden subset for `source`, or a clear error naming what exists.
+
+    `extractable_subset` silently returns an empty subset for any unmatched
+    source marker, and an empty subset scores a perfect (and meaningless)
+    1.00 recall for both nodes and edges -- `_recall`'s empty-denominator
+    behavior is deliberate and untouched here (see grade.py), but a bad
+    --grade value must not be allowed to reach it silently. Measured:
+    `--grade ch4`, `--grade appendix-d`, and `--grade typo-source` all
+    printed a perfect score after a paid extraction run.
+    """
+    subset = extractable_subset(data, source)
+    if not subset["nodes"] and not subset["edges"]:
+        available = ", ".join(_known_sources(data))
+        raise ValueError(
+            f"--grade {source!r} matches no golden entries in this seed. "
+            f"Available sources: {available}"
+        )
+    return subset
 
 
 def chapter_place(chapter: Chapter, sections: list[Section]) -> str | None:
@@ -95,34 +134,58 @@ async def run(
     layers: list[Layer] | None,
     out_path: Path | None,
 ) -> dict:
+    # Validated before the paid extraction call below: a bad --grade value
+    # must fail fast, not silently score 1.00/1.00 after money is spent.
+    golden: dict | None = None
+    if grade_against:
+        data = yaml.safe_load((SEED_DIR / "village-of-barovia.yaml").read_text())
+        golden = _gradeable_subset(data, grade_against)
+
     chapter = find_chapter(load_chapters(), chapter_title)
     sections = split_sections(chapter)
     units = units_from_sections(sections)
     print(f"{chapter.title}: {len(units)} units")
 
-    nodes, edges = await CandidateExtractor().extract_units(units, layers=layers)
+    nodes, edges, failed = await CandidateExtractor().extract_units(units, layers=layers)
     print(f"  {len(nodes)} candidate nodes, {len(edges)} candidate edges")
+    total_calls = len(units) * len(layers or list(Layer))
+    if failed:
+        print(
+            f"\n  !! {failed} of {total_calls} extraction calls FAILED -- "
+            "results below are incomplete, not a low-quality passage !!\n"
+        )
 
     derived = structural_edges(sections, nodes, chapter_place(chapter, sections))
     print(f"  {len(derived)} derived structural edges")
     edges = edges + derived
 
     if out_path:
-        out_path.write_text(
-            json.dumps(
-                {"nodes": [asdict(n) for n in nodes], "edges": [asdict(e) for e in edges]},
-                indent=2,
+        if failed and out_path.exists():
+            print(
+                f"  NOT writing {out_path}: this run had failures and would "
+                "clobber the last good output"
             )
+        else:
+            out_path.write_text(
+                json.dumps(
+                    {"nodes": [asdict(n) for n in nodes], "edges": [asdict(e) for e in edges]},
+                    indent=2,
+                )
+            )
+            print(f"  wrote {out_path}")
+
+    summary: dict = {"nodes": len(nodes), "edges": len(edges), "failed": failed}
+
+    if golden is not None:
+        report = grade(nodes, edges, golden)
+        print(
+            f"\n  node recall: {report.node_recall:.2f} "
+            f"(unambiguous: {report.node_recall_unambiguous:.2f})"
         )
-        print(f"  wrote {out_path}")
-
-    summary: dict = {"nodes": len(nodes), "edges": len(edges)}
-
-    if grade_against:
-        data = yaml.safe_load((SEED_DIR / "village-of-barovia.yaml").read_text())
-        report = grade(nodes, edges, extractable_subset(data, grade_against))
-        print(f"\n  node recall: {report.node_recall:.2f}")
-        print(f"  edge recall: {report.edge_recall:.2f}")
+        print(
+            f"  edge recall: {report.edge_recall:.2f} "
+            f"(unambiguous: {report.edge_recall_unambiguous:.2f})"
+        )
         if report.missing_nodes:
             print(f"  MISSING nodes ({len(report.missing_nodes)}): "
                   f"{', '.join(report.missing_nodes)}")
@@ -130,21 +193,37 @@ async def run(
             print(f"  MISSING edges ({len(report.missing_edges)}):")
             for m in report.missing_edges:
                 print(f"    {m}")
-        print(f"\n  unmatched candidates ({len(report.unmatched_nodes)}) "
+        print(f"\n  unmatched candidate nodes ({len(report.unmatched_nodes)}) "
               "-- NOT scored, spot-check for fabrication:")
         for name in report.unmatched_nodes:
             print(f"    {name}")
+        print(f"\n  unmatched candidate edges ({len(report.unmatched_edges)}) "
+              "-- NOT scored, spot-check for fabrication:")
+        for e in report.unmatched_edges:
+            print(f"    {e}")
         if report.collisions:
-            print(f"\n  COLLISIONS ({len(report.collisions)}):")
+            print(f"\n  NODE COLLISIONS ({len(report.collisions)}):")
             for c in report.collisions:
+                print(f"    {c}")
+        if report.edge_collisions:
+            print(f"\n  EDGE COLLISIONS ({len(report.edge_collisions)}):")
+            for c in report.edge_collisions:
                 print(f"    {c}")
         summary["node_recall"] = report.node_recall
         summary["edge_recall"] = report.edge_recall
+        summary["node_recall_unambiguous"] = report.node_recall_unambiguous
+        summary["edge_recall_unambiguous"] = report.edge_recall_unambiguous
 
     return summary
 
 
 def main() -> None:
+    # No handler is configured anywhere else in this chain, so without this
+    # the extraction warnings logged on a swallowed exception (see extract.py)
+    # depend on logging.lastResort rather than a deliberate, discoverable
+    # configuration.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("chapter", help="Chapter title prefix, e.g. 'Chapter 3'")
     parser.add_argument("--grade", dest="grade_against", metavar="SOURCE",
@@ -156,7 +235,13 @@ def main() -> None:
     args = parser.parse_args()
 
     layers = [Layer(v) for v in args.layers] if args.layers else None
-    asyncio.run(run(args.chapter, args.grade_against, layers, args.out))
+    try:
+        summary = asyncio.run(run(args.chapter, args.grade_against, layers, args.out))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(1 if summary["failed"] else 0)
 
 
 if __name__ == "__main__":

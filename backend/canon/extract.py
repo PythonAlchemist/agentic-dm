@@ -96,7 +96,15 @@ class CandidateExtractor:
         self,
         unit: ExtractionUnit,
         layer: Layer,
-    ) -> tuple[list[CandidateNode], list[CandidateEdge]]:
+    ) -> tuple[list[CandidateNode], list[CandidateEdge], bool]:
+        """Returns `(nodes, edges, failed)`.
+
+        `failed` is True when the API call raised or the response could not
+        be parsed. An empty `(nodes, edges)` is ambiguous on its own -- it is
+        the same shape whether the passage legitimately said nothing for this
+        layer, or the call hard-failed (a 401, a rate limit). The caller must
+        be able to tell those apart, so this never raises but always reports.
+        """
         try:
             async with self._semaphore:
                 response = await self.client.chat.completions.create(
@@ -109,15 +117,22 @@ class CandidateExtractor:
             logger.warning(
                 "extraction failed for %s / %s: %s", unit.chapter_slug, layer.value, exc
             )
-            return [], []
+            return [], [], True
 
-        return self._parse(payload, unit, layer)
+        nodes, edges = self._parse(payload, unit, layer)
+        return nodes, edges, False
 
     async def extract_units(
         self,
         units: list[ExtractionUnit],
         layers: list[Layer] | None = None,
-    ) -> tuple[list[CandidateNode], list[CandidateEdge]]:
+    ) -> tuple[list[CandidateNode], list[CandidateEdge], int]:
+        """Returns `(nodes, edges, failed_count)`.
+
+        `failed_count` is how many of the `len(units) * len(wanted)` calls
+        failed -- see `extract_unit`. A caller that ignores this cannot tell
+        a quiet chapter from a chapter that failed to extract at all.
+        """
         wanted = layers or list(Layer)
         results = await asyncio.gather(
             *(self.extract_unit(u, layer) for u in units for layer in wanted),
@@ -126,14 +141,18 @@ class CandidateExtractor:
 
         nodes: list[CandidateNode] = []
         edges: list[CandidateEdge] = []
+        failed = 0
         for result in results:
             if isinstance(result, BaseException):
                 logger.warning("extraction task failed: %s", result)
+                failed += 1
                 continue
-            unit_nodes, unit_edges = result
+            unit_nodes, unit_edges, unit_failed = result
             nodes.extend(unit_nodes)
             edges.extend(unit_edges)
-        return nodes, edges
+            if unit_failed:
+                failed += 1
+        return nodes, edges, failed
 
     @staticmethod
     def _parse(
@@ -152,6 +171,7 @@ class CandidateExtractor:
                 layer=layer.value,
                 chapter_slug=unit.chapter_slug,
                 section_heading=heading,
+                section_index=unit.section_index,
             )
             for n in payload.get("nodes", [])
             if str(n.get("name", "")).strip()
@@ -166,6 +186,7 @@ class CandidateExtractor:
                 layer=layer.value,
                 chapter_slug=unit.chapter_slug,
                 section_heading=heading,
+                section_index=unit.section_index,
             )
             for e in payload.get("edges", [])
             # A model that ignores its vocabulary must not smuggle another layer in.
