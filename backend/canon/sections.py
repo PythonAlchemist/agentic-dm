@@ -61,6 +61,26 @@ def split_sections(chapter: Chapter) -> list[Section]:
     ]
 
 
+def units_from_sections(sections: list[Section]) -> list[ExtractionUnit]:
+    """One extraction unit per section, so a candidate's provenance is exact.
+
+    Packing several sections into one call saves a few cents across the corpus
+    and costs the ability to say which section a candidate came from -- which
+    structural derivation and stage 2b's resolution both depend on. At
+    gpt-4o-mini prices that is a bad trade.
+    """
+    return [
+        ExtractionUnit(
+            chapter_slug=s.chapter_slug,
+            chapter_title=s.chapter_title,
+            headings=[s.heading],
+            markdown=s.markdown,
+            token_count=_count(s.markdown),
+        )
+        for s in sections
+    ]
+
+
 def pack_sections(
     sections: list[Section],
     max_tokens: int = DEFAULT_MAX_TOKENS,

@@ -23,7 +23,7 @@ from backend.canon.extract import CandidateExtractor
 from backend.canon.grade import grade
 from backend.canon.models import Chapter
 from backend.canon.page_extractor import PageExtractor
-from backend.canon.sections import pack_sections, split_sections
+from backend.canon.sections import split_sections, units_from_sections
 from backend.canon.seed_loader import SEED_DIR, extractable_subset
 from backend.canon.structure import structural_edges
 from backend.core.config import settings
@@ -41,14 +41,24 @@ def chapter_place(chapter: Chapter) -> str | None:
 
 
 def load_chapters(pdf_path: Path = DEFAULT_PDF, book_slug: str = "cos") -> list[Chapter]:
-    """Rebuild chapters from the transcript cache. No API calls: cache only."""
+    """Rebuild chapters from the transcript cache. No API calls: cache only.
+
+    The source PDF repeats every page, so pages are grouped by image hash --
+    preserving first-seen (page) order -- and the richer of each pair's two
+    transcriptions is chosen with `get_best`. This yields one transcript per
+    real page, in page order, ready for `assemble_chapters`.
+    """
     cache = TranscriptCache(settings.canon_dir / book_slug)
     extractor = PageExtractor(pdf_path)
     try:
+        pages_by_hash: dict[str, list[int]] = {}
+        for page in extractor.extract(dedup=False):
+            pages_by_hash.setdefault(page.sha256, []).append(page.page_number)
+
         transcripts = [
             t
-            for page in extractor.extract()
-            if (t := cache.get(page.page_number, page.sha256)) is not None
+            for sha256, numbers in pages_by_hash.items()
+            if (t := cache.get_best(numbers, sha256)) is not None
         ]
     finally:
         extractor.close()
@@ -78,7 +88,7 @@ async def run(
 ) -> dict:
     chapter = find_chapter(load_chapters(), chapter_title)
     sections = split_sections(chapter)
-    units = pack_sections(sections)
+    units = units_from_sections(sections)
     print(f"{chapter.title}: {len(units)} units")
 
     nodes, edges = await CandidateExtractor().extract_units(units, layers=layers)

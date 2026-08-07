@@ -45,6 +45,22 @@ class TranscriptCache:
             output_tokens=meta.get("output_tokens", 0),
         )
 
+    def get_best(self, page_numbers: list[int], sha256: str) -> PageTranscript | None:
+        """The richest cached transcript among pages sharing one image.
+
+        The source PDF repeats every page, and because the vision model is
+        non-deterministic the two transcriptions of one image differ. Taking
+        whichever came first discarded structure: chapter 3 lost two keyed
+        sections that way. Prefer more markdown headings, then more text.
+        """
+        candidates = [t for n in page_numbers if (t := self.get(n, sha256)) is not None]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda t: (t.markdown.count("\n## "), len(t.markdown)),
+        )
+
     def put(self, transcript: PageTranscript) -> None:
         """Persist a successful transcript. Failures are intentionally not cached."""
         if transcript.status != "ok":

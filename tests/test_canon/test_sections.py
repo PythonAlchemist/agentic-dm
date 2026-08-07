@@ -7,7 +7,7 @@ own author chose.
 """
 
 from backend.canon.models import Chapter
-from backend.canon.sections import _count, pack_sections, split_sections
+from backend.canon.sections import _count, pack_sections, split_sections, units_from_sections
 
 
 def chapter(markdown: str) -> Chapter:
@@ -117,3 +117,26 @@ class TestPackSections:
 
         assert len(units) == 1
         assert units[0].headings == ["A", "B"]
+
+
+class TestUnitsFromSections:
+    def test_one_unit_per_section(self):
+        sections = split_sections(
+            chapter("## A\n\nshort.\n\n## B\n\nshort.\n\n## C\n\nshort.")
+        )
+        units = units_from_sections(sections)
+
+        assert [u.headings for u in units] == [["A"], ["B"], ["C"]]
+
+    def test_each_unit_carries_its_own_token_count(self):
+        units = units_from_sections(split_sections(chapter("## A\n\nsome words here.")))
+
+        assert units[0].token_count > 0
+
+    def test_no_section_is_lost(self):
+        sections = split_sections(
+            chapter("".join(f"## S{i}\n\nbody {i}.\n\n" for i in range(6)))
+        )
+        units = units_from_sections(sections)
+
+        assert [u.headings[0] for u in units] == [s.heading for s in sections]

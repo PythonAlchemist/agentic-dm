@@ -155,3 +155,24 @@ class TestExtractUnits:
         await CandidateExtractor(client=client).extract_units([unit(), unit()])
 
         assert client.chat.completions.create.await_count == 6  # 2 units x 3 layers
+
+
+class TestPerSectionProvenance:
+    @pytest.mark.asyncio
+    async def test_candidates_carry_the_units_own_heading(self):
+        """A unit spans one section, so its heading is unambiguous."""
+        client = make_client(
+            {"nodes": [{"name": "Donavich", "entity_type": "NPC"}], "edges": []}
+        )
+        one_section = ExtractionUnit(
+            chapter_slug="chapter-3-the-village-of-barovia",
+            chapter_title="Chapter 3: The Village of Barovia",
+            headings=["E5. Church"],
+            markdown="## E5. Church\n\nDonavich prays here.",
+            token_count=9,
+        )
+        nodes, _ = await CandidateExtractor(client=client).extract_unit(
+            one_section, Layer.SOCIAL
+        )
+
+        assert nodes[0].section_heading == "E5. Church"
