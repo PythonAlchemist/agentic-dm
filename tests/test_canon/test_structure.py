@@ -7,7 +7,11 @@ does not state them is neither.
 """
 
 from backend.canon.models import CandidateNode, Section
-from backend.canon.structure import place_of_section, structural_edges
+from backend.canon.structure import STRUCTURAL_EVIDENCE, place_of_section, structural_edges
+
+
+def contains(edges) -> set[tuple[str, str]]:
+    return {(e.source_name, e.target_name) for e in edges if e.rel_type == "CONTAINS"}
 
 
 def section(heading: str, index: int = 0) -> Section:
@@ -143,6 +147,90 @@ class TestStructuralEdges:
         }
         seen = [(e.source_name, e.target_name, e.rel_type) for e in edges]
         assert len(seen) == len(set(seen))
+
+
+class TestSubareaContainment:
+    """The keys encode the hierarchy the transcription lost.
+
+    `E5g. Undercroft` is inside `E5. Church`, and the letter suffix is the only
+    reliable record of that: the transcription put `E5. Church` at H2 and
+    `E5a. Hall` at H3 in chapter 3, but `E6. Cemetery` at H1 and
+    `E4. Burgomaster's Mansion` at H3, so heading depth says nothing.
+    """
+
+    def test_a_suffixed_key_is_contained_by_its_stem_section(self):
+        sections = [section("E5. Church"), section("E5g. Undercroft", 1)]
+
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert contains(edges) == {
+            ("Village of Barovia", "Church"),
+            ("Church", "Undercroft"),
+        }, "the Undercroft is in the Church, not loose in the village"
+
+    def test_a_suffixless_key_is_contained_by_the_chapter_place(self):
+        sections = [section("E1. Bildrath's Mercantile")]
+
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert contains(edges) == {("Village of Barovia", "Bildrath's Mercantile")}
+
+    def test_a_suffixed_key_falls_back_to_the_chapter_place_with_no_stem_section(self):
+        """`K20a` with no `K20` section: dropping the edge would lose a
+        containment the chapter place can still state correctly."""
+        sections = [section("K18. High Tower"), section("K20a. Study", 1)]
+
+        edges = structural_edges(sections, [], "Castle Ravenloft")
+
+        assert contains(edges) == {
+            ("Castle Ravenloft", "High Tower"),
+            ("Castle Ravenloft", "Study"),
+        }
+
+    def test_only_a_suffixless_section_can_be_a_stem(self):
+        """`E5a` is not the parent of `E5b`; both are children of `E5`, and
+        with no `E5` section both fall back to the chapter place."""
+        sections = [section("E5a. Hall"), section("E5b. Bedroom", 1)]
+
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert contains(edges) == {
+            ("Village of Barovia", "Hall"),
+            ("Village of Barovia", "Bedroom"),
+        }
+
+    def test_a_place_is_never_contained_by_itself(self):
+        """The transcription repeats a heading's name onto its sub-area often
+        enough that this is real: `E5. Church` and `E5a. Church` would derive
+        `Church CONTAINS Church`, a self-loop in the one module that is
+        documented as unable to fabricate."""
+        sections = [section("E5. Church"), section("E5a. Church", 1)]
+
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert contains(edges) == {("Village of Barovia", "Church")}
+
+    def test_a_stem_contained_edge_keeps_its_structural_evidence_and_provenance(self):
+        sections = [section("E5. Church"), section("E5g. Undercroft", 7)]
+
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        edge = next(e for e in edges if e.target_name == "Undercroft")
+        assert edge.evidence == STRUCTURAL_EVIDENCE
+        assert edge.layer == "spatial"
+        assert edge.section_index == 7
+        assert edge.section_heading == "E5g. Undercroft"
+
+    def test_a_stem_parent_holds_even_with_no_chapter_place(self):
+        """A stem parent is a section of the document, not an invented place,
+        so the anti-fabrication guard that suppresses chapter-place CONTAINS
+        for a place-less chapter does not apply to it. (The two suffix-less
+        sections still get nothing -- there is no parent to name.)"""
+        sections = [section("E5. Church"), section("E5g. Undercroft", 1)]
+
+        edges = structural_edges(sections, [], None)
+
+        assert contains(edges) == {("Church", "Undercroft")}
 
 
 class TestSectionIndexIsTheKey:

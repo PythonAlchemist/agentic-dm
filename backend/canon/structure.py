@@ -9,14 +9,12 @@ Deriving it is deterministic and free, and unlike extraction it cannot hallucina
 every edge here is a restatement of where the text physically sits.
 """
 
-import re
-
 from backend.canon.models import CandidateEdge, CandidateNode, Section
 
-# "E1. Bildrath's Mercantile", "E5g. Undercroft". A letter prefix is required:
-# the book's only bare-number keys are chapter 1's Tarokka card list and
-# Appendix B's Death House rooms, neither of which name a physical room.
-_KEYED = re.compile(r"^[A-Z]\d+[a-z]?\.\s*(.+)$")
+# One definition, shared with the splitter that decides what a section IS --
+# see the comment on KEYED_HEADING in sections.py. Two copies of this pattern
+# that must agree is a defect waiting to happen.
+from backend.canon.sections import KEYED_HEADING
 
 STRUCTURAL_EVIDENCE = "derived from document structure"
 
@@ -28,8 +26,8 @@ def place_of_section(section: Section) -> str | None:
     Village" do not, and treating those as locations would invent places the book
     never keys.
     """
-    match = _KEYED.match(section.heading.strip())
-    return match.group(1).strip() if match else None
+    match = KEYED_HEADING.match(section.heading.strip())
+    return match.group("name").strip() if match else None
 
 
 def structural_edges(
@@ -40,12 +38,21 @@ def structural_edges(
     """Containment implied by the chapter/section hierarchy.
 
     Two derivations:
-    - the chapter's place CONTAINS each keyed section's place
+    - each keyed section's place is CONTAINS-ed by its parent -- the section
+      named by its key's stem (`E5g. Undercroft` is inside `E5. Church`) when
+      one exists, otherwise the chapter's place
     - a non-location entity extracted from a keyed section is LOCATED_IN it
 
-    A chapter with no containing place (an appendix, say) yields no CONTAINS
-    edges: inventing a parent would be a fabrication, which is exactly what this
-    module exists to avoid.
+    The stem rule reads the hierarchy off the key because the key is the only
+    place it survives: heading depth was assigned by a vision transcription that
+    put `E5. Church` at H2 and `E6. Cemetery` at H1 in the same chapter, so
+    depth encodes nothing. Letter suffixes are authored and reliable.
+
+    A chapter with no containing place (an appendix, say) yields no
+    chapter-level CONTAINS edges: inventing a parent would be a fabrication,
+    which is exactly what this module exists to avoid. A stem parent is not an
+    invention -- it is another section of the same document -- so it stands
+    even there.
     """
     # Keyed on section_index, not heading text: `(chapter_slug, heading)` is
     # not a unique key -- duplicate H2 headings occur within a chapter (four
@@ -75,14 +82,33 @@ def structural_edges(
             )
         )
 
-    if chapter_place:
-        for s in sections:
-            place = by_index[s.index]
-            if place:
-                add(
-                    chapter_place, place, "CONTAINS",
-                    section_index=s.index, section_heading=s.heading,
-                )
+    # Only a suffix-LESS section can be a stem: `E5a` is not the parent of
+    # `E5b`, they are siblings under `E5`. First occurrence wins, since a
+    # duplicated key is a transcription artifact rather than two parents.
+    stems: dict[str, str] = {}
+    for s in sections:
+        match = KEYED_HEADING.match(s.heading.strip())
+        if match and not match.group("suffix"):
+            stems.setdefault(match.group("stem"), match.group("name").strip())
+
+    for s in sections:
+        place = by_index[s.index]
+        if not place:
+            continue
+        match = KEYED_HEADING.match(s.heading.strip())
+        # Fall back to the chapter place when the stem section is absent
+        # (`K20a` with no `K20`): dropping the edge would lose a containment
+        # the chapter place can still state correctly.
+        parent = chapter_place
+        if match and match.group("suffix"):
+            parent = stems.get(match.group("stem"), chapter_place)
+        # A place does not contain itself. The transcription repeats a parent's
+        # name onto its sub-area often enough for this to be real.
+        if parent and parent != place:
+            add(
+                parent, place, "CONTAINS",
+                section_index=s.index, section_heading=s.heading,
+            )
 
     for node in nodes:
         place = by_index.get(node.section_index)
