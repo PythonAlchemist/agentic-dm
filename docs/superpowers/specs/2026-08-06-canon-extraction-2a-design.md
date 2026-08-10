@@ -194,3 +194,38 @@ chunk-page-attribution weakness noted in the stage-0 review is not fixed here ei
 **The narrative layer's failure mode is silent.** Vector search degrades visibly; a graph
 query over 80%-recall narrative edges returns a confident, incomplete answer. This is why
 recall is the number that gates the full run rather than a thing we check afterwards.
+
+---
+
+## Addendum (2026-08-07, task 10) — three things this document states that are no longer true
+
+Recorded here rather than edited in above, so the reasoning that led to each original
+decision stays readable.
+
+**§1's packing was removed (commit `b7d405d`).** There is no token budget and no `pack`
+step: an `ExtractionUnit` is exactly one `Section`, produced by `units_from_sections`.
+Packing saved a few cents across the corpus and cost the ability to say which section a
+candidate came from — which both structural derivation and stage 2b's resolution depend
+on. At gpt-4o-mini prices that is a bad trade. The data-flow diagram's `──► pack ──►
+[ExtractionUnit] (~1,500 tokens each)` should read `──► [ExtractionUnit] (one per
+section)`. The cost valve that shipped instead is `--limit N`.
+
+**§5's bar of 0.9 was unreachable as written, and by construction.** Feeding the golden set
+to itself as a perfect-by-construction candidate set scored 0.78 node / 0.68 edge
+unambiguous recall: four golden nodes and eight golden edges could never be credited,
+because their own exact names are token-subsets of other golden entries (`Vallaki` inside
+`Escort Ireena to Vallaki`). No extractor of any quality could have reached 0.9. Two
+changes followed. Matching is now type-aware — a candidate credits a golden entry only when
+the names match *and* the candidate's `entity_type` equals the type segment of the golden
+id — which removes nearly every collision, since nearly every one was a type collision. And
+`grade` now computes and reports that ceiling next to every score, so a bar can never again
+be set above what the key admits without anyone noticing. Any future bar must be stated
+relative to the ceiling, and a ceiling below 1.0 must be read as a defect in the key.
+
+**A single run's edge set is a ~50% arbitrary draw.** At temperature 0 with the seed pinned,
+unique-edge Jaccard between two runs of the same chapter is 0.49 while the reported recall
+numbers are identical — recall is blind to the churn, because the edges that swap out are
+mostly ones the golden set does not list either way. Stage 2b must therefore consume
+multi-sample consensus (extract N times, keep what recurs) rather than one run's artifact.
+Treating a single artifact as *the* extraction of a chapter would bake in half an arbitrary
+draw, and no recall number computed here would show it.

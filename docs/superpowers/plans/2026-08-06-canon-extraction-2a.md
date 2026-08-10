@@ -52,6 +52,9 @@ Layer vocabularies, derived from `LAYER_MAP` (do not hardcode):
 
 **Created:**
 - `backend/canon/sections.py` — `split_sections`, `pack_sections`
+  <!-- SUPERSEDED by commit b7d405d: `pack_sections` was removed. The module
+  exports `split_sections` and `units_from_sections` (one unit per section). -->
+
 - `backend/canon/extract.py` — `CandidateExtractor`, the layer prompts
 - `backend/canon/grade.py` — `grade`, `normalize_name`
 - `backend/scripts/extract_canon.py` — CLI
@@ -78,6 +81,15 @@ Layer vocabularies, derived from `LAYER_MAP` (do not hardcode):
   - `ExtractionUnit(chapter_slug: str, chapter_title: str, headings: list[str], markdown: str, token_count: int)`
   - `split_sections(chapter: Chapter) -> list[Section]`
   - `pack_sections(sections: list[Section], max_tokens: int = 1500) -> list[ExtractionUnit]`
+
+  <!-- SUPERSEDED by commit b7d405d. Packing was removed: an ExtractionUnit is
+  exactly one section, so a candidate's provenance is exact. The shipped shape is
+  `ExtractionUnit(chapter_slug, chapter_title, heading: str, section_index: int,
+  markdown, token_count)` -- singular `heading`, plus `section_index`, which is
+  the only unique key (duplicate H2 headings occur within a chapter: four
+  "Treasure" sections in chapter 4, three "Actions" in Appendix D). The
+  constructor is `units_from_sections(sections) -> list[ExtractionUnit]`. -->
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -215,6 +227,10 @@ class Section:
     index: int
     markdown: str
 
+
+<!-- SUPERSEDED by commit b7d405d: `headings: list[str]` never shipped. The unit
+is one section, so the field is `heading: str`, and `section_index: int` was
+added as the unit's only unique key. -->
 
 @dataclass
 class ExtractionUnit:
@@ -1984,6 +2000,12 @@ def units_from_sections(sections: list[Section]) -> list[ExtractionUnit]:
 `pack_sections` stays — it is tested and may be wanted for a cheaper bulk mode — but the
 CLI stops using it. Note that in your report so the final review can decide whether to keep
 it.
+
+<!-- SUPERSEDED by commit b7d405d: the final review decided the other way and
+`pack_sections` was deleted along with its tests. Nothing packs sections now;
+the cheaper bulk mode, if it is ever wanted, starts from `units_from_sections`.
+The try-a-few-first cost valve that shipped instead is `--limit N` (task 10). -->
+
 
 - [ ] **Step 5: Use both in the CLI**
 
