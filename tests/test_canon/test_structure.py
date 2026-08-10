@@ -199,6 +199,24 @@ class TestSubareaContainment:
             ("Village of Barovia", "Bedroom"),
         }
 
+    def test_a_duplicated_stem_key_keeps_its_first_occurrence(self):
+        """The transcription duplicates a heading across a page seam -- the same
+        reason the self-containment guard below exists. A second `E5` heading
+        naming a different place must not silently reparent every E5* sub-area:
+        with last-occurrence-wins, all seven of E5a-E5g would point at `Nave`
+        instead of `Church`, and nothing else in this module would notice.
+        """
+        sections = [
+            section("E5. Church"),
+            section("E5g. Undercroft", 1),
+            section("E5. Nave", 2),
+        ]
+
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert ("Church", "Undercroft") in contains(edges)
+        assert ("Nave", "Undercroft") not in contains(edges)
+
     def test_a_place_is_never_contained_by_itself(self):
         """The transcription repeats a heading's name onto its sub-area often
         enough that this is real: `E5. Church` and `E5a. Church` would derive
