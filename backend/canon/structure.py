@@ -123,10 +123,19 @@ def structural_edges(
             section_index=node.section_index, section_heading=node.section_heading,
         )
 
-    seen: set[tuple[str, str, str]] = set()
+    # `section_index` is part of the key for the same reason `by_index` is keyed
+    # on it: name text does not identify a section, and since sections split on
+    # the key rather than on heading level, same-named rooms are common -- one
+    # chapter has two `Closet`s (K44, K51), two `Forgotten Treasure`s and three
+    # `Empty Cell`s. On name alone, 103 keyed places yielded 100 CONTAINS edges,
+    # and the drop was undetectable downstream because the survivor's provenance
+    # named the other room. Duplicates worth collapsing -- the three layer passes
+    # naming one node repeatedly in one section -- share a section_index, so they
+    # still collapse.
+    seen: set[tuple[str, str, str, int]] = set()
     unique: list[CandidateEdge] = []
     for edge in edges:
-        key = (edge.source_name, edge.target_name, edge.rel_type)
+        key = (edge.source_name, edge.target_name, edge.rel_type, edge.section_index)
         if key not in seen:
             seen.add(key)
             unique.append(edge)

@@ -140,7 +140,11 @@ class TestStructuralEdges:
         edges = structural_edges(sections, nodes, "Village of Barovia")
 
         located = [e for e in edges if e.rel_type == "LOCATED_IN"]
-        assert len(located) == 2, "the repeated Donavich mention must collapse to one edge"
+        assert len(located) == 2, (
+            "the repeated Donavich mention must collapse to one edge -- these "
+            "duplicates share a section_index, which is what separates them "
+            "from two same-named rooms in DIFFERENT sections"
+        )
         assert {(e.source_name, e.target_name) for e in located} == {
             ("Donavich", "Church"),
             ("Doru", "Church"),
@@ -216,6 +220,24 @@ class TestSubareaContainment:
 
         assert ("Church", "Undercroft") in contains(edges)
         assert ("Nave", "Undercroft") not in contains(edges)
+
+    def test_two_distinct_rooms_that_share_a_name_both_keep_containment(self):
+        """Keyed rooms repeat names across a castle: chapter 4 has two closets
+        (`K44`, `K51`), two forgotten treasures (`K74b`, `K74d`) and three empty
+        cells. Deduplicating derived edges on name text alone silently drops one
+        of each -- 103 keyed places produced only 100 CONTAINS edges -- and the
+        loss is invisible downstream, because the surviving edge's provenance
+        names the OTHER room. `section_index` is what distinguishes them, which
+        is the same reason `by_index` is keyed on it rather than on heading.
+        """
+        sections = [section("K44. Closet"), section("K51. Closet", 1)]
+
+        edges = [e for e in structural_edges(sections, [], "Castle Ravenloft")
+                 if e.rel_type == "CONTAINS"]
+
+        assert len(edges) == 2, "one room's containment was dropped as a duplicate"
+        assert {e.section_heading for e in edges} == {"K44. Closet", "K51. Closet"}
+        assert {e.section_index for e in edges} == {0, 1}
 
     def test_a_place_is_never_contained_by_itself(self):
         """The transcription repeats a heading's name onto its sub-area often
