@@ -6,7 +6,9 @@ candidate is usually a legitimate entity the key omits. Scoring precision here
 would punish an extractor for being thorough.
 """
 
-from backend.canon.grade import grade, names_match, normalize_name
+import pytest
+
+from backend.canon.grade import ceiling, grade, names_match, normalize_name
 from backend.canon.models import CandidateEdge, CandidateNode
 
 
@@ -15,7 +17,18 @@ def golden(nodes=None, edges=None) -> dict:
 
 
 def gnode(name, entity_type="NPC", **kw):
-    return {"id": f"cos:npc:{name.lower()}", "name": name, "entity_type": entity_type, **kw}
+    """A golden node whose id encodes its own type -- `cos:<type>:<slug>`.
+
+    The type segment is the one the matcher reads (see `golden_entity_type`), so a
+    fixture whose id said `npc` while its `entity_type` said QUEST would be
+    self-contradictory and would grade against the wrong type.
+    """
+    return {
+        "id": f"cos:{entity_type.lower()}:{name.lower()}",
+        "name": name,
+        "entity_type": entity_type,
+        **kw,
+    }
 
 
 def gedge(source, target, rel_type):
@@ -83,7 +96,7 @@ class TestEdgeRecall:
     def test_edge_matches_on_type_and_both_endpoints(self):
         g = golden(edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
                    nodes=[gnode("A"), gnode("B")])
-        report = grade([], [cedge("A", "B", "KNOWS")], g)
+        report = grade([cnode("A"), cnode("B")], [cedge("A", "B", "KNOWS")], g)
 
         assert report.edge_recall == 1.0
 
@@ -109,7 +122,11 @@ class TestEdgeRecall:
             edges=[gedge("cos:npc:ismark kolyanovich", "cos:npc:b", "KNOWS")],
             nodes=[gnode("Ismark Kolyanovich", aliases=["Ismark the Lesser"]), gnode("B")],
         )
-        report = grade([], [cedge("Ismark the Lesser", "B", "KNOWS")], g)
+        report = grade(
+            [cnode("Ismark the Lesser"), cnode("B")],
+            [cedge("Ismark the Lesser", "B", "KNOWS")],
+            g,
+        )
 
         assert report.edge_recall == 1.0
 
@@ -122,7 +139,7 @@ class TestEdgeRecall:
         g = golden(edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
                    nodes=[gnode("A"), gnode("B")])
         report = grade(
-            [],
+            [cnode("A"), cnode("B"), cnode("Ireena Kolyana"), cnode("Castle Ravenloft")],
             [cedge("A", "B", "KNOWS"), cedge("Ireena Kolyana", "Castle Ravenloft", "GUARDS")],
             g,
         )
@@ -227,7 +244,9 @@ class TestSubsetMatchingInGrade:
             nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
             edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
         )
-        report = grade([], [cedge("Strahd", "Ireena", "SEEKS")], g)
+        report = grade(
+            [cnode("Strahd"), cnode("Ireena")], [cedge("Strahd", "Ireena", "SEEKS")], g
+        )
 
         assert report.edge_recall == 1.0
 
@@ -271,20 +290,19 @@ class TestUnambiguousNodeRecall:
     def test_an_entry_with_both_an_ambiguous_and_unambiguous_witness_counts(self):
         """A single unambiguous witness is enough to credit an entry -- this
         does NOT require every matching candidate to be unambiguous, only
-        that at least one is. "Ireena" is ambiguous (matches both the NPC and
-        the quest named after her), but "Ireena Kolyana" matches the NPC
-        alone, so the NPC entry is credited. The quest has no unambiguous
-        witness at all, so only half of the two entries count.
+        that at least one is. "Ireena" is ambiguous (it matches both NPCs),
+        but "Ireena Kolyana" matches one of them alone, so that entry is
+        credited. "Ireena the Cursed" has no unambiguous witness at all, so
+        only half of the two entries count.
+
+        Both entries are NPCs deliberately: since matching became type-aware,
+        two entries of different types sharing a name are no longer ambiguous
+        at all, so a QUEST here would not exercise this path.
 
         Pinned so a future "require ALL matching candidates to be
         unambiguous" rewrite is caught immediately.
         """
-        g = golden(
-            nodes=[
-                gnode("Ireena Kolyana"),
-                gnode("Escort Ireena to Vallaki", entity_type="QUEST"),
-            ]
-        )
+        g = golden(nodes=[gnode("Ireena Kolyana"), gnode("Ireena the Cursed")])
         report = grade([cnode("Ireena"), cnode("Ireena Kolyana")], [], g)
 
         assert report.node_recall == 1.0
@@ -301,6 +319,251 @@ class TestUnambiguousNodeRecall:
         assert report.node_recall_unambiguous == 0.0
 
 
+class TestTypeAwareMatching:
+    """A candidate credits a golden entry only when it is the same KIND of thing.
+
+    Measured: a ~10-line regex scraping capitalized words scored 0.78 unambiguous
+    node recall against chapter 3 -- above the tuned three-pass pipeline's 0.72.
+    `*_unambiguous` cannot stop that, because it constrains what one candidate
+    matches, never how many candidates exist. Nearly every collision in the golden
+    set is a TYPE collision (`Vallaki` the LOCATION versus `Escort Ireena to
+    Vallaki` the QUEST), so requiring the type to agree removes the credit that
+    was being awarded for matching the wrong kind of thing.
+    """
+
+    def test_a_location_credits_the_location_and_not_the_quest_named_after_it(self):
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Escort Ireena to Vallaki", entity_type="QUEST"),
+            ]
+        )
+        report = grade([cnode("Vallaki", "LOCATION")], [], g)
+
+        assert report.missing_nodes == ["Escort Ireena to Vallaki"]
+        assert report.node_recall == 0.5
+        assert report.node_recall_unambiguous == 0.5, (
+            "the LOCATION is now credited unambiguously -- the quest it collided "
+            "with is a different type and no longer competes"
+        )
+
+    def test_type_is_compared_case_insensitively(self):
+        g = golden(nodes=[gnode("Vallaki", entity_type="LOCATION")])
+
+        assert grade([cnode("Vallaki", "location")], [], g).node_recall == 1.0
+
+    def test_the_shotgun_in_miniature(self):
+        """A scraper that emits every capitalized name under one blanket type can
+        only ever credit that type's slice of the key, however many names it
+        emits. Under name-only matching this same candidate set scored 1.00."""
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Church of Barovia", entity_type="LOCATION"),
+                gnode("Ireena Kolyana", entity_type="NPC"),
+                gnode("Donavich", entity_type="NPC"),
+                gnode("Escort Ireena to Vallaki", entity_type="QUEST"),
+            ]
+        )
+        shotgun = [
+            cnode(n, "LOCATION")
+            for n in ("Vallaki", "Church", "Ireena", "Donavich", "Escort", "Barovia")
+        ]
+
+        report = grade(shotgun, [], g)
+
+        assert report.node_recall == 0.4, "only the two LOCATION entries can be credited"
+        assert sorted(report.missing_nodes) == [
+            "Donavich",
+            "Escort Ireena to Vallaki",
+            "Ireena Kolyana",
+        ]
+
+    def test_the_same_names_correctly_typed_still_score_one(self):
+        """The control for the shotgun case above: the names are doing no less
+        work than before -- it is the type, and only the type, that changed."""
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Ireena Kolyana", entity_type="NPC"),
+            ]
+        )
+        report = grade([cnode("Vallaki", "LOCATION"), cnode("Ireena", "NPC")], [], g)
+
+        assert report.node_recall == 1.0
+
+    def test_an_untyped_candidate_matches_nothing(self):
+        """A candidate carrying no entity_type must not fall back to name-only
+        matching -- that fallback is exactly the hole this closes."""
+        g = golden(nodes=[gnode("Vallaki", entity_type="LOCATION")])
+        report = grade([cnode("Vallaki", "")], [], g)
+
+        assert report.node_recall == 0.0
+        assert report.unmatched_nodes == ["Vallaki"]
+
+    def test_a_golden_id_with_an_unknown_type_segment_raises(self):
+        """A malformed id must not become a wildcard that matches every type."""
+        g = golden(nodes=[{"id": "cos:locaton:vallaki", "name": "Vallaki",
+                           "entity_type": "LOCATION"}])
+
+        with pytest.raises(ValueError) as exc:
+            grade([cnode("Vallaki", "LOCATION")], [], g)
+
+        assert "cos:locaton:vallaki" in str(exc.value)
+
+    def test_a_golden_id_without_three_segments_raises(self):
+        g = golden(nodes=[{"id": "vallaki", "name": "Vallaki", "entity_type": "LOCATION"}])
+
+        with pytest.raises(ValueError):
+            grade([cnode("Vallaki", "LOCATION")], [], g)
+
+
+class TestCeiling:
+    """The key graded against itself: the best any extractor could ever score.
+
+    Measured before type-aware matching, chapter 3's own golden set scored 0.78
+    node / 0.68 edge unambiguous against ITSELF -- four nodes and eight edges
+    were uncreditable by construction, and the spec's 0.9 bar was unreachable by
+    anything. Nobody could see that without running the experiment.
+    """
+
+    def test_a_key_with_no_collisions_has_a_ceiling_of_one(self):
+        g = golden(
+            nodes=[gnode("Ireena Kolyana"), gnode("Vallaki", entity_type="LOCATION")],
+            edges=[gedge("cos:npc:ireena kolyana", "cos:location:vallaki", "TRAVELED_TO")],
+        )
+
+        assert ceiling(g) == (1.0, 1.0)
+
+    def test_a_same_type_token_subset_pair_lowers_the_node_ceiling(self):
+        """"Vallaki" is a token-subset of "Vallaki Gates" and both are LOCATIONs,
+        so each key entry's own exact name matches the other. Neither can ever be
+        credited unambiguously, by anyone."""
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Vallaki Gates", entity_type="LOCATION"),
+                gnode("Ireena Kolyana"),
+                gnode("Donavich"),
+            ]
+        )
+
+        assert ceiling(g)[0] == 0.5
+
+    def test_the_type_collision_that_used_to_cost_a_node_no_longer_does(self):
+        """`Vallaki` the LOCATION against `Escort Ireena to Vallaki` the QUEST is
+        the shape of nearly every collision in the real key, and cost both
+        entries their unambiguous credit before matching became type-aware."""
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Escort Ireena to Vallaki", entity_type="QUEST"),
+            ]
+        )
+
+        assert ceiling(g)[0] == 1.0
+
+    def test_an_ambiguous_endpoint_lowers_the_edge_ceiling(self):
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Vallaki Gates", entity_type="LOCATION"),
+                gnode("Ireena Kolyana"),
+            ],
+            edges=[
+                gedge("cos:npc:ireena kolyana", "cos:location:vallaki", "TRAVELED_TO"),
+                gedge("cos:npc:ireena kolyana", "cos:npc:ireena kolyana", "KNOWS"),
+            ],
+        )
+
+        assert ceiling(g)[1] == 0.5, "the edge through the ambiguous endpoint is uncreditable"
+
+    def test_grade_reports_the_ceiling_alongside_the_score(self):
+        g = golden(
+            nodes=[
+                gnode("Vallaki", entity_type="LOCATION"),
+                gnode("Vallaki Gates", entity_type="LOCATION"),
+            ]
+        )
+        report = grade([cnode("Vallaki", "LOCATION")], [], g)
+
+        assert report.node_ceiling == 0.0
+        assert report.edge_ceiling == 1.0
+        assert report.node_recall_unambiguous <= report.node_ceiling
+
+    def test_the_real_chapter_three_key_is_gradeable_to_its_own_ceiling(self):
+        """A ceiling below 1.0 on the shipped key is a defect in the key. If this
+        fails, fix the seed -- do not lower the bar."""
+        import yaml
+
+        from backend.canon.seed_loader import SEED_DIR, extractable_subset
+
+        data = yaml.safe_load((SEED_DIR / "village-of-barovia.yaml").read_text())
+
+        for source in ("ch3", "ch1"):
+            node_ceiling, edge_ceiling = ceiling(extractable_subset(data, source))
+            assert node_ceiling == 1.0, f"{source} node ceiling is {node_ceiling}"
+            assert edge_ceiling == 1.0, f"{source} edge ceiling is {edge_ceiling}"
+
+
+class TestTypeAwareEdgeEndpoints:
+    """An edge inherits the type rule through its endpoints: an endpoint name is
+    typed by the candidate node that carries it, so an edge between wrongly typed
+    (or never-extracted, therefore untyped) endpoints cannot be credited."""
+
+    def test_edge_matches_when_both_endpoints_are_correctly_typed(self):
+        g = golden(
+            nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
+            edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
+        )
+        report = grade(
+            [cnode("Strahd", "NPC"), cnode("Ireena", "NPC")],
+            [cedge("Strahd", "Ireena", "SEEKS")],
+            g,
+        )
+
+        assert report.edge_recall == 1.0
+
+    def test_edge_with_a_wrongly_typed_endpoint_is_not_credited(self):
+        g = golden(
+            nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
+            edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
+        )
+        report = grade(
+            [cnode("Strahd", "NPC"), cnode("Ireena", "LOCATION")],
+            [cedge("Strahd", "Ireena", "SEEKS")],
+            g,
+        )
+
+        assert report.edge_recall == 0.0
+        assert report.edge_recall_unambiguous == 0.0
+
+    def test_edge_whose_endpoint_was_never_extracted_as_a_node_is_not_credited(self):
+        """The shotgun's 45,540 edges were emitted over bare name strings. An
+        endpoint with no candidate node behind it has no type at all, and must
+        not be credited on its name alone."""
+        g = golden(
+            nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
+            edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
+        )
+        report = grade([], [cedge("Strahd", "Ireena", "SEEKS")], g)
+
+        assert report.edge_recall == 0.0
+
+    def test_a_quest_named_after_a_location_does_not_satisfy_the_locations_edge(self):
+        g = golden(
+            nodes=[gnode("Ismark Kolyanovich"), gnode("Vallaki", entity_type="LOCATION")],
+            edges=[gedge("cos:npc:ismark kolyanovich", "cos:location:vallaki", "TRAVELED_TO")],
+        )
+        report = grade(
+            [cnode("Ismark", "NPC"), cnode("Escort Ireena to Vallaki", "QUEST")],
+            [cedge("Ismark", "Escort Ireena to Vallaki", "TRAVELED_TO")],
+            g,
+        )
+
+        assert report.edge_recall == 0.0
+
+
 class TestEdgeCollisions:
     def test_candidate_edge_matching_multiple_golden_edges_is_a_collision(self):
         """Two golden nodes sharing a token make one candidate edge satisfy both
@@ -313,19 +576,24 @@ class TestEdgeCollisions:
                 gedge("cos:npc:ireena the cursed", "cos:npc:target", "SEEKS"),
             ],
         )
-        report = grade([], [cedge("Ireena", "Target", "SEEKS")], g)
+        report = grade(
+            [cnode("Ireena"), cnode("Target")], [cedge("Ireena", "Target", "SEEKS")], g
+        )
 
         assert report.edge_collisions, "one candidate satisfying two golden edges must be flagged"
 
     def test_golden_edge_credited_via_ambiguous_endpoint_is_a_collision(self):
         """Only one golden edge here -- the ambiguity is that "Ireena" also
-        names a second, unrelated golden node with no edge of its own."""
+        names a second, unrelated golden NPC with no edge of its own. Same
+        type, or matching would separate them and there would be no
+        ambiguity to report."""
         g = golden(
-            nodes=[gnode("Ireena"), gnode("Ireena the Vampire", entity_type="QUEST"),
-                   gnode("Target")],
+            nodes=[gnode("Ireena"), gnode("Ireena the Cursed"), gnode("Target")],
             edges=[gedge("cos:npc:ireena", "cos:npc:target", "SEEKS")],
         )
-        report = grade([], [cedge("Ireena", "Target", "SEEKS")], g)
+        report = grade(
+            [cnode("Ireena"), cnode("Target")], [cedge("Ireena", "Target", "SEEKS")], g
+        )
 
         assert report.edge_collisions, "an ambiguous endpoint match must be surfaced"
 
@@ -334,7 +602,7 @@ class TestEdgeCollisions:
             nodes=[gnode("A"), gnode("B")],
             edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
         )
-        report = grade([], [cedge("A", "B", "KNOWS")], g)
+        report = grade([cnode("A"), cnode("B")], [cedge("A", "B", "KNOWS")], g)
 
         assert report.edge_collisions == []
 
@@ -345,17 +613,18 @@ class TestUnambiguousEdgeRecall:
             nodes=[gnode("A"), gnode("B")],
             edges=[gedge("cos:npc:a", "cos:npc:b", "KNOWS")],
         )
-        report = grade([], [cedge("A", "B", "KNOWS")], g)
+        report = grade([cnode("A"), cnode("B")], [cedge("A", "B", "KNOWS")], g)
 
         assert report.edge_recall_unambiguous == 1.0
 
     def test_ambiguous_endpoint_match_does_not_count_toward_unambiguous_recall(self):
         g = golden(
-            nodes=[gnode("Ireena"), gnode("Ireena the Vampire", entity_type="QUEST"),
-                   gnode("Target")],
+            nodes=[gnode("Ireena"), gnode("Ireena the Cursed"), gnode("Target")],
             edges=[gedge("cos:npc:ireena", "cos:npc:target", "SEEKS")],
         )
-        report = grade([], [cedge("Ireena", "Target", "SEEKS")], g)
+        report = grade(
+            [cnode("Ireena"), cnode("Target")], [cedge("Ireena", "Target", "SEEKS")], g
+        )
 
         assert report.edge_recall == 1.0
         assert report.edge_recall_unambiguous == 0.0

@@ -100,12 +100,20 @@ class GradeReport:
     Precision is deliberately absent: the golden set is not exhaustive, so an
     unmatched candidate is usually a legitimate entity the key omits rather than
     a fabrication. Scoring it would punish thoroughness.
+
+    `node_ceiling` / `edge_ceiling` are the best unambiguous recall this golden
+    subset admits at all -- the key graded against itself. Below 1.0 means the
+    key contains entries indistinguishable under the matcher, and no extractor
+    can reach the difference. Reported next to the score so a bar can never
+    again be set above what is achievable without anyone noticing.
     """
 
     node_recall: float
     edge_recall: float
     node_recall_unambiguous: float
     edge_recall_unambiguous: float
+    node_ceiling: float
+    edge_ceiling: float
     missing_nodes: list[str]
     missing_edges: list[str]
     unmatched_nodes: list[str]
