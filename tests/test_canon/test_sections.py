@@ -163,8 +163,10 @@ class TestRealCorpusSections:
         ]
 
     def test_a_stat_block_appendix_splits_on_creatures_not_on_stat_block_parts(self):
-        """Appendix D writes each creature's "Actions"/"Traits" as an H3 inside
-        its section. 37 H3 sub-headings must not become 37 sections."""
+        """Appendix D writes stat-block parts as H3 sub-headings inside a
+        creature's section -- "The Abbot's Traits", "Antimagic Susceptibility",
+        "Reactions". All 37 of them must stay inside their sections rather than
+        becoming 37 more sections."""
         sections = split_sections(real_chapter(*APPENDIX_D))
         headings = [s.heading for s in sections]
 
@@ -173,9 +175,8 @@ class TestRealCorpusSections:
             "New Creatures by Challenge Rating",
             "Baba Lysaga's Creeping Hut",
         ]
-        assert "Vladimir Horngaard" not in headings, (
-            "an H3 stat-block heading must stay inside its own section"
-        )
+        for h3 in ("The Abbot's Traits", "Antimagic Susceptibility", "Reactions"):
+            assert h3 not in headings, "an H3 stat-block heading must not split"
 
     @pytest.mark.parametrize(
         ("fixture", "heading", "expected"),

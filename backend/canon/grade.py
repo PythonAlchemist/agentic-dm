@@ -14,9 +14,24 @@ emitting every name pair across every relationship type, out-scored the tuned
 three-pass pipeline on node recall (0.78 vs 0.72 unambiguous). `*_unambiguous`
 cannot stop that -- it constrains what one candidate matches, never how many
 candidates exist. Requiring the candidate's `entity_type` to equal the type the
-golden id declares does stop it, because nearly every collision in the key is a
-type collision: `Vallaki` the LOCATION versus `Escort Ireena to Vallaki` the
-QUEST.
+golden id declares raises the price of that attack, because nearly every
+collision in the key is a type collision: `Vallaki` the LOCATION versus `Escort
+Ireena to Vallaki` the QUEST.
+
+BUT IT DOES NOT CLOSE THE HOLE, and this module must not be read as claiming it
+does. Measured after the change: the same shotgun, emitting each scraped name
+once per EntityType (18 copies, one extra loop) and stamping a matching `layer`
+to satisfy `anchor_quests`, scores node 0.84/0.84 and edge 0.72/0.48 -- 0.74/0.74
+and 0.60/0.60 after `anchor_quests` -- against the tuned pipeline's node
+0.79/0.74 and edge 0.32/0.28. It still wins on all four numbers with no LLM.
+Type-awareness multiplied its cost by roughly the type count and nothing more.
+
+Recall is monotone in candidate count at every looseness, so NO recall-only
+metric can rank two extractors: emitting more candidates can never lose a credit
+already earned. Ranking needs something recall cannot supply -- a precision term,
+a candidate budget, or the hand-checked fabrication sample the spec's bar already
+calls for and which has never been performed. Read these numbers as "did the
+extractor find the key's entities", never as "is this extractor better".
 """
 
 import re

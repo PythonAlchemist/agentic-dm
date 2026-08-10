@@ -229,3 +229,17 @@ mostly ones the golden set does not list either way. Stage 2b must therefore con
 multi-sample consensus (extract N times, keep what recurs) rather than one run's artifact.
 Treating a single artifact as *the* extraction of a chapter would bake in half an arbitrary
 draw, and no recall number computed here would show it.
+
+**Recall alone cannot rank two extractors, and type-awareness did not change that.** The
+type rule above raised the price of a name-only shotgun by roughly the type count and no
+more. Measured: the same ~10-line regex, emitting each scraped name once per `EntityType`
+(one extra loop, 18 copies) and stamping a matching `layer` so `anchor_quests` passes,
+scores node 0.84 / 0.84 and edge 0.72 / 0.48 unambiguous — 0.74 / 0.74 and 0.60 / 0.60 after
+`anchor_quests` — against the tuned three-pass pipeline's node 0.79 / 0.74 and edge 0.32 /
+0.28. It wins on all four numbers with no LLM. The reason is structural: recall is monotone
+in candidate count, so an extra candidate can never revoke a credit already earned, and no
+looseness setting or ambiguity filter changes that. Stage 2b inherits this metric and must
+not use it to choose between two extractors. What would work is a precision term, a
+candidate budget (score per N candidates), or §5's hand-checked fabrication sample — that
+check has never been performed, and it is the half of the bar that actually separates a
+shotgun from real extraction.
