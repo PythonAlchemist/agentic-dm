@@ -82,6 +82,24 @@ class TestStructuralEdges:
 
         assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []
 
+    def test_a_node_naming_its_own_section_is_not_located_in_itself(self):
+        """The entity_type guard above is not enough, and the real chapter-3 run
+        proves it: the extractor typed `Trapdoor` -- from section
+        `E5d. Trapdoor` -- as an ITEM, and the derived set shipped
+        `Trapdoor -LOCATED_IN-> Trapdoor`. A self-loop out of the one module
+        documented as unable to fabricate. Casing varies in the transcription
+        (`undercroft` beside `Undercroft`), so the comparison ignores it.
+        """
+        sections = [section("E5d. Trapdoor"), section("E5g. Undercroft", 1)]
+        nodes = [
+            node("Trapdoor", entity_type="ITEM", heading="E5d. Trapdoor"),
+            node("undercroft", entity_type="ITEM", heading="E5g. Undercroft", section_index=1),
+        ]
+
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []
+
     def test_nodes_from_unkeyed_sections_get_no_location(self):
         sections = [section("Approaching the Village")]
         nodes = [node("Ismark", heading="Approaching the Village")]

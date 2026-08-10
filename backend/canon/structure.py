@@ -19,6 +19,16 @@ from backend.canon.sections import KEYED_HEADING
 STRUCTURAL_EVIDENCE = "derived from document structure"
 
 
+def _same_place(a: str, b: str) -> bool:
+    """Whether two names denote the same place, ignoring case and edge spacing.
+
+    Casing is not stable in this corpus -- `undercroft` appears beside
+    `Undercroft` in one chapter's candidates -- so an exact comparison would let
+    a self-loop through on a capital letter.
+    """
+    return a.strip().lower() == b.strip().lower()
+
+
 def place_of_section(section: Section) -> str | None:
     """The place a keyed section names, or None if it names no place.
 
@@ -104,7 +114,7 @@ def structural_edges(
             parent = stems.get(match.group("stem"), chapter_place)
         # A place does not contain itself. The transcription repeats a parent's
         # name onto its sub-area often enough for this to be real.
-        if parent and parent != place:
+        if parent and not _same_place(parent, place):
             add(
                 parent, place, "CONTAINS",
                 section_index=s.index, section_heading=s.heading,
@@ -117,6 +127,12 @@ def structural_edges(
         # A place is not located in itself, and a section's own location node
         # names the same place the heading does.
         if node.entity_type == "LOCATION":
+            continue
+        # The type guard alone is not enough. On the real chapter-3 run the
+        # extractor typed `Trapdoor` -- out of section `E5d. Trapdoor` -- as an
+        # ITEM, and this shipped `Trapdoor -LOCATED_IN-> Trapdoor`: a self-loop
+        # from the module that is supposed to be incapable of fabricating one.
+        if _same_place(node.name, place):
             continue
         add(
             node.name, place, "LOCATED_IN",
