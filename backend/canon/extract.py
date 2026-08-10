@@ -251,43 +251,75 @@ ANCHORING_TYPES = frozenset({"GAVE_QUEST", "OBJECTIVE_AT", "SEEKS", "COMPLETED",
 
 def anchor_quests(
     nodes: list[CandidateNode], edges: list[CandidateEdge]
-) -> tuple[list[CandidateNode], list[CandidateEdge], int]:
-    """Drop QUEST nodes that no extracted entity points at, and their dangling edges.
+) -> tuple[list[CandidateNode], list[CandidateEdge], int, int]:
+    """Drop QUEST nodes no INDEPENDENT extracted entity points at, and their edges.
 
     A coined quest name is the one candidate the source text never states literally,
     so it is the one most likely to be invented. A quest that no NPC gives, no place
-    hosts, and nobody seeks is not a quest the book describes. Requiring an anchor
-    bounds fabrication mechanically instead of trusting the model's restraint.
+    hosts, and nobody seeks is not a quest the book describes.
 
-    Returns the surviving nodes, the surviving edges, and the number of quests dropped.
+    The anchor must be an independent witness: the non-quest endpoint of the
+    anchoring edge has to be a candidate node some OTHER layer pass also produced.
+    Requiring merely "some extracted node" bounds nothing, because the narrative
+    prompt instructs the model to emit GAVE_QUEST/OBJECTIVE_AT for every quest it
+    coins -- the same call invents the quest, the giver, and the edge between them,
+    and the filter then accepts its own output as corroboration. Demonstrated: a
+    coined `Assassinate the Burgomaster of Vallaki` with a GAVE_QUEST edge from
+    Ismark survived, and the dropped-quest count was 0 in all four measured runs.
+    An NPC the social pass also found is real corroboration; an NPC named only
+    inside the same narrative response is the same sentence read twice.
+
+    Returns the surviving nodes, the surviving edges, the number of QUEST nodes
+    dropped, and the number of edges dropped with them.
     """
 
     def fold(name: str) -> str:
         return name.strip().casefold()
 
-    quest_names = {fold(n.name) for n in nodes if n.entity_type == "QUEST"}
-    non_quest_names = {fold(n.name) for n in nodes if n.entity_type != "QUEST"}
+    # Keyed on (name, type), never name alone: a QUEST that happens to share a name
+    # with a LOCATION must not take the LOCATION's edges down with it. Demonstrated:
+    # a coined QUEST "Village of Barovia" destroyed both of the village's real
+    # spatial edges, one of them a derived structural edge from the module
+    # documented as unable to hallucinate.
+    quest_layers: dict[str, set[str]] = {}
+    other_layers: dict[str, set[str]] = {}
+    for n in nodes:
+        bucket = quest_layers if n.entity_type == "QUEST" else other_layers
+        bucket.setdefault(fold(n.name), set()).add(n.layer)
 
     anchored: set[str] = set()
+
+    def consider(quest_name: str, witness_name: str) -> None:
+        if quest_name not in quest_layers:
+            return
+        # An independent witness is one found by a pass that did not also produce
+        # the quest node itself.
+        if other_layers.get(witness_name, set()) - quest_layers[quest_name]:
+            anchored.add(quest_name)
+
     for e in edges:
         if e.rel_type not in ANCHORING_TYPES:
             continue
         source, target = fold(e.source_name), fold(e.target_name)
-        if source in quest_names and target in non_quest_names:
-            anchored.add(source)
-        if target in quest_names and source in non_quest_names:
-            anchored.add(target)
+        consider(source, target)
+        consider(target, source)
 
-    dropped_names = quest_names - anchored
+    dropped_names = set(quest_layers) - anchored
     surviving_nodes = [
         n for n in nodes if not (n.entity_type == "QUEST" and fold(n.name) in dropped_names)
     ]
+    # A name that some surviving non-quest node still carries is a live entity, so
+    # edges naming it are about that entity, not about the dropped quest.
+    surviving_names = {fold(n.name) for n in surviving_nodes}
     surviving_edges = [
         e
         for e in edges
-        if fold(e.source_name) not in dropped_names and fold(e.target_name) not in dropped_names
+        if not any(
+            fold(name) in dropped_names and fold(name) not in surviving_names
+            for name in (e.source_name, e.target_name)
+        )
     ]
     dropped_count = sum(
         1 for n in nodes if n.entity_type == "QUEST" and fold(n.name) in dropped_names
     )
-    return surviving_nodes, surviving_edges, dropped_count
+    return surviving_nodes, surviving_edges, dropped_count, len(edges) - len(surviving_edges)

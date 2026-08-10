@@ -1,11 +1,13 @@
 """CLI plumbing. The extraction itself is tested in test_extract.py."""
 
 import asyncio
+import json
 
 import pytest
 
 import backend.scripts.extract_canon as extract_canon
-from backend.canon.models import CandidateNode, Chapter
+from backend.canon.extract import EXTRACTION_SEED
+from backend.canon.models import CandidateEdge, CandidateNode, Chapter
 from backend.scripts.extract_canon import _gradeable_subset, _known_sources, find_chapter
 
 
@@ -97,14 +99,18 @@ def _one_section_chapter() -> Chapter:
     )
 
 
-def _fake_extractor(nodes=None, edges=None, failed=0, rejected_entity_types=0):
+def _fake_extractor(nodes=None, edges=None, failed=0, rejected_entity_types=0, seen=None):
     """Stands in for CandidateExtractor: canned results, no network call."""
 
     class _Fake:
         def __init__(self, *a, **kw):
             self.rejected_entity_types = rejected_entity_types
+            self.model = "fake-model"
+            self.temperature = 0.0
 
         async def extract_units(self, units, layers=None):
+            if seen is not None:
+                seen.extend(units)
             return nodes or [], edges or [], failed
 
     return _Fake
@@ -205,22 +211,146 @@ class TestRejectedEntityTypeReporting:
         assert "unknown entity_type" not in capsys.readouterr().out
 
 
+def _three_section_chapter() -> Chapter:
+    return Chapter(
+        slug="chapter-3-the-village-of-barovia",
+        title="Chapter 3: The Village of Barovia",
+        start_page=80,
+        end_page=81,
+        markdown="## E1. Shop\n\nA.\n\n## E2. Tavern\n\nB.\n\n## E3. Church\n\nC.",
+    )
+
+
+class TestRunProvenance:
+    """Finding 5: a first-ever `--out ch4.json` with 12 of 180 calls rate-limited
+    writes a 93%-complete file that is byte-shaped exactly like a clean one. The
+    no-clobber guard cannot fire -- there is nothing to clobber -- and stage 2b
+    consumes the artifact, not the exit code."""
+
+    def _written(self, monkeypatch, tmp_path, **kw):
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(**kw))
+        asyncio.run(extract_canon.run("Chapter 3", None, None, out_path))
+        return json.loads(out_path.read_text())
+
+    def test_the_artifact_records_how_it_was_produced(self, monkeypatch, tmp_path):
+        written = self._written(monkeypatch, tmp_path)
+
+        run = written["run"]
+        assert run["model"] == "fake-model"
+        assert run["temperature"] == 0.0
+        assert run["seed"] == EXTRACTION_SEED
+        assert run["chapter"] == "Chapter 3: The Village of Barovia"
+        assert run["total_calls"] == 3  # 1 unit x 3 layers
+        assert run["failed"] == 0
+
+    def test_a_partial_run_is_distinguishable_from_a_clean_one_by_the_file_alone(
+        self, monkeypatch, tmp_path
+    ):
+        written = self._written(monkeypatch, tmp_path, failed=2)
+
+        assert written["run"]["failed"] == 2
+        assert written["run"]["complete"] is False
+
+    def test_a_clean_run_says_so(self, monkeypatch, tmp_path):
+        assert self._written(monkeypatch, tmp_path)["run"]["complete"] is True
+
+
+class TestLimit:
+    """The try-a-few-first valve on the only path that spends money: chapter 4
+    alone is ~84 units x 3 layers."""
+
+    @pytest.mark.asyncio
+    async def test_limit_caps_the_units_processed(self, monkeypatch):
+        seen: list = []
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(seen=seen))
+
+        summary = await extract_canon.run("Chapter 3", None, None, None, limit=2)
+
+        assert [u.heading for u in seen] == ["E1. Shop", "E2. Tavern"]
+        assert summary["units"] == 2
+
+    @pytest.mark.asyncio
+    async def test_no_limit_processes_every_unit(self, monkeypatch):
+        seen: list = []
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(seen=seen))
+
+        await extract_canon.run("Chapter 3", None, None, None)
+
+        assert len(seen) == 3
+
+    @pytest.mark.asyncio
+    async def test_a_limited_run_is_recorded_as_partial(self, monkeypatch, tmp_path):
+        """A capped run covers part of the chapter, so its artifact must not
+        claim to be a complete extraction of it."""
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
+
+        await extract_canon.run("Chapter 3", None, None, out_path, limit=2)
+
+        run = json.loads(out_path.read_text())["run"]
+        assert run["units"] == 2
+        assert run["units_available"] == 3
+        assert run["complete"] is False
+
+    def test_the_flag_is_wired_to_the_parser(self, monkeypatch):
+        seen: list = []
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(seen=seen))
+        monkeypatch.setattr("sys.argv", ["extract_canon.py", "Chapter 3", "--limit", "1"])
+
+        with pytest.raises(SystemExit):
+            extract_canon.main()
+
+        assert len(seen) == 1
+
+
+class TestCeilingReporting:
+    """A ceiling below 1.0 is a defect in the KEY, and the operator must see it
+    next to the score without running an experiment."""
+
+    @pytest.mark.asyncio
+    async def test_recall_is_printed_against_the_ceiling(self, monkeypatch, capsys):
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
+
+        summary = await extract_canon.run("Chapter 3", "ch3", None, None)
+
+        out = capsys.readouterr().out
+        assert "ceiling:" in out
+        assert out.count("ceiling:") == 2, "both node and edge recall carry one"
+        assert summary["node_ceiling"] == 1.0
+        assert summary["edge_ceiling"] == 1.0
+
+
 class TestDroppedQuestReporting:
     """anchor_quests runs at chapter level, after all layer passes and the
     derived structural edges are merged in -- see run()."""
 
     @pytest.mark.asyncio
     async def test_printed_when_nonzero(self, monkeypatch, capsys):
-        orphan_quest = CandidateNode(name="Free Doru", entity_type="QUEST")
+        orphan_quest = CandidateNode(name="Free Doru", entity_type="QUEST", layer="narrative")
+        orphan_edge = CandidateEdge(
+            source_name="Free Doru", target_name="Undercroft", rel_type="OBJECTIVE_AT"
+        )
         monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
         monkeypatch.setattr(
-            extract_canon, "CandidateExtractor", _fake_extractor(nodes=[orphan_quest])
+            extract_canon,
+            "CandidateExtractor",
+            _fake_extractor(nodes=[orphan_quest], edges=[orphan_edge]),
         )
 
         summary = await extract_canon.run("Chapter 3", None, None, None)
 
-        assert "dropped 1 unanchored QUEST nodes" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "dropped 1 unanchored QUEST nodes" in out
+        assert "1 edge" in out, "the edges that went with them must be counted too"
         assert summary["dropped_quests"] == 1
+        assert summary["dropped_edges"] == 1
         assert summary["nodes"] == 0
 
     @pytest.mark.asyncio

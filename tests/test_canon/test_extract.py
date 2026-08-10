@@ -267,46 +267,96 @@ class TestPerSectionProvenance:
         assert nodes[0].section_index == 4
 
 
-def cand_node(name: str, entity_type: str = "NPC") -> CandidateNode:
-    return CandidateNode(name=name, entity_type=entity_type)
+def cand_node(name: str, entity_type: str = "NPC", layer: str = "social") -> CandidateNode:
+    return CandidateNode(name=name, entity_type=entity_type, layer=layer)
 
 
 def cand_edge(source: str, target: str, rel_type: str) -> CandidateEdge:
     return CandidateEdge(source_name=source, target_name=target, rel_type=rel_type)
 
 
-class TestAnchorQuests:
-    """See task-9 brief section 4b: a coined quest name is the one candidate
-    the source text never states literally, so a QUEST node only survives
-    when some other extracted entity points at it via an ANCHORING_TYPES edge."""
+def quest(name: str) -> CandidateNode:
+    """Quests are coined by the narrative pass -- the prompt offers them nowhere else."""
+    return cand_node(name, "QUEST", layer="narrative")
 
-    def test_quest_with_gave_quest_edge_from_extracted_npc_survives(self):
-        nodes = [cand_node("Ismark", "NPC"), cand_node("Escort Ireena to Vallaki", "QUEST")]
+
+class TestAnchorQuests:
+    """A coined quest name is the one candidate the source text never states
+    literally, so a QUEST node only survives when some other extracted entity
+    points at it via an ANCHORING_TYPES edge -- and that entity must have been
+    found by a DIFFERENT layer pass than the quest itself.
+
+    Without the different-pass rule the filter is not a mechanical bound at all:
+    the narrative prompt instructs the model to emit GAVE_QUEST/OBJECTIVE_AT for
+    every quest it coins, so the same call produces both the quest and its own
+    anchor. Demonstrated: a coined `Assassinate the Burgomaster of Vallaki` with
+    a GAVE_QUEST edge from Ismark survived, and the dropped-quest count was 0 in
+    all four measured runs -- the filter had never fired on real data.
+    """
+
+    def test_quest_anchored_by_an_entity_another_pass_also_found_survives(self):
+        nodes = [
+            cand_node("Ismark", "NPC", layer="social"),
+            quest("Escort Ireena to Vallaki"),
+        ]
         edges = [cand_edge("Ismark", "Escort Ireena to Vallaki", "GAVE_QUEST")]
 
-        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+        surviving_nodes, surviving_edges, dropped, dropped_edges = anchor_quests(nodes, edges)
 
         assert surviving_nodes == nodes
         assert surviving_edges == edges
+        assert (dropped, dropped_edges) == (0, 0)
+
+    def test_quest_anchored_only_from_inside_its_own_pass_is_dropped(self):
+        """The demonstrated fabrication: the narrative pass coins a quest and,
+        in the same response, names the NPC that supposedly gave it. That NPC is
+        not corroboration -- it is the same sentence twice."""
+        nodes = [
+            cand_node("Ismark", "NPC", layer="narrative"),
+            quest("Assassinate the Burgomaster of Vallaki"),
+        ]
+        edges = [
+            cand_edge("Ismark", "Assassinate the Burgomaster of Vallaki", "GAVE_QUEST")
+        ]
+
+        surviving_nodes, surviving_edges, dropped, dropped_edges = anchor_quests(nodes, edges)
+
+        assert [n.name for n in surviving_nodes] == ["Ismark"]
+        assert surviving_edges == []
+        assert (dropped, dropped_edges) == (1, 1)
+
+    def test_one_independent_witness_is_enough(self):
+        """The same NPC found by both the narrative and the social pass still
+        anchors: the social pass is an independent witness to it."""
+        nodes = [
+            cand_node("Ismark", "NPC", layer="narrative"),
+            cand_node("Ismark", "NPC", layer="social"),
+            quest("Escort Ireena to Vallaki"),
+        ]
+        edges = [cand_edge("Ismark", "Escort Ireena to Vallaki", "GAVE_QUEST")]
+
+        surviving_nodes, _, dropped, _ = anchor_quests(nodes, edges)
+
+        assert surviving_nodes == nodes
         assert dropped == 0
 
     def test_orphan_quest_is_dropped_along_with_its_edges(self):
         """The quest has an edge, but its other endpoint ("Undercroft") was
         never itself extracted as a candidate node, so it does not anchor."""
         ismark = cand_node("Ismark", "NPC")
-        nodes = [ismark, cand_node("Free Doru from the undercroft", "QUEST")]
+        nodes = [ismark, quest("Free Doru from the undercroft")]
         edges = [cand_edge("Free Doru from the undercroft", "Undercroft", "OBJECTIVE_AT")]
 
-        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+        surviving_nodes, surviving_edges, dropped, dropped_edges = anchor_quests(nodes, edges)
 
         assert surviving_nodes == [ismark]
         assert surviving_edges == []
-        assert dropped == 1
+        assert (dropped, dropped_edges) == (1, 1)
 
     def test_quest_anchored_only_by_another_quest_is_dropped(self):
         nodes = [
-            cand_node("Escort Ireena to Vallaki", "QUEST"),
-            cand_node("Free Doru from the undercroft", "QUEST"),
+            quest("Escort Ireena to Vallaki"),
+            quest("Free Doru from the undercroft"),
         ]
         edges = [
             cand_edge(
@@ -314,18 +364,42 @@ class TestAnchorQuests:
             )
         ]
 
-        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+        surviving_nodes, surviving_edges, dropped, dropped_edges = anchor_quests(nodes, edges)
 
         assert surviving_nodes == []
         assert surviving_edges == []
-        assert dropped == 2
+        assert (dropped, dropped_edges) == (2, 1)
 
     def test_non_quest_node_is_never_touched(self):
         nodes = [cand_node("Bildrath", "NPC")]
         edges = [cand_edge("Bildrath", "Bildrath's Mercantile", "OWNS")]
 
-        surviving_nodes, surviving_edges, dropped = anchor_quests(nodes, edges)
+        surviving_nodes, surviving_edges, dropped, dropped_edges = anchor_quests(nodes, edges)
 
         assert surviving_nodes == nodes
         assert surviving_edges == edges
-        assert dropped == 0
+        assert (dropped, dropped_edges) == (0, 0)
+
+    def test_a_dropped_quest_does_not_take_a_same_named_locations_edges(self):
+        """Demonstrated collateral damage: `dropped_names` was keyed on name
+        alone, so dropping a QUEST that happened to share a name with a LOCATION
+        destroyed the LOCATION's edges too -- including a derived structural edge
+        from the one module documented as unable to hallucinate."""
+        nodes = [
+            cand_node("Village of Barovia", "LOCATION", layer="spatial"),
+            cand_node("Church of Barovia", "LOCATION", layer="spatial"),
+            quest("Village of Barovia"),
+        ]
+        edges = [
+            cand_edge("Village of Barovia", "Church of Barovia", "CONTAINS"),
+            cand_edge("Donavich", "Village of Barovia", "LOCATED_IN"),
+        ]
+
+        surviving_nodes, surviving_edges, dropped, dropped_edges = anchor_quests(nodes, edges)
+
+        assert [(n.name, n.entity_type) for n in surviving_nodes] == [
+            ("Village of Barovia", "LOCATION"),
+            ("Church of Barovia", "LOCATION"),
+        ]
+        assert surviving_edges == edges, "both real spatial edges must survive"
+        assert (dropped, dropped_edges) == (1, 0)

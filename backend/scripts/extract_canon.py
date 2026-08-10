@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
-from backend.canon.extract import CandidateExtractor, anchor_quests
+from backend.canon.extract import EXTRACTION_SEED, CandidateExtractor, anchor_quests
 from backend.canon.grade import grade
 from backend.canon.models import Chapter, Section
 from backend.canon.page_extractor import PageExtractor
@@ -133,6 +133,7 @@ async def run(
     grade_against: str | None,
     layers: list[Layer] | None,
     out_path: Path | None,
+    limit: int | None = None,
 ) -> dict:
     # Validated before the paid extraction call below: a bad --grade value
     # must fail fast, not silently score 1.00/1.00 after money is spent.
@@ -144,7 +145,10 @@ async def run(
     chapter = find_chapter(load_chapters(), chapter_title)
     sections = split_sections(chapter)
     units = units_from_sections(sections)
-    print(f"{chapter.title}: {len(units)} units")
+    units_available = len(units)
+    if limit is not None:
+        units = units[:limit]
+    print(f"{chapter.title}: {len(units)} of {units_available} units")
 
     extractor = CandidateExtractor()
     nodes, edges, failed = await extractor.extract_units(units, layers=layers)
@@ -166,9 +170,30 @@ async def run(
     # Applied at chapter level, after all three layer passes are merged: a quest
     # coined by the narrative pass may be anchored by an entity the social pass
     # found, so a per-unit or per-layer filter would discard it wrongly.
-    nodes, edges, dropped_quests = anchor_quests(nodes, edges)
+    nodes, edges, dropped_quests, dropped_edges = anchor_quests(nodes, edges)
     if dropped_quests:
-        print(f"  dropped {dropped_quests} unanchored QUEST nodes")
+        print(
+            f"  dropped {dropped_quests} unanchored QUEST nodes "
+            f"and {dropped_edges} edge(s) with them"
+        )
+
+    # Provenance travels WITH the candidates, not just on stdout and the exit
+    # code. A first-ever `--out ch4.json` whose run lost 12 of 180 calls to rate
+    # limits cannot trip the no-clobber guard below -- there is nothing to
+    # clobber -- and stage 2b consumes the artifact, not the exit code. Reading
+    # this object must be enough to tell a complete run from a partial one.
+    run_meta = {
+        "chapter": chapter.title,
+        "model": extractor.model,
+        "temperature": extractor.temperature,
+        "seed": EXTRACTION_SEED,
+        "layers": [layer.value for layer in (layers or list(Layer))],
+        "units": len(units),
+        "units_available": units_available,
+        "total_calls": total_calls,
+        "failed": failed,
+        "complete": failed == 0 and len(units) == units_available,
+    }
 
     if out_path:
         if failed and out_path.exists():
@@ -179,7 +204,11 @@ async def run(
         else:
             out_path.write_text(
                 json.dumps(
-                    {"nodes": [asdict(n) for n in nodes], "edges": [asdict(e) for e in edges]},
+                    {
+                        "run": run_meta,
+                        "nodes": [asdict(n) for n in nodes],
+                        "edges": [asdict(e) for e in edges],
+                    },
                     indent=2,
                 )
             )
@@ -188,21 +217,33 @@ async def run(
     summary: dict = {
         "nodes": len(nodes),
         "edges": len(edges),
+        "units": len(units),
         "failed": failed,
         "rejected_entity_types": rejected_entity_types,
         "dropped_quests": dropped_quests,
+        "dropped_edges": dropped_edges,
+        "derived_edges": len(derived),
     }
 
     if golden is not None:
         report = grade(nodes, edges, golden)
+        # The ceiling is what the KEY admits at all. Printed next to every score
+        # so a bar can never again be set above what is achievable.
         print(
             f"\n  node recall: {report.node_recall:.2f} "
-            f"(unambiguous: {report.node_recall_unambiguous:.2f})"
+            f"(unambiguous: {report.node_recall_unambiguous:.2f}, "
+            f"ceiling: {report.node_ceiling:.2f})"
         )
         print(
             f"  edge recall: {report.edge_recall:.2f} "
-            f"(unambiguous: {report.edge_recall_unambiguous:.2f})"
+            f"(unambiguous: {report.edge_recall_unambiguous:.2f}, "
+            f"ceiling: {report.edge_ceiling:.2f})"
         )
+        if report.node_ceiling < 1.0 or report.edge_ceiling < 1.0:
+            print(
+                "  !! a ceiling below 1.00 is a defect in the GOLDEN SET, not the "
+                "extractor: some entries are indistinguishable under the matcher"
+            )
         if report.missing_nodes:
             print(f"  MISSING nodes ({len(report.missing_nodes)}): "
                   f"{', '.join(report.missing_nodes)}")
@@ -230,6 +271,8 @@ async def run(
         summary["edge_recall"] = report.edge_recall
         summary["node_recall_unambiguous"] = report.node_recall_unambiguous
         summary["edge_recall_unambiguous"] = report.edge_recall_unambiguous
+        summary["node_ceiling"] = report.node_ceiling
+        summary["edge_ceiling"] = report.edge_ceiling
 
     return summary
 
@@ -249,11 +292,17 @@ def main() -> None:
                         choices=[layer.value for layer in Layer],
                         help="Restrict to one layer; repeatable")
     parser.add_argument("-o", "--out", type=Path, help="Write candidates as JSON")
+    # The try-a-few-first valve on the only path that spends money: chapter 4
+    # alone is ~84 units x 3 layers.
+    parser.add_argument("--limit", type=int, metavar="N",
+                        help="Process only the first N extraction units")
     args = parser.parse_args()
 
     layers = [Layer(v) for v in args.layers] if args.layers else None
     try:
-        summary = asyncio.run(run(args.chapter, args.grade_against, layers, args.out))
+        summary = asyncio.run(
+            run(args.chapter, args.grade_against, layers, args.out, args.limit)
+        )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(1)
