@@ -22,16 +22,32 @@ BUT IT DOES NOT CLOSE THE HOLE, and this module must not be read as claiming it
 does. Measured after the change: the same shotgun, emitting each scraped name
 once per EntityType (18 copies, one extra loop) and stamping a matching `layer`
 to satisfy `anchor_quests`, scores node 0.84/0.84 and edge 0.72/0.48 -- 0.74/0.74
-and 0.60/0.60 after `anchor_quests` -- against the tuned pipeline's node
-0.79/0.74 and edge 0.32/0.28. It still wins on all four numbers with no LLM.
-Type-awareness multiplied its cost by roughly the type count and nothing more.
+and 0.60/0.60 after `anchor_quests`. The pipeline's current numbers are node
+0.74/0.74 and edge 0.44/0.44 (chapter 3, key-based sections). The raw shotgun
+still beats all four with no LLM; its anchored variant now TIES node recall
+rather than beating it, and that is the whole of the improvement. Type-awareness
+multiplied its cost by roughly the type count and nothing more.
 
 Recall is monotone in candidate count at every looseness, so NO recall-only
 metric can rank two extractors: emitting more candidates can never lose a credit
 already earned. Ranking needs something recall cannot supply -- a precision term,
-a candidate budget, or the hand-checked fabrication sample the spec's bar already
-calls for and which has never been performed. Read these numbers as "did the
-extractor find the key's entities", never as "is this extractor better".
+a candidate budget, or a hand-checked fabrication sample.
+
+THAT SAMPLE HAS NOW BEEN TAKEN, AND THE PIPELINE FAILED IT. 30 of 145 LLM edges
+from a chapter-3 run were hand-read against their own quoted evidence: roughly
+HALF are false as stated. The failure mode is not invented text -- the evidence
+spans are real book prose -- it is the relationship welded onto them, which is
+unsupported or outright inverted: `Castle Ravenloft -OWNS-> Strahd`,
+`Chapel -LOCATED_IN-> Donavich`, `Doru -TRAVELED_TO-> Strahd` off "sent by
+Strahd". The same sample found 2 self-loops, 26 edges with a bare generic-noun
+endpoint, 17 such nodes (`Chapel` x4, `Hall`, `Crypts` x2, `Trapdoor` x2), and 1
+edge with no real evidence at all. Derived structural edges were excluded from
+the sample; they had one self-loop of their own, since fixed in structure.py.
+
+So the spec's §5 fabrication gate is FAILED, not pending. Anyone consuming these
+candidates should size their review for a measured ~50% edge error rate, not for
+an unknown. Read these numbers as "did the extractor find the key's entities",
+never as "is this extractor better" and never as "are these edges true".
 """
 
 import re

@@ -301,7 +301,8 @@ def main() -> None:
                         help="Restrict to one layer; repeatable")
     parser.add_argument("-o", "--out", type=Path, help="Write candidates as JSON")
     # The try-a-few-first valve on the only path that spends money: chapter 4
-    # alone is ~84 units x 3 layers.
+    # alone is 147 units x 3 layers = 441 calls. (It was ~84 units before
+    # sections split on the key rather than on `##`.)
     parser.add_argument("--limit", type=int, metavar="N",
                         help="Process only the first N extraction units")
     args = parser.parse_args()

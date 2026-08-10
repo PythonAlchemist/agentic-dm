@@ -42,7 +42,12 @@ class Chapter:
 
 @dataclass
 class Section:
-    """One `##` section of a chapter, with its chapter provenance."""
+    """One section of a chapter, with its chapter provenance.
+
+    A section starts at a keyed heading at any level (`E4. …`, `K18a. …`) or at
+    an unkeyed `##` -- see `sections.split_sections`. Not `##` alone: the vision
+    transcription assigns heading levels at random.
+    """
 
     chapter_slug: str
     chapter_title: str

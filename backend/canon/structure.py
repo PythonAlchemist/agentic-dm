@@ -106,9 +106,11 @@ def structural_edges(
         if not place:
             continue
         match = KEYED_HEADING.match(s.heading.strip())
-        # Fall back to the chapter place when the stem section is absent
-        # (`K20a` with no `K20`): dropping the edge would lose a containment
-        # the chapter place can still state correctly.
+        # Fall back to the chapter place when the stem section is absent:
+        # dropping the edge would lose a containment the chapter place can
+        # still state correctly. No orphan sub-area occurs in chapter 3 or
+        # chapter 4, so this guard is precautionary -- it is not motivated by
+        # anything measured in the corpus.
         parent = chapter_place
         if match and match.group("suffix"):
             parent = stems.get(match.group("stem"), chapter_place)
