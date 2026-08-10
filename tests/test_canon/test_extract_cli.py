@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+from dataclasses import asdict, replace
 
 import pytest
 
 import backend.scripts.extract_canon as extract_canon
-from backend.canon.extract import EXTRACTION_SEED
+from backend.canon.extract import EXTRACTION_SEED, anchor_quests, merge_edges
 from backend.canon.models import CandidateEdge, CandidateNode, Chapter
+from backend.canon.sections import split_sections
+from backend.canon.structure import STRUCTURAL_EVIDENCE, structural_edges
 from backend.scripts.extract_canon import _gradeable_subset, _known_sources, find_chapter
 
 
@@ -325,6 +328,389 @@ class TestCeilingReporting:
         assert out.count("ceiling:") == 2, "both node and edge recall carry one"
         assert summary["node_ceiling"] == 1.0
         assert summary["edge_ceiling"] == 1.0
+
+
+def _sampling_extractor(draws, seen_seeds=None, seen_node_args=None):
+    """Stands in for CandidateExtractor across N samples.
+
+    `draws` is one `(nodes, edges, failed)` per sample, handed out by the seed
+    the sample was drawn with -- which is how run() distinguishes them.
+    """
+
+    class _Fake:
+        def __init__(self, *a, seed=EXTRACTION_SEED, **kw):
+            self.seed = seed
+            self.index = seed - EXTRACTION_SEED
+            self.rejected_entity_types = 0
+            self.model = "fake-model"
+            self.temperature = 0.0
+            if seen_seeds is not None:
+                seen_seeds.append(seed)
+
+        async def extract_units(self, units, layers=None):
+            nodes, edges, failed = draws[self.index]
+            # Fresh objects per sample: the real extractor never hands two
+            # samples the same instance, and consensus must not rely on it.
+            return [replace(n) for n in nodes], [replace(e) for e in edges], failed
+
+    return _Fake
+
+
+def _keyed_chapter() -> Chapter:
+    """One keyed section, so structural derivation has something to derive."""
+    return Chapter(
+        slug="chapter-3-the-village-of-barovia",
+        title="Chapter 3: The Village of Barovia",
+        start_page=80,
+        end_page=81,
+        markdown="## E1. Blood of the Vine Tavern\n\nBody.",
+    )
+
+
+class TestSampleSeeds:
+    """Section 1: five draws at ONE seed would be voting on residual API
+    nondeterminism -- the very thing being measured."""
+
+    @pytest.mark.asyncio
+    async def test_each_sample_is_drawn_with_its_own_seed(self, monkeypatch):
+        seeds: list[int] = []
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon,
+            "CandidateExtractor",
+            _sampling_extractor([([], [], 0)] * 3, seen_seeds=seeds),
+        )
+
+        await extract_canon.run("Chapter 3", None, None, None, samples=3, node_k=1, edge_k=1)
+
+        assert seeds == [EXTRACTION_SEED, EXTRACTION_SEED + 1, EXTRACTION_SEED + 2]
+
+    @pytest.mark.asyncio
+    async def test_a_single_sample_still_uses_the_pinned_seed(self, monkeypatch):
+        seeds: list[int] = []
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon,
+            "CandidateExtractor",
+            _sampling_extractor([([], [], 0)], seen_seeds=seeds),
+        )
+
+        await extract_canon.run("Chapter 3", None, None, None)
+
+        assert seeds == [EXTRACTION_SEED]
+
+
+class TestConsensusInTheCli:
+    @pytest.mark.asyncio
+    async def test_a_candidate_in_2_of_3_samples_survives_k2_and_is_dropped_at_k3(
+        self, monkeypatch
+    ):
+        doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
+        draws = [([doru], [], 0), ([doru], [], 0), ([], [], 0)]
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _sampling_extractor(draws))
+
+        at_2 = await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=2, edge_k=2
+        )
+        at_3 = await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=3, edge_k=3
+        )
+
+        assert at_2["nodes"] == 1
+        assert at_3["nodes"] == 0
+
+    @pytest.mark.asyncio
+    async def test_the_vote_histogram_is_printed_before_the_scores(self, monkeypatch, capsys):
+        doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
+        draws = [([doru], [], 0), ([doru], [], 0), ([], [], 0)]
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _sampling_extractor(draws))
+
+        await extract_canon.run("Chapter 3", "ch3", None, None, samples=3, node_k=1, edge_k=1)
+
+        out = capsys.readouterr().out
+        assert "nodes  by votes: 2:1" in out
+        assert "edges  by votes:" in out
+        assert out.index("by votes") < out.index("node recall"), "histogram comes first"
+
+    @pytest.mark.asyncio
+    async def test_no_histogram_is_printed_for_a_single_sample(self, monkeypatch, capsys):
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
+
+        await extract_canon.run("Chapter 3", None, None, None)
+
+        assert "by votes" not in capsys.readouterr().out
+
+    @pytest.mark.asyncio
+    async def test_the_run_object_records_how_the_vote_was_run(self, monkeypatch, tmp_path):
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 3)
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=2, edge_k=3
+        )
+
+        run = json.loads(out_path.read_text())["run"]
+        assert run["samples"] == 3
+        assert run["node_k"] == 2
+        assert run["edge_k"] == 3
+        assert run["seeds"] == [EXTRACTION_SEED, EXTRACTION_SEED + 1, EXTRACTION_SEED + 2]
+
+    @pytest.mark.asyncio
+    async def test_surviving_candidates_carry_their_vote_count_into_the_artifact(
+        self, monkeypatch, tmp_path
+    ):
+        """Stage 2b weights by it, and it reads the artifact, not stdout."""
+        out_path = tmp_path / "candidates.json"
+        doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([doru], [], 0)] * 3)
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=2, edge_k=2
+        )
+
+        written = json.loads(out_path.read_text())
+        assert [n["votes"] for n in written["nodes"]] == [3]
+
+    def test_the_flags_are_wired_to_the_parser(self, monkeypatch, tmp_path):
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 4)
+        )
+        monkeypatch.setattr(
+            "sys.argv",
+            ["extract_canon.py", "Chapter 3", "--samples", "4", "--node-k", "2",
+             "--edge-k", "3", "-o", str(out_path)],
+        )
+
+        with pytest.raises(SystemExit):
+            extract_canon.main()
+
+        run = json.loads(out_path.read_text())["run"]
+        assert (run["samples"], run["node_k"], run["edge_k"]) == (4, 2, 3)
+
+    @pytest.mark.asyncio
+    async def test_a_k_no_sample_count_can_satisfy_is_called_out(self, monkeypatch, capsys):
+        """k=5 over 3 contributing samples silently empties the run. That must
+        not read as 'the chapter contained nothing'."""
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 3)
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=5, edge_k=5
+        )
+
+        assert "no candidate can reach" in capsys.readouterr().out
+
+
+class TestFailedSamplesAreExcluded:
+    """Section 3: a truncated sample makes every candidate in it look rarer
+    than it is, so it must not become a weaker vote -- it must not vote."""
+
+    def _draws(self):
+        ghost = CandidateNode(name="Ghost", entity_type="NPC", section_index=0)
+        doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
+        return [
+            ([doru], [], 0),
+            ([doru, ghost], [], 2),  # this sample lost 2 calls
+            ([doru, ghost], [], 0),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_sample_casts_no_vote(self, monkeypatch, tmp_path):
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=2, edge_k=2
+        )
+
+        written = json.loads(out_path.read_text())
+        names = [n["name"] for n in written["nodes"]]
+        assert names == ["Doru"], "Ghost's two sightings include the excluded sample"
+        assert [n["votes"] for n in written["nodes"]] == [2], (
+            "Doru must not be credited with a vote from the excluded sample"
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_excluded_sample_is_named_on_stdout(self, monkeypatch, capsys):
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=2, edge_k=2
+        )
+
+        out = capsys.readouterr().out
+        assert "sample 2" in out
+        assert "FAILED" in out
+        assert "excluded" in out.lower()
+
+    @pytest.mark.asyncio
+    async def test_the_artifact_records_which_samples_voted(self, monkeypatch, tmp_path):
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=2, edge_k=2
+        )
+
+        run = json.loads(out_path.read_text())["run"]
+        assert run["sample_failures"] == [0, 2, 0]
+        assert run["samples_voting"] == 2
+        assert run["complete"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_single_sample_run_is_not_excluded_by_its_own_failure(
+        self, monkeypatch
+    ):
+        """Present behaviour: a partial single run still writes its candidates,
+        flagged partial. Excluding it would turn a degraded run into an empty
+        one."""
+        doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([doru], [], 2)])
+        )
+
+        summary = await extract_canon.run("Chapter 3", None, None, None)
+
+        assert summary["nodes"] == 1
+        assert summary["failed"] == 2
+
+
+class TestSingleSamplePathIsUntouched:
+    def _draw(self):
+        # A duplicate within the one sample: consensus would collapse it, and
+        # the single-run path must not.
+        doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
+        return [doru, CandidateNode(name="Doru", entity_type="NPC", section_index=0)], [
+            CandidateEdge(
+                source_name="Doru",
+                target_name="Donavich",
+                rel_type="RELATED_TO",
+                section_index=0,
+            )
+        ]
+
+    @pytest.mark.asyncio
+    async def test_samples_1_matches_the_pre_consensus_composition_candidate_for_candidate(
+        self, monkeypatch, tmp_path
+    ):
+        out_path = tmp_path / "candidates.json"
+        nodes, edges = self._draw()
+        chapter = _keyed_chapter()
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [chapter])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([(nodes, edges, 0)])
+        )
+
+        await extract_canon.run("Chapter 3", None, None, out_path)
+
+        # The pipeline as it stood before consensus existed: extract, derive,
+        # merge, anchor -- with no vote in between.
+        sections = split_sections(chapter)
+        derived = structural_edges(
+            sections, nodes, extract_canon.chapter_place(chapter, sections)
+        )
+        expected_nodes, expected_edges, _, _ = anchor_quests(
+            nodes, merge_edges(edges, derived)
+        )
+        written = json.loads(out_path.read_text())
+        assert written["nodes"] == [asdict(n) for n in expected_nodes]
+        assert written["edges"] == [asdict(e) for e in expected_edges]
+
+    @pytest.mark.asyncio
+    async def test_samples_1_neither_deduplicates_nor_stamps_votes(self, monkeypatch, tmp_path):
+        out_path = tmp_path / "candidates.json"
+        nodes, edges = self._draw()
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_keyed_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([(nodes, edges, 0)])
+        )
+
+        await extract_canon.run("Chapter 3", None, None, out_path)
+
+        written = json.loads(out_path.read_text())
+        assert [n["name"] for n in written["nodes"]] == ["Doru", "Doru"]
+        assert {n["votes"] for n in written["nodes"]} == {0}
+
+
+class TestStructuralEdgesAreDerivedAfterTheVote:
+    """The ordering constraint. Derived edges are deterministic given a node
+    set, so voting on them would be voting on one computation five times, and
+    the derived layer would look weakly supported when it is not sampled at
+    all."""
+
+    @pytest.mark.asyncio
+    async def test_derivation_runs_once_over_the_consensus_node_set(self, monkeypatch):
+        calls: list[list[CandidateNode]] = []
+        real = extract_canon.structural_edges
+
+        def spy(sections, nodes, place):
+            calls.append(list(nodes))
+            return real(sections, nodes, place)
+
+        agreed = CandidateNode(name="Rope", entity_type="ITEM", section_index=0)
+        lone = CandidateNode(name="Phantom", entity_type="ITEM", section_index=0)
+        draws = [([agreed, lone], [], 0), ([agreed], [], 0), ([agreed], [], 0)]
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_keyed_chapter()])
+        monkeypatch.setattr(extract_canon, "structural_edges", spy)
+        monkeypatch.setattr(extract_canon, "CandidateExtractor", _sampling_extractor(draws))
+
+        await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=2, edge_k=2
+        )
+
+        assert len(calls) == 1, "one derivation, not one per sample"
+        assert [n.name for n in calls[0]] == ["Rope"], (
+            "a node that lost the vote must not still seed a derived edge"
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_derived_edge_survives_a_k_no_sample_count_could_reach(
+        self, monkeypatch, tmp_path
+    ):
+        """edge_k=5 over 3 samples: any derived edge that had been put through
+        the vote would carry 3 votes and be discarded here."""
+        out_path = tmp_path / "candidates.json"
+        agreed = CandidateNode(name="Rope", entity_type="ITEM", section_index=0)
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_keyed_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([agreed], [], 0)] * 3)
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=3, edge_k=5
+        )
+
+        written = json.loads(out_path.read_text())
+        derived = [e for e in written["edges"] if e["evidence"] == STRUCTURAL_EVIDENCE]
+        assert ("Rope", "LOCATED_IN", "Blood of the Vine Tavern") in [
+            (e["source_name"], e["rel_type"], e["target_name"]) for e in derived
+        ]
+        assert {e["votes"] for e in derived} == {0}, (
+            "0 means never voted on, not 'agreed by nobody'"
+        )
 
 
 class TestDroppedQuestReporting:

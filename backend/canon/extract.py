@@ -127,10 +127,16 @@ class CandidateExtractor:
         model: str | None = None,
         concurrency: int = 6,
         temperature: float = 0.0,
+        seed: int = EXTRACTION_SEED,
     ):
         self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = model or EXTRACTION_MODEL
         self.temperature = temperature
+        # Multi-sample consensus draws sample i with EXTRACTION_SEED + i. Five
+        # draws at one seed would be voting on residual API nondeterminism --
+        # the thing being measured -- rather than on five reads of the passage.
+        # The default keeps a single-sample run identical to the pinned one.
+        self.seed = seed
         self._semaphore = asyncio.Semaphore(concurrency)
         # Nodes dropped by the entity_type filter in `_parse` -- see section 1
         # of the task-9 brief. Surfaced by the CLI, never dropped silently.
@@ -156,7 +162,7 @@ class CandidateExtractor:
                     messages=[{"role": "user", "content": _prompt(unit, layer)}],
                     response_format={"type": "json_object"},
                     temperature=self.temperature,
-                    seed=EXTRACTION_SEED,
+                    seed=self.seed,
                 )
             payload = json.loads(response.choices[0].message.content or "{}")
         except Exception as exc:  # one unit must not abort a chapter

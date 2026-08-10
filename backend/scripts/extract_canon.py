@@ -20,7 +20,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
+from backend.canon.consensus import consense, format_votes, vote_histograms
 from backend.canon.extract import (
+    EXTRACTION_MODEL,
     EXTRACTION_SEED,
     CandidateExtractor,
     anchor_quests,
@@ -139,6 +141,9 @@ async def run(
     layers: list[Layer] | None,
     out_path: Path | None,
     limit: int | None = None,
+    samples: int = 1,
+    node_k: int = 1,
+    edge_k: int = 1,
 ) -> dict:
     # Validated before the paid extraction call below: a bad --grade value
     # must fail fast, not silently score 1.00/1.00 after money is spent.
@@ -155,19 +160,74 @@ async def run(
         units = units[:limit]
     print(f"{chapter.title}: {len(units)} of {units_available} units")
 
-    extractor = CandidateExtractor()
-    nodes, edges, failed = await extractor.extract_units(units, layers=layers)
+    # Sample i is drawn at EXTRACTION_SEED + i. Five draws at one seed would be
+    # a vote on residual API nondeterminism, which is the thing being measured.
+    seeds = [EXTRACTION_SEED + i for i in range(samples)]
+    calls_per_sample = len(units) * len(layers or list(Layer))
+    total_calls = calls_per_sample * samples
+
+    drawn: list[tuple[list, list]] = []
+    sample_failures: list[int] = []
+    rejected_entity_types = 0
+    model = EXTRACTION_MODEL
+    temperature = 0.0
+    for i, seed in enumerate(seeds):
+        extractor = CandidateExtractor(seed=seed)
+        s_nodes, s_edges, s_failed = await extractor.extract_units(units, layers=layers)
+        sample_failures.append(s_failed)
+        rejected_entity_types += extractor.rejected_entity_types
+        model, temperature = extractor.model, extractor.temperature
+        if samples > 1:
+            # A sample with any failed call is dropped from the vote, not
+            # counted weakly: a truncated sample makes every candidate in it
+            # look rarer than it is, which is a false negative dressed as
+            # evidence. Reported per sample so the loss is never silent.
+            if s_failed:
+                print(
+                    f"  !! sample {i + 1} (seed {seed}): {s_failed} of {calls_per_sample} "
+                    "calls FAILED -- excluded from the vote entirely !!"
+                )
+            else:
+                print(
+                    f"  sample {i + 1} (seed {seed}): "
+                    f"{len(s_nodes)} nodes, {len(s_edges)} edges"
+                )
+                drawn.append((s_nodes, s_edges))
+        else:
+            # One sample is not a vote, so there is nothing to exclude it from:
+            # a partial single run still writes its candidates, flagged partial,
+            # exactly as it did before consensus existed.
+            drawn.append((s_nodes, s_edges))
+    failed = sum(sample_failures)
+
+    if samples > 1:
+        node_hist, edge_hist = vote_histograms(drawn)
+        print(f"  nodes  by votes: {format_votes(node_hist)}")
+        print(f"  edges  by votes: {format_votes(edge_hist)}")
+        if max(node_k, edge_k) > len(drawn):
+            print(
+                f"  !! k={max(node_k, edge_k)} over {len(drawn)} voting sample(s): "
+                "no candidate can reach it, so an empty result below means the "
+                "threshold, not the chapter !!"
+            )
+        nodes, edges = consense(drawn, node_k, edge_k)
+    else:
+        nodes, edges = drawn[0]
+
     print(f"  {len(nodes)} candidate nodes, {len(edges)} candidate edges")
-    total_calls = len(units) * len(layers or list(Layer))
     if failed:
         print(
             f"\n  !! {failed} of {total_calls} extraction calls FAILED -- "
             "results below are incomplete, not a low-quality passage !!\n"
         )
-    rejected_entity_types = extractor.rejected_entity_types
     if rejected_entity_types:
         print(f"  rejected {rejected_entity_types} nodes with an unknown entity_type")
 
+    # Derived AFTER the vote and ONCE, from the consensus node set. These edges
+    # are a deterministic function of that set, so sampling them N times yields
+    # N identical copies; voting on them would score one computation five times
+    # and make the one layer that provably cannot hallucinate look like the
+    # weakly-supported one. Their `votes` stays 0, meaning "never voted on".
     derived = structural_edges(sections, nodes, chapter_place(chapter, sections))
     print(f"  {len(derived)} derived structural edges")
     before_dedup = len(edges) + len(derived)
@@ -192,9 +252,18 @@ async def run(
     # this object must be enough to tell a complete run from a partial one.
     run_meta = {
         "chapter": chapter.title,
-        "model": extractor.model,
-        "temperature": extractor.temperature,
+        "model": model,
+        "temperature": temperature,
         "seed": EXTRACTION_SEED,
+        "samples": samples,
+        "seeds": seeds,
+        "node_k": node_k,
+        "edge_k": edge_k,
+        # Per sample, so a reader can tell a 5-sample vote from a 5-sample run
+        # in which two samples were thrown away -- the vote counts below mean
+        # something different in each case.
+        "sample_failures": sample_failures,
+        "samples_voting": len(drawn),
         "layers": [layer.value for layer in (layers or list(Layer))],
         "units": len(units),
         "units_available": units_available,
@@ -227,6 +296,10 @@ async def run(
         "edges": len(edges),
         "units": len(units),
         "failed": failed,
+        "samples": samples,
+        "samples_voting": len(drawn),
+        "node_k": node_k,
+        "edge_k": edge_k,
         "rejected_entity_types": rejected_entity_types,
         "dropped_quests": dropped_quests,
         "dropped_edges": dropped_edges,
@@ -305,12 +378,31 @@ def main() -> None:
     # sections split on the key rather than on `##`.)
     parser.add_argument("--limit", type=int, metavar="N",
                         help="Process only the first N extraction units")
+    # Default 1 keeps the present single-run behaviour, and keeps the money a
+    # run costs proportional to what was asked for.
+    parser.add_argument("--samples", type=int, default=1, metavar="N",
+                        help="Draw N extraction samples (seed EXTRACTION_SEED+i) and vote")
+    # Default 1 is "keep everything the vote saw", NOT a recommended threshold:
+    # the k worth defaulting to is decided from the measured recall/precision
+    # curve, not chosen here.
+    parser.add_argument("--node-k", type=int, default=1, metavar="K",
+                        help="Keep nodes found in at least K samples (default 1: no filtering)")
+    parser.add_argument("--edge-k", type=int, default=1, metavar="K",
+                        help="Keep edges found in at least K samples (default 1: no filtering)")
     args = parser.parse_args()
+
+    if args.samples < 1:
+        parser.error("--samples must be at least 1")
+    if args.node_k < 1 or args.edge_k < 1:
+        parser.error("--node-k and --edge-k must be at least 1")
 
     layers = [Layer(v) for v in args.layers] if args.layers else None
     try:
         summary = asyncio.run(
-            run(args.chapter, args.grade_against, layers, args.out, args.limit)
+            run(
+                args.chapter, args.grade_against, layers, args.out, args.limit,
+                samples=args.samples, node_k=args.node_k, edge_k=args.edge_k,
+            )
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)

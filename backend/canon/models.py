@@ -82,6 +82,10 @@ class CandidateNode:
     # headings occur within a chapter (four "Treasure" sections in Chapter 4,
     # three "Actions" sections in Appendix D). `section_index` is.
     section_index: int = -1
+    # How many distinct extraction samples produced this candidate -- see
+    # `backend.canon.consensus`. 0 means it was never voted on: a single-sample
+    # run, or an edge derived from document structure, which is deterministic.
+    votes: int = 0
 
 
 @dataclass
@@ -96,6 +100,9 @@ class CandidateEdge:
     chapter_slug: str = ""
     section_heading: str = ""
     section_index: int = -1
+    # See CandidateNode.votes. A derived structural edge keeps 0: it is not
+    # voted on, because it is the same deterministic computation every sample.
+    votes: int = 0
 
 
 @dataclass
