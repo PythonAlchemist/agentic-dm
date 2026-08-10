@@ -29,11 +29,14 @@ logger = logging.getLogger(__name__)
 
 EXTRACTION_MODEL = "gpt-4o-mini"
 
-# Fixed so the graded path's variance is small enough for recall to gate a
-# decision -- OpenAI does not guarantee bit-identical output at temperature 0
-# even with a seed pinned, but this removes "sampled at the API's default
-# temperature 1.0" as a source of run-to-run recall swing. A future bulk mode
-# may want to vary temperature deliberately; the graded path must not.
+# Fixed to remove "sampled at the API's default temperature 1.0" as a source of
+# run-to-run recall swing. It does NOT make the graded path stable: measured at
+# temperature 0 with this seed, unique-edge Jaccard between two runs is 0.49
+# while reported recall is identical. Pinning removed the recall swing, not the
+# underlying instability -- recall is simply blind to a ~50% churn in which edges
+# a run produces. Do not read a repeated number as a reproduced edge set; stage
+# 2b should consume multi-sample consensus rather than one run. A future bulk
+# mode may want to vary temperature deliberately; the graded path must not.
 EXTRACTION_SEED = 20260806
 
 _LAYER_GUIDANCE = {
@@ -244,6 +247,26 @@ class CandidateExtractor:
         ]
 
         return nodes, edges
+
+
+def merge_edges(
+    llm_edges: list[CandidateEdge], derived_edges: list[CandidateEdge]
+) -> list[CandidateEdge]:
+    """One edge per `(source_name, target_name, rel_type)`, derived one preferred.
+
+    `structural_edges` deduplicates its own output, but the two lists were merely
+    concatenated, so an LLM spatial edge identical to a derived one shipped twice
+    -- inflating the edge count and handing stage 2b two provenances for one fact.
+
+    The derived edge wins: it carries STRUCTURAL_EVIDENCE and an exact section
+    index, and by construction it cannot have been hallucinated.
+    """
+    by_key: dict[tuple[str, str, str], CandidateEdge] = {}
+    for e in llm_edges:
+        by_key.setdefault((e.source_name, e.target_name, e.rel_type), e)
+    for e in derived_edges:
+        by_key[(e.source_name, e.target_name, e.rel_type)] = e
+    return list(by_key.values())
 
 
 ANCHORING_TYPES = frozenset({"GAVE_QUEST", "OBJECTIVE_AT", "SEEKS", "COMPLETED", "RESOLVES_TO"})

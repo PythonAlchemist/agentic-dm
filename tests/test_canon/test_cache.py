@@ -68,28 +68,18 @@ class TestGetBest:
         """The source PDF repeats every page, and the two transcriptions differ.
 
         Keeping whichever came first discarded better-structured text: chapter 3
-        lost two keyed sections that way. The richer transcript here opens
-        directly on a heading -- no blank line before it -- which a naive
-        "\\n## " substring count misses entirely. A page-number-order or naive
-        length tiebreak would wrongly prefer the poorer transcript below, since
-        it is padded long enough to win on length alone if its one real heading
-        ties the richer page's undercounted total.
+        lost two keyed sections that way. The richer transcript is deliberately
+        the SECOND one here -- with it first, `return candidates[0]` (the exact
+        original bug) still returned the richer page and this test passed while
+        proving nothing. It also opens directly on a heading, no blank line
+        before it, which a naive "\\n## " substring count misses entirely; and
+        the poorer page is padded long enough to win on length alone if its one
+        real heading tied the richer page's undercounted total.
         """
         cache = TranscriptCache(tmp_path)
         cache.put(
             PageTranscript(
                 page_number=80,
-                markdown=(
-                    "## E1. Bildrath's Mercantile\n\nProse.\n\n"
-                    "## E2. Blood on the Vine Tavern\n\nMore."
-                ),
-                image_sha256="a" * 64,
-                model="gpt-4o",
-            )
-        )
-        cache.put(
-            PageTranscript(
-                page_number=81,
                 markdown=(
                     "Some prose with only one heading and no structure otherwise, "
                     "padded long enough that a naive length tiebreak would wrongly "
@@ -99,11 +89,22 @@ class TestGetBest:
                 model="gpt-4o",
             )
         )
+        cache.put(
+            PageTranscript(
+                page_number=81,
+                markdown=(
+                    "## E1. Bildrath's Mercantile\n\nProse.\n\n"
+                    "## E2. Blood on the Vine Tavern\n\nMore."
+                ),
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
 
         best = cache.get_best([80, 81], "a" * 64)
 
         assert best is not None
-        assert best.page_number == 80
+        assert best.page_number == 81
 
     def test_falls_back_to_length_when_structure_ties(self, tmp_path):
         cache = TranscriptCache(tmp_path)

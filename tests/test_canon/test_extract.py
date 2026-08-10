@@ -15,8 +15,10 @@ from backend.canon.extract import (
     CandidateExtractor,
     anchor_quests,
     layer_vocabulary,
+    merge_edges,
 )
 from backend.canon.models import CandidateEdge, CandidateNode, ExtractionUnit
+from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import RELATIONSHIP_GLOSS, Layer, RelationshipType
 
 
@@ -278,6 +280,62 @@ def cand_edge(source: str, target: str, rel_type: str) -> CandidateEdge:
 def quest(name: str) -> CandidateNode:
     """Quests are coined by the narrative pass -- the prompt offers them nowhere else."""
     return cand_node(name, "QUEST", layer="narrative")
+
+
+class TestMergeEdges:
+    """Only derived edges were ever deduplicated; `run()` concatenated the two
+    lists, so an LLM spatial edge identical to a derived one shipped twice."""
+
+    def test_an_llm_edge_identical_to_a_derived_one_ships_once(self):
+        llm = [cand_edge("Donavich", "Church", "LOCATED_IN")]
+        derived = [
+            CandidateEdge(
+                source_name="Donavich",
+                target_name="Church",
+                rel_type="LOCATED_IN",
+                evidence=STRUCTURAL_EVIDENCE,
+                section_index=4,
+            )
+        ]
+
+        merged = merge_edges(llm, derived)
+
+        assert len(merged) == 1
+        assert merged[0].evidence == STRUCTURAL_EVIDENCE, (
+            "the derived edge wins: it carries structural provenance and an exact "
+            "section index, and cannot have been hallucinated"
+        )
+
+    def test_duplicate_llm_edges_collapse_too(self):
+        llm = [
+            cand_edge("Donavich", "Church", "LOCATED_IN"),
+            cand_edge("Donavich", "Church", "LOCATED_IN"),
+        ]
+
+        assert len(merge_edges(llm, [])) == 1
+
+    def test_distinct_edges_are_all_kept(self):
+        llm = [
+            cand_edge("Donavich", "Church", "LOCATED_IN"),
+            cand_edge("Donavich", "Church", "GUARDS"),
+            cand_edge("Doru", "Church", "LOCATED_IN"),
+        ]
+
+        assert len(merge_edges(llm, [])) == 3
+
+    def test_the_llm_edges_own_order_is_preserved(self):
+        llm = [
+            cand_edge("A", "B", "KNOWS"),
+            cand_edge("C", "D", "KNOWS"),
+        ]
+        derived = [
+            CandidateEdge(source_name="A", target_name="B", rel_type="KNOWS",
+                          evidence=STRUCTURAL_EVIDENCE)
+        ]
+
+        merged = merge_edges(llm, derived)
+
+        assert [(e.source_name, e.target_name) for e in merged] == [("A", "B"), ("C", "D")]
 
 
 class TestAnchorQuests:

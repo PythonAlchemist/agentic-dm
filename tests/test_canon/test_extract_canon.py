@@ -5,11 +5,21 @@ A chapter's title is not by itself evidence that it describes a place: chapter
 its title as a containing place would invent one for cards and people. Only a
 chapter with at least one letter-keyed section -- a genuine keyed room -- is
 trusted to be about a physical place.
+
+There is deliberately NO end-to-end "a card-style chapter yields no CONTAINS
+edges" case here. `chapter_place` returns None exactly when no section is keyed,
+and `structural_edges` emits a CONTAINS only for a keyed section, so the two
+guards are logically coupled: any fixture that reaches structural_edges with a
+None place is a fixture where the per-section guard already suppresses CONTAINS
+on its own. The test that used to sit here asserted that composition and passed
+with the `chapter_place` guard deleted, whichever fixture it was given. The
+guard is covered by the two `is None` cases below (both fail when it is deleted)
+and structural_edges' own handling of a None place by
+test_structure.py::TestStructuralEdges::test_no_chapter_place_means_no_contains_edges.
 """
 
 from backend.canon.models import Chapter
 from backend.canon.sections import split_sections
-from backend.canon.structure import structural_edges
 from backend.scripts.extract_canon import chapter_place
 
 
@@ -30,23 +40,6 @@ class TestChapterPlace:
         sections = split_sections(ch1)
 
         assert chapter_place(ch1, sections) is None
-
-    def test_a_card_style_chapter_yields_no_contains_edges(self):
-        """No place means structural_edges must not invent a CONTAINS parent,
-        even when the chapter DOES have a keyed section -- otherwise this only
-        proves the unrelated by-heading None guard (every section is unkeyed),
-        not the chapter_place guard itself. This is the exact anti-fabrication
-        property Task 6 exists for."""
-        ch1 = chapter(
-            "chapter-1-into-the-mists",
-            "Chapter 1: Into the Mists",
-            "## E1. A Keyed Area\n\nBody.",
-        )
-        sections = split_sections(ch1)
-
-        edges = structural_edges(sections, [], None)
-
-        assert [e for e in edges if e.rel_type == "CONTAINS"] == []
 
     def test_a_letter_keyed_chapter_still_has_a_place(self):
         ch3 = chapter(

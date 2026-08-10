@@ -20,7 +20,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
-from backend.canon.extract import EXTRACTION_SEED, CandidateExtractor, anchor_quests
+from backend.canon.extract import (
+    EXTRACTION_SEED,
+    CandidateExtractor,
+    anchor_quests,
+    merge_edges,
+)
 from backend.canon.grade import grade
 from backend.canon.models import Chapter, Section
 from backend.canon.page_extractor import PageExtractor
@@ -165,7 +170,10 @@ async def run(
 
     derived = structural_edges(sections, nodes, chapter_place(chapter, sections))
     print(f"  {len(derived)} derived structural edges")
-    edges = edges + derived
+    before_dedup = len(edges) + len(derived)
+    edges = merge_edges(edges, derived)
+    if before_dedup != len(edges):
+        print(f"  merged {before_dedup - len(edges)} duplicate edges")
 
     # Applied at chapter level, after all three layer passes are merged: a quest
     # coined by the narrative pass may be anchored by an entity the social pass
