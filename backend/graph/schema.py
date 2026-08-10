@@ -146,6 +146,75 @@ LAYER_MAP: dict[RelationshipType, Layer | None] = {
     RelationshipType.OCCURRED_IN: None,
 }
 
+# The entity types a source book can describe. Campaign-runtime types (PC, PLAYER,
+# SESSION, CAMPAIGN) and mechanical ones (CLASS, RACE, RULE, SPELL) are deliberately
+# excluded: canon extraction that proposes them is miscategorizing, not discovering.
+CANON_ENTITY_TYPES: frozenset[EntityType] = frozenset({
+    EntityType.LOCATION,
+    EntityType.NPC,
+    EntityType.MONSTER,
+    EntityType.FACTION,
+    EntityType.ITEM,
+    EntityType.LORE,
+    EntityType.EVENT,
+    EntityType.QUEST,
+    EntityType.SETTING,
+})
+
+# A directional gloss for every relationship type offered to the extraction prompt
+# (i.e. every type in a layer vocabulary -- see `layer_vocabulary`). A bare type
+# name like OWNS does not say which endpoint is the owner; the gloss does. Types
+# outside the three extraction layers (structural/runtime edges) are not glossed --
+# the extractor never offers them, so there is nothing to disambiguate.
+RELATIONSHIP_GLOSS: dict[RelationshipType, str] = {
+    RelationshipType.CONNECTED_TO: "A CONNECTED_TO B - a route or passage joins A and B.",
+    RelationshipType.CONTAINS: (
+        "A CONTAINS B - B sits inside A. A is the larger, containing place."
+    ),
+    RelationshipType.LOCATED_IN: (
+        "A LOCATED_IN B - A sits inside B. B is the larger, containing place."
+    ),
+    RelationshipType.TRAVELED_TO: "A TRAVELED_TO B - A journeyed to B.",
+    RelationshipType.ALLIED_WITH: "A ALLIED_WITH B - A and B are allies.",
+    RelationshipType.ENEMY_OF: "A ENEMY_OF B - A is a standing enemy of B.",
+    RelationshipType.GUARDS: (
+        "A GUARDS B - A keeps B confined, protected, or watched over."
+    ),
+    RelationshipType.HOSTILE_TO: "A HOSTILE_TO B - A is presently hostile toward B.",
+    RelationshipType.KNOWS: "A KNOWS B - A is acquainted with B.",
+    RelationshipType.MEMBER_OF: (
+        "A MEMBER_OF B - A belongs to the group B. B is the group."
+    ),
+    RelationshipType.OWNS: (
+        "A OWNS B - A is the owner or proprietor of B. A is the owner."
+    ),
+    RelationshipType.RELATED_TO: (
+        "A RELATED_TO B - A and B are kin: parent, child, sibling, cousin, uncle, "
+        "nephew. Family ties ONLY."
+    ),
+    RelationshipType.SERVES: (
+        "A SERVES B - A works for or is subordinate to B. B is the master."
+    ),
+    RelationshipType.WIELDS: "A WIELDS B - A carries or uses the item B.",
+    RelationshipType.COMPLETED: "A COMPLETED B - A finished the quest B.",
+    RelationshipType.GAVE_QUEST: (
+        "A GAVE_QUEST B - A asks the party to undertake quest B. A is the giver, "
+        "B is the quest."
+    ),
+    RelationshipType.IDENTITY_OF: (
+        "A IDENTITY_OF B - A and B are the SAME being under two names or two lives: "
+        "a reincarnation, a soul reborn, a secret alias. NOT for family relationships."
+    ),
+    RelationshipType.OBJECTIVE_AT: (
+        "A OBJECTIVE_AT B - quest A is pursued or completed at place B."
+    ),
+    RelationshipType.OPPOSES: "A OPPOSES B - A works against B's goals.",
+    RelationshipType.PREREQUISITE_OF: "A PREREQUISITE_OF B - A must happen before B can.",
+    RelationshipType.RESOLVES_TO: "A RESOLVES_TO B - the outcome of A is B.",
+    RelationshipType.SEEKS: "A SEEKS B - A wants to obtain, reach, or accomplish B.",
+    RelationshipType.THREATENS: "A THREATENS B - A endangers B.",
+}
+
 # Campaign edges of these types SHADOW canon edges of the same type from the same
 # source, rather than adding to them. This is the Tarokka collapse: canon fans out to
 # ten candidate sites, a table's draw resolves it to one.

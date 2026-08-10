@@ -83,15 +83,37 @@ def extractable_subset(data: dict, source: str = DEFAULT_SOURCE) -> dict:
     feeds its extractor: strict-per-source is right if each run sees one chapter's text,
     and under-grades every later run if runs see cumulative text. Deliberately left
     strict until that consumer exists, rather than guessing the semantics here.
+
+    ONE exception to the strictness, and it is not a guess: a node referenced by a kept
+    edge is kept too, whatever its own marker says. A subset that emits an edge but not
+    its endpoint emits an edge nothing can ever match -- `grade` resolves an endpoint id
+    to the names of a node in the same subset, so a missing endpoint yields an empty name
+    set and the edge fails at every looseness. Measured: `ireena-kolyana IDENTITY_OF
+    tatyana` sat in the chapter-3 edge subset while Tatyana (marked ch1) sat outside the
+    node subset, a permanent 4-point floor on edge recall that was read as an extraction
+    failure for four review rounds.
+
+    Keeping the edge and pulling its endpoint in, rather than dropping the edge, because
+    an edge IS the joint assertion that both its ends exist: asking an extractor for
+    `Ireena IDENTITY_OF Tatyana` is asking it to name Tatyana. Dropping the edge instead
+    would silently shrink the key on chapter 3's most plot-central fact -- and would
+    empty the ch1 subset of the entire Tarokka fan-out, which is the only thing that
+    subset grades.
     """
     if source == DEFAULT_SOURCE:
         keep = lambda entry: entry.get(EXTRACTABLE_FROM) is None  # noqa: E731
     else:
         keep = lambda entry: entry.get(EXTRACTABLE_FROM) == source  # noqa: E731
 
+    edges = [e for e in data.get("edges", []) if keep(e)]
+    needed = {n.get("id") for n in data.get("nodes", []) if keep(n)}
+    needed.update(e.get(end) for e in edges for end in ("source", "target"))
+
+    # Filtered from the seed rather than appended, so pulled-in endpoints keep the
+    # order the seed author wrote them in.
     return {
-        "nodes": [n for n in data.get("nodes", []) if keep(n)],
-        "edges": [e for e in data.get("edges", []) if keep(e)],
+        "nodes": [n for n in data.get("nodes", []) if n.get("id") in needed],
+        "edges": edges,
     }
 
 

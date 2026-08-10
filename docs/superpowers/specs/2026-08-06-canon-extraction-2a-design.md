@@ -194,3 +194,112 @@ chunk-page-attribution weakness noted in the stage-0 review is not fixed here ei
 **The narrative layer's failure mode is silent.** Vector search degrades visibly; a graph
 query over 80%-recall narrative edges returns a confident, incomplete answer. This is why
 recall is the number that gates the full run rather than a thing we check afterwards.
+
+---
+
+## Addendum (2026-08-07, task 10) — three things this document states that are no longer true
+
+Recorded here rather than edited in above, so the reasoning that led to each original
+decision stays readable.
+
+**§1's packing was removed (commit `b7d405d`).** There is no token budget and no `pack`
+step: an `ExtractionUnit` is exactly one `Section`, produced by `units_from_sections`.
+Packing saved a few cents across the corpus and cost the ability to say which section a
+candidate came from — which both structural derivation and stage 2b's resolution depend
+on. At gpt-4o-mini prices that is a bad trade. The data-flow diagram's `──► pack ──►
+[ExtractionUnit] (~1,500 tokens each)` should read `──► [ExtractionUnit] (one per
+section)`. The cost valve that shipped instead is `--limit N`.
+
+**§5's bar of 0.9 was unreachable as written, and by construction.** Feeding the golden set
+to itself as a perfect-by-construction candidate set scored 0.78 node / 0.68 edge
+unambiguous recall: four golden nodes and eight golden edges could never be credited,
+because their own exact names are token-subsets of other golden entries (`Vallaki` inside
+`Escort Ireena to Vallaki`). No extractor of any quality could have reached 0.9. Two
+changes followed. Matching is now type-aware — a candidate credits a golden entry only when
+the names match *and* the candidate's `entity_type` equals the type segment of the golden
+id — which removes nearly every collision, since nearly every one was a type collision. And
+`grade` now computes and reports that ceiling next to every score, so a bar can never again
+be set above what the key admits without anyone noticing. Any future bar must be stated
+relative to the ceiling, and a ceiling below 1.0 must be read as a defect in the key.
+
+**A single run's edge set is a ~50% arbitrary draw.** At temperature 0 with the seed pinned,
+unique-edge Jaccard between two runs of the same chapter is 0.49 while the reported recall
+numbers are identical — recall is blind to the churn, because the edges that swap out are
+mostly ones the golden set does not list either way. Stage 2b must therefore consume
+multi-sample consensus (extract N times, keep what recurs) rather than one run's artifact.
+Treating a single artifact as *the* extraction of a chapter would bake in half an arbitrary
+draw, and no recall number computed here would show it.
+
+**Recall alone cannot rank two extractors, and type-awareness did not change that.** The
+type rule above raised the price of a name-only shotgun by roughly the type count and no
+more. Measured: the same ~10-line regex, emitting each scraped name once per `EntityType`
+(one extra loop, 18 copies) and stamping a matching `layer` so `anchor_quests` passes,
+scores node 0.84 / 0.84 and edge 0.72 / 0.48 unambiguous — 0.74 / 0.74 and 0.60 / 0.60 after
+`anchor_quests`. The three-pass pipeline's current numbers are node 0.74 / 0.74 and edge
+0.44 / 0.44 (chapter 3, key-based sections, Task 11). The raw shotgun still wins on all four
+with no LLM; its anchored variant now ties node recall instead of beating it. (The
+0.79 / 0.74 and 0.32 / 0.28 previously quoted here are `55e250d`'s numbers, from a different
+run of a pre-key-sections pipeline; with run-to-run edge Jaccard at 0.40–0.49 they were never
+comparable in principle, and they are superseded.) The reason the shotgun wins is structural:
+recall is monotone in candidate count, so an extra candidate can never revoke a credit
+already earned, and no looseness setting or ambiguity filter changes that. Stage 2b inherits
+this metric and must not use it to choose between two extractors. What would work is a
+precision term, a candidate budget (score per N candidates), or §5's hand-checked fabrication
+sample.
+
+**§5's fabrication gate has now been checked, and it is FAILED — not pending.** 30 of 145 LLM
+edges from a chapter-3 run were hand-read against their own quoted evidence, and roughly
+**half are false as stated**. Nothing is hallucinated in the usual sense: the evidence spans
+are genuine book prose. What is wrong is the relationship attached to them — unsupported or
+inverted — `Castle Ravenloft -OWNS-> Strahd`, `Chapel -LOCATED_IN-> Donavich`,
+`Doru -TRAVELED_TO-> Strahd` off "sent by Strahd". Also in the sample: 2 self-loops, 26 edges
+with a bare generic-noun endpoint, 17 nodes that are bare generic nouns (`Chapel` ×4, `Hall`,
+`Crypts` ×2, `Trapdoor` ×2), and 1 edge with no real evidence. Derived structural edges were
+excluded from the sample; they carried one self-loop of their own
+(`Trapdoor -LOCATED_IN-> Trapdoor`, from an ITEM-typed node naming its own section), fixed in
+`structure.py` in Task 11.
+
+Stage 2b must size its review gate for a **measured ~50% edge error rate**, not for an
+unknown. Recall says the extractor finds the key's entities; it says nothing about whether
+the edges it emits are true, and now there is a number for that.
+
+---
+
+## Addendum (2026-08-10, task 11) — the splitter, and the module §Components forgot
+
+**§1's split rule is no longer `##`.** A heading at *any* level from H1 to H4 whose text
+matches the keyed pattern (`E4. Burgomaster's Mansion`, `K18a. High Tower Shaft`) starts a
+section; an unkeyed `##` still starts a prose section; an unkeyed H1 does not split, because
+the assembler finds chapter boundaries there and running headers land there too. The vision
+transcription assigns heading levels essentially at random — the same keyed room appears as
+H1, H2, H3 and H4 within one chapter (chapter 3: 2/4/8; chapter 4: 39/40/23/1) — so the
+H2-only rule lost roughly 60% of the book's keyed areas silently, as sections that were
+never proposed. Section counts: chapter 3 **21** (was 11), chapter 4 **147** (was 84),
+Appendix D **32** (unchanged). Appendix D is unchanged because **not one of its 88 headings
+is keyed**, which also means appendices get no derived containment at all — a fact 2b should
+not mistake for an extraction failure. The `sections.py` row in §Components should read
+"Chapter markdown → `Section`s on keyed headings at any level and on unkeyed `##`".
+
+**§Components and the data-flow diagram omit `backend/canon/structure.py` entirely**, and it
+is not a minor omission: it now produces the *majority* of chapter 3's edges — **60 derived
+against 120 from the LLM**, where before the splitter change it produced 28. It belongs in
+the table as "Chapter/section hierarchy → `CONTAINS` and `LOCATED_IN` `CandidateEdge`s. Pure,
+no LLM, cannot hallucinate", and in the diagram as a second arrow out of `[Section]` merging
+into the candidate set ahead of `grade.py`. Containment is derived from the *key*, not from
+heading depth: a suffixed key (`E5g`) is contained by its stem's section (`E5`) when one
+exists, falling back to the chapter place.
+
+**Two defects in that module, found by review and fixed (Task 11).** Derived edges were
+deduplicated on `(source_name, target_name, rel_type)` — name text alone — so distinct rooms
+sharing a name silently lost containment: chapter 4's 103 keyed places produced only 100
+`CONTAINS` edges, dropping `K51. Closet`, `K74b. Forgotten Treasure` and `K74f. Empty Cell`,
+and the loss was undetectable downstream because the surviving edge's `section_heading` named
+the *other* room. The key now includes `section_index` (chapter 4: 103 of 103). Separately,
+the `LOCATED_IN` self-loop guard tested only `entity_type == "LOCATION"`, so an ITEM-typed
+`Trapdoor` out of section `E5d. Trapdoor` shipped `Trapdoor -LOCATED_IN-> Trapdoor`; a node
+naming its own section's place is now skipped regardless of type, case-insensitively.
+
+**Not fixed, recorded for 2b.** The splitter's `#{1,4}` upper bound is untested and
+behaviourally inert — the corpus contains no H5/H6 heading. And a mistyped node still yields
+one false derived containment per chapter-3 run (`Barovia` typed `SETTING`); finer sectioning
+does not cause it, but it enlarges the surface as the corpus scales.

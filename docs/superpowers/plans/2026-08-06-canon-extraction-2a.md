@@ -52,6 +52,9 @@ Layer vocabularies, derived from `LAYER_MAP` (do not hardcode):
 
 **Created:**
 - `backend/canon/sections.py` — `split_sections`, `pack_sections`
+  <!-- SUPERSEDED by commit b7d405d: `pack_sections` was removed. The module
+  exports `split_sections` and `units_from_sections` (one unit per section). -->
+
 - `backend/canon/extract.py` — `CandidateExtractor`, the layer prompts
 - `backend/canon/grade.py` — `grade`, `normalize_name`
 - `backend/scripts/extract_canon.py` — CLI
@@ -78,6 +81,15 @@ Layer vocabularies, derived from `LAYER_MAP` (do not hardcode):
   - `ExtractionUnit(chapter_slug: str, chapter_title: str, headings: list[str], markdown: str, token_count: int)`
   - `split_sections(chapter: Chapter) -> list[Section]`
   - `pack_sections(sections: list[Section], max_tokens: int = 1500) -> list[ExtractionUnit]`
+
+  <!-- SUPERSEDED by commit b7d405d. Packing was removed: an ExtractionUnit is
+  exactly one section, so a candidate's provenance is exact. The shipped shape is
+  `ExtractionUnit(chapter_slug, chapter_title, heading: str, section_index: int,
+  markdown, token_count)` -- singular `heading`, plus `section_index`, which is
+  the only unique key (duplicate H2 headings occur within a chapter: four
+  "Treasure" sections in chapter 4, three "Actions" in Appendix D). The
+  constructor is `units_from_sections(sections) -> list[ExtractionUnit]`. -->
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -215,6 +227,10 @@ class Section:
     index: int
     markdown: str
 
+
+<!-- SUPERSEDED by commit b7d405d: `headings: list[str]` never shipped. The unit
+is one section, so the field is `heading: str`, and `section_index: int` was
+added as the unit's only unique key. -->
 
 @dataclass
 class ExtractionUnit:
@@ -1296,6 +1312,754 @@ the controller decides which evidence matters.
 ```bash
 git add backend/scripts/extract_canon.py tests/test_canon/test_extract_cli.py
 git commit -m "feat(canon): add extraction CLI with golden-set grading"
+```
+
+---
+
+### Task 5: Subset matching, so recall measures extraction rather than naming
+
+**Why this exists.** Task 4's chapter-3 run scored node recall 0.67 and edge recall 0.12,
+and the miss lists show the cause is the matcher, not the extractor. From the unmatched
+candidates:
+
+| Golden expects | Extractor produced | Matched |
+|---|---|---|
+| `Strahd von Zarovich` | `Strahd` (×6) | no |
+| `Church of Barovia` | `Church`, `The Church` | no |
+| `Village of Barovia` | `Barovia` (×6) | no |
+| `Ismark Kolyanovich` | `Ismark` (×3) | no |
+
+`normalize_name` folds case, punctuation, articles and whitespace, then compares for
+**exact equality**, so a shorter form never matches a longer one. The spec set out to avoid
+"recall as a measure of naming luck rather than extraction quality"; the matcher as built
+is that failure. Edge recall is worse because an edge needs both endpoints to match, so
+endpoint failures compound multiplicatively.
+
+**Not in scope here:** two misses are genuine corpus defects — the transcription reads
+`Blood of the Vine Tavern` where the book says "on", and `Morgatha` where it says
+"Morgantha". Those are vision-transcription errors in proper nouns, recorded for stage 2b's
+resolution work. Do not paper over them by making the matcher fuzzy enough to absorb typos;
+that would hide real extraction errors too.
+
+**Files:**
+- Modify: `backend/canon/grade.py`
+- Modify: `tests/test_canon/test_grade.py`
+
+**Interfaces:**
+- Consumes: `CandidateNode`, `CandidateEdge`, `GradeReport` (unchanged)
+- Produces: `names_match(candidate: str, golden: str) -> bool`. `normalize_name` and `grade` keep their signatures.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/test_canon/test_grade.py`:
+
+```python
+class TestSubsetMatching:
+    """A shorter name the passage actually used must match the key's fuller form.
+
+    The extractor writes what the book writes. Chapter 3 says "Strahd" far more
+    often than "Strahd von Zarovich", and grading the former as a miss measures
+    naming convention rather than whether the entity was found.
+    """
+
+    def test_shorter_candidate_matches_longer_golden(self):
+        assert names_match("Strahd", "Strahd von Zarovich")
+        assert names_match("Church", "Church of Barovia")
+        assert names_match("Barovia", "Village of Barovia")
+        assert names_match("Ismark", "Ismark Kolyanovich")
+
+    def test_longer_candidate_matches_shorter_golden(self):
+        """Direction must not matter -- the extractor may be more specific."""
+        assert names_match("Ireena Kolyana", "Ireena")
+
+    def test_articles_are_still_folded(self):
+        assert names_match("The Church", "Church of Barovia")
+
+    def test_unrelated_names_do_not_match(self):
+        assert not names_match("Ismark", "Ireena")
+        assert not names_match("Bildrath", "Parriwimple")
+
+    def test_a_shared_generic_token_is_not_enough(self):
+        """"Village of Barovia" and "Village of Krezk" share a token and are
+        different places. Subset matching must not collapse them."""
+        assert not names_match("Village of Krezk", "Village of Barovia")
+
+    def test_typos_do_not_match(self):
+        """Deliberate: a transcription typo is a real defect, not naming variance.
+
+        Making the matcher fuzzy enough to absorb "Morgatha" -> "Morgantha" would
+        also hide genuine extraction errors.
+        """
+        assert not names_match("Morgatha", "Morgantha")
+        assert not names_match("Blood of the Vine Tavern", "Blood on the Vine Tavern")
+
+
+class TestSubsetMatchingInGrade:
+    def test_recall_counts_a_shorter_candidate(self):
+        g = golden(nodes=[gnode("Strahd von Zarovich")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.node_recall == 1.0
+        assert report.unmatched_nodes == []
+
+    def test_edge_endpoints_use_subset_matching_too(self):
+        g = golden(
+            nodes=[gnode("Strahd von Zarovich"), gnode("Ireena Kolyana")],
+            edges=[gedge("cos:npc:strahd von zarovich", "cos:npc:ireena kolyana", "SEEKS")],
+        )
+        report = grade([], [cedge("Strahd", "Ireena", "SEEKS")], g)
+
+        assert report.edge_recall == 1.0
+
+    def test_an_ambiguous_candidate_is_reported_as_a_collision(self):
+        """If a short name matches two golden entries, that is ambiguity, and the
+        harness must say so rather than silently crediting one."""
+        g = golden(nodes=[gnode("Strahd von Zarovich"), gnode("Strahd Zombie")])
+        report = grade([cnode("Strahd")], [], g)
+
+        assert report.collisions, "an ambiguous candidate must be surfaced"
+```
+
+Add `names_match` to the existing import from `backend.canon.grade`.
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest tests/test_canon/test_grade.py::TestSubsetMatching -v`
+Expected: FAIL with `ImportError: cannot import name 'names_match'`. Capture the output.
+
+- [ ] **Step 3: Implement subset matching**
+
+In `backend/canon/grade.py`, add below `normalize_name`:
+
+```python
+def names_match(candidate: str, golden: str) -> bool:
+    """True when a candidate name refers to the same entity as a golden name.
+
+    Exact folded equality is too strict: the extractor writes what the passage
+    writes, and chapter 3 says "Strahd" far more often than "Strahd von
+    Zarovich". Grading the former as a miss measures naming convention rather
+    than whether the entity was found.
+
+    So one name also matches the other when its tokens are a subset -- "strahd"
+    within "strahd von zarovich", "church" within "church of barovia". Subset,
+    not substring: "Village of Krezk" and "Village of Barovia" share a token but
+    neither contains the other, so they correctly do not match.
+
+    Deliberately NOT fuzzy. A typo like "Morgatha" for "Morgantha" is a real
+    defect -- a transcription error or an extraction error -- and absorbing it
+    here would hide the class of problem this harness exists to surface.
+    """
+    a, b = normalize_name(candidate), normalize_name(golden)
+    if a == b:
+        return True
+    if not a or not b:
+        return False
+
+    a_tokens, b_tokens = set(a.split()), set(b.split())
+    return a_tokens < b_tokens or b_tokens < a_tokens
+```
+
+Then replace exact-equality comparisons in `grade` with `names_match`:
+
+- Node matching: instead of intersecting `candidate_names` with the golden's acceptable
+  set, a golden entry is hit when **any** candidate matches **any** of its acceptable
+  names. Track which candidates were consumed so `unmatched_nodes` stays correct.
+- Edge matching: resolve each golden endpoint id to its acceptable names as now, but
+  compare endpoints with `names_match` rather than set membership.
+- **Ambiguity goes to `collisions`.** If one candidate name matches more than one golden
+  node id, append a line naming the candidate and the ids it matched. This reuses the
+  diagnostic added in the previous fix round and is why that field exists.
+
+Keep `_find_collisions`'s existing golden-vs-golden detection; ambiguous candidates are an
+additional source of collision entries, not a replacement.
+
+- [ ] **Step 4: Run the new tests**
+
+Run: `uv run pytest tests/test_canon/test_grade.py -v`
+Expected: all pass, including the pre-existing tests. If a pre-existing test now fails,
+**report it rather than editing it** — subset matching is a behaviour change and an
+existing assertion contradicting it is information, not an obstacle.
+
+- [ ] **Step 5: Run the whole suite**
+
+Run: `uv run pytest -q`
+Expected: green. Report the count.
+
+- [ ] **Step 6: Re-run chapter 3 and report the new numbers**
+
+```bash
+SP=/private/tmp/claude-501/-Users-csinger-projects-agentic-dm/52a0dd1b-7233-44b1-b4e8-ed61a72765e5/scratchpad
+uv run python -m backend.scripts.extract_canon "Chapter 3" --grade ch3 -o "$SP/ch3-candidates-v2.json"
+```
+
+Report both recall figures, the full miss list, and any collisions, verbatim. **Do not tune
+the extraction prompt** — that decision remains the controller's, and this run exists to
+separate matcher error from extractor error, not to chase a number.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/canon/grade.py tests/test_canon/test_grade.py
+git commit -m "fix(canon): match names by token subset so recall measures extraction"
+```
+
+---
+
+### Task 6: Derive spatial containment from document structure
+
+**Why this exists.** After Task 5 the chapter-3 run reached node recall 0.89 — with both
+remaining misses being known corpus defects, so extraction found every node the corpus can
+support. Edge recall is 0.28, and the breakdown of the 18 remaining misses shows why:
+
+```
+7  LOCATED_IN     <- half the misses, and both types are containment
+2  CONTAINS
+3  SEEKS
+2  THREATENS
+1  each: RELATED_TO, OBJECTIVE_AT, IDENTITY_OF, GUARDS, GAVE_QUEST, CONNECTED_TO
+```
+
+**These are missing for a structural reason, not a prompt one.** A section headed
+`E5. Church` describes Donavich. That Donavich is `LOCATED_IN` the Church is encoded by
+*which section he appears in* — the section's prose never says it. Likewise
+`Village of Barovia CONTAINS Church of Barovia` is the chapter/section hierarchy, not a
+sentence anywhere in the book. Section-level extraction discards that structure and then
+asks a model to infer what the text does not state.
+
+The design consultation predicted spatial extraction would be near-perfect because
+containment is "stated typographically". It is — in the document structure this pipeline
+currently throws away.
+
+So: derive it, rather than asking an LLM for it. Structural derivation is deterministic,
+free, and cannot hallucinate.
+
+**Files:**
+- Create: `backend/canon/structure.py`
+- Create: `tests/test_canon/test_structure.py`
+- Modify: `backend/scripts/extract_canon.py`
+
+**Interfaces:**
+- Consumes: `Section`, `CandidateNode`, `CandidateEdge` (Task 1); `Chapter`
+- Produces:
+  - `place_of_section(section: Section) -> str | None`
+  - `structural_edges(sections: list[Section], nodes: list[CandidateNode], chapter_place: str | None) -> list[CandidateEdge]`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/test_canon/test_structure.py`:
+
+```python
+"""Spatial containment lives in the document hierarchy, not the prose.
+
+A section headed "E5. Church" describes Donavich without ever saying he is in
+the church -- that is encoded by which section he appears in. Deriving those
+edges is deterministic and free; asking an LLM to infer them from prose that
+does not state them is neither.
+"""
+
+from backend.canon.models import CandidateNode, Section
+from backend.canon.structure import place_of_section, structural_edges
+
+
+def section(heading: str, index: int = 0) -> Section:
+    return Section(
+        chapter_slug="chapter-3-the-village-of-barovia",
+        chapter_title="Chapter 3: The Village of Barovia",
+        heading=heading,
+        index=index,
+        markdown=f"## {heading}\n\nBody.",
+    )
+
+
+def node(name: str, entity_type: str = "NPC", heading: str = "") -> CandidateNode:
+    return CandidateNode(
+        name=name,
+        entity_type=entity_type,
+        chapter_slug="chapter-3-the-village-of-barovia",
+        section_heading=heading,
+    )
+
+
+class TestPlaceOfSection:
+    def test_strips_a_keyed_area_prefix(self):
+        assert place_of_section(section("E1. Bildrath's Mercantile")) == "Bildrath's Mercantile"
+        assert place_of_section(section("E5. Church")) == "Church"
+
+    def test_handles_a_lettered_subarea(self):
+        assert place_of_section(section("E5g. Undercroft")) == "Undercroft"
+
+    def test_a_section_without_a_key_is_not_a_place(self):
+        """Prose sections like "Approaching the Village" name no location."""
+        assert place_of_section(section("Approaching the Village")) is None
+        assert place_of_section(section("(preamble)")) is None
+
+    def test_a_bare_number_prefix_also_counts(self):
+        assert place_of_section(section("12. Old Bonegrinder")) == "Old Bonegrinder"
+
+
+class TestStructuralEdges:
+    def test_chapter_place_contains_each_keyed_section(self):
+        sections = [section("E1. Bildrath's Mercantile"), section("E5. Church", 1)]
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        contains = [e for e in edges if e.rel_type == "CONTAINS"]
+        assert {e.target_name for e in contains} == {"Bildrath's Mercantile", "Church"}
+        assert all(e.source_name == "Village of Barovia" for e in contains)
+
+    def test_an_npc_is_located_in_its_section_place(self):
+        sections = [section("E5. Church")]
+        nodes = [node("Donavich", heading="E5. Church")]
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        located = [e for e in edges if e.rel_type == "LOCATED_IN"]
+        assert len(located) == 1
+        assert located[0].source_name == "Donavich"
+        assert located[0].target_name == "Church"
+
+    def test_a_location_node_is_not_located_in_itself(self):
+        sections = [section("E5. Church")]
+        nodes = [node("Church", entity_type="LOCATION", heading="E5. Church")]
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []
+
+    def test_nodes_from_unkeyed_sections_get_no_location(self):
+        sections = [section("Approaching the Village")]
+        nodes = [node("Ismark", heading="Approaching the Village")]
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []
+
+    def test_no_chapter_place_means_no_contains_edges(self):
+        """Appendix D has no containing place; inventing one would be a fabrication."""
+        sections = [section("Baba Lysaga")]
+        edges = structural_edges(sections, [], None)
+
+        assert [e for e in edges if e.rel_type == "CONTAINS"] == []
+
+    def test_derived_edges_are_marked_as_structural(self):
+        sections = [section("E5. Church")]
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert all(e.layer == "spatial" for e in edges)
+        assert all("structure" in e.evidence for e in edges)
+
+    def test_edges_are_deduplicated(self):
+        """Two NPCs in one section must not produce two identical CONTAINS edges."""
+        sections = [section("E5. Church")]
+        nodes = [node("Donavich", heading="E5. Church"),
+                 node("Doru", heading="E5. Church")]
+        edges = structural_edges(sections, nodes, "Village of Barovia")
+
+        seen = [(e.source_name, e.target_name, e.rel_type) for e in edges]
+        assert len(seen) == len(set(seen))
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `uv run pytest tests/test_canon/test_structure.py -v`
+Expected: FAIL with `ModuleNotFoundError: No module named 'backend.canon.structure'`
+
+- [ ] **Step 3: Implement**
+
+Create `backend/canon/structure.py`:
+
+```python
+"""Derive spatial containment from the document hierarchy.
+
+Sourcebooks encode location structure typographically: a keyed area is a section,
+and everything described inside it is there. That relationship is never written as
+a sentence, so an LLM reading one section in isolation cannot state it -- it is in
+the shape of the document, not its prose.
+
+Deriving it is deterministic and free, and unlike extraction it cannot hallucinate:
+every edge here is a restatement of where the text physically sits.
+"""
+
+import re
+
+from backend.canon.models import CandidateEdge, CandidateNode, Section
+
+# "E1. Bildrath's Mercantile", "E5g. Undercroft", "12. Old Bonegrinder"
+_KEYED = re.compile(r"^[A-Z]?\d+[a-z]?\.\s*(.+)$")
+
+STRUCTURAL_EVIDENCE = "derived from document structure"
+
+
+def place_of_section(section: Section) -> str | None:
+    """The place a keyed section names, or None if it names no place.
+
+    Keyed areas carry an identifier prefix; prose sections like "Approaching the
+    Village" do not, and treating those as locations would invent places the book
+    never keys.
+    """
+    match = _KEYED.match(section.heading.strip())
+    return match.group(1).strip() if match else None
+
+
+def structural_edges(
+    sections: list[Section],
+    nodes: list[CandidateNode],
+    chapter_place: str | None,
+) -> list[CandidateEdge]:
+    """Containment implied by the chapter/section hierarchy.
+
+    Two derivations:
+    - the chapter's place CONTAINS each keyed section's place
+    - a non-location entity extracted from a keyed section is LOCATED_IN it
+
+    A chapter with no containing place (an appendix, say) yields no CONTAINS
+    edges: inventing a parent would be a fabrication, which is exactly what this
+    module exists to avoid.
+    """
+    by_heading = {s.heading: place_of_section(s) for s in sections}
+    edges: list[CandidateEdge] = []
+
+    def add(source: str, target: str, rel_type: str) -> None:
+        edges.append(
+            CandidateEdge(
+                source_name=source,
+                target_name=target,
+                rel_type=rel_type,
+                evidence=STRUCTURAL_EVIDENCE,
+                layer="spatial",
+                chapter_slug=sections[0].chapter_slug if sections else "",
+            )
+        )
+
+    if chapter_place:
+        for place in by_heading.values():
+            if place:
+                add(chapter_place, place, "CONTAINS")
+
+    for node in nodes:
+        place = by_heading.get(node.section_heading)
+        if not place:
+            continue
+        # A place is not located in itself, and a section's own location node
+        # names the same place the heading does.
+        if node.entity_type == "LOCATION":
+            continue
+        add(node.name, place, "LOCATED_IN")
+
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[CandidateEdge] = []
+    for edge in edges:
+        key = (edge.source_name, edge.target_name, edge.rel_type)
+        if key not in seen:
+            seen.add(key)
+            unique.append(edge)
+    return unique
+```
+
+- [ ] **Step 4: Run the new tests**
+
+Run: `uv run pytest tests/test_canon/test_structure.py -v`
+Expected: 11 passed
+
+- [ ] **Step 5: Wire it into the CLI**
+
+In `backend/scripts/extract_canon.py`'s `run()`, after the extractor returns and before
+grading, add the derived edges. The chapter's own place is the chapter title with its
+`Chapter N:` prefix removed — `Chapter 3: The Village of Barovia` gives
+`The Village of Barovia`.
+
+```python
+from backend.canon.structure import structural_edges
+
+_CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
+
+
+def chapter_place(chapter: Chapter) -> str | None:
+    """The place a chapter is about, or None if it is not about a place."""
+    stripped = _CHAPTER_PREFIX.sub("", chapter.title).strip()
+    return stripped or None
+```
+
+Call it as `structural_edges(sections, nodes, chapter_place(chapter))` and extend `edges`
+with the result before grading. Print the derived count separately from the extracted
+count, so the two are never conflated in the output.
+
+Note `split_sections` is currently called inside `pack_sections(split_sections(chapter))`;
+you will need the section list itself, so bind it to a name first.
+
+- [ ] **Step 6: Re-run chapter 3**
+
+```bash
+SP=/private/tmp/claude-501/-Users-csinger-projects-agentic-dm/52a0dd1b-7233-44b1-b4e8-ed61a72765e5/scratchpad
+uv run python -m backend.scripts.extract_canon "Chapter 3" --grade ch3 -o "$SP/ch3-candidates-v3.json"
+```
+
+Report both recall figures, the derived-edge count, the full miss list and any collisions,
+verbatim. **Do not tune the extraction prompt.** If edge recall is still low, report which
+relationship types remain missing — that is the useful signal.
+
+- [ ] **Step 7: Run the whole suite and commit**
+
+```bash
+uv run pytest -q
+git add backend/canon/structure.py tests/test_canon/test_structure.py \
+        backend/scripts/extract_canon.py
+git commit -m "feat(canon): derive spatial containment from document structure"
+```
+
+---
+
+### Task 7: Exact provenance, and pick the better of two transcriptions
+
+**Why this exists.** Task 6's run raised edge recall only 0.28 → 0.32, and its diagnosis
+found two upstream causes. Neither is a defect in the structural derivation itself.
+
+**(A) Provenance is wrong for any packed unit.** `CandidateExtractor._parse` stamps every
+node with `unit.headings[0]` — the *first* heading of a packed batch. Chapter 3's third
+unit is `['Roleplaying Ireena', 'E5. Church']`, so Donavich and Doru, extracted from the
+Church section, are attributed to "Roleplaying Ireena". Structural derivation cannot find
+their place, and stage 2b's resolution would inherit the same wrong provenance.
+
+Packing exists to avoid spending a call on a 14-token stub. At `gpt-4o-mini` prices the
+whole corpus is ~500 sections × 3 layers ≈ $0.11, so the optimisation costs far more in
+provenance accuracy than it saves. **One section per extraction unit.**
+
+**(B) The duplicate-page fix silently discarded better transcriptions.** The source PDF
+contains every page twice, and `PageExtractor` now skips repeats by image hash, keeping the
+first. But the two pages of a pair carry *different* transcriptions — the vision model is
+non-deterministic — and the discarded one is sometimes better structured. Chapter 3 lost
+`E1. Bildrath's Mercantile` and `E2. Blood on the Vine Tavern` as sections this way; it now
+has only two keyed sections where it had four.
+
+Both transcriptions are already cached, so choosing the richer one costs nothing.
+
+**Files:**
+- Modify: `backend/canon/cache.py`
+- Modify: `backend/canon/extract.py`
+- Modify: `backend/scripts/extract_canon.py`
+- Modify: `tests/test_canon/test_cache.py`
+- Modify: `tests/test_canon/test_extract.py`
+
+**Interfaces:**
+- Produces: `TranscriptCache.get_best(page_numbers: list[int], sha256: str) -> PageTranscript | None`; `units_from_sections(sections: list[Section]) -> list[ExtractionUnit]` in `backend/canon/sections.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/test_canon/test_extract.py`:
+
+```python
+class TestPerSectionProvenance:
+    @pytest.mark.asyncio
+    async def test_candidates_carry_the_units_own_heading(self):
+        """A unit spans one section, so its heading is unambiguous."""
+        client = make_client(
+            {"nodes": [{"name": "Donavich", "entity_type": "NPC"}], "edges": []}
+        )
+        one_section = ExtractionUnit(
+            chapter_slug="chapter-3-the-village-of-barovia",
+            chapter_title="Chapter 3: The Village of Barovia",
+            headings=["E5. Church"],
+            markdown="## E5. Church\n\nDonavich prays here.",
+            token_count=9,
+        )
+        nodes, _ = await CandidateExtractor(client=client).extract_unit(
+            one_section, Layer.SOCIAL
+        )
+
+        assert nodes[0].section_heading == "E5. Church"
+```
+
+Append to `tests/test_canon/test_sections.py`:
+
+```python
+class TestUnitsFromSections:
+    def test_one_unit_per_section(self):
+        sections = split_sections(
+            chapter("## A\n\nshort.\n\n## B\n\nshort.\n\n## C\n\nshort.")
+        )
+        units = units_from_sections(sections)
+
+        assert [u.headings for u in units] == [["A"], ["B"], ["C"]]
+
+    def test_each_unit_carries_its_own_token_count(self):
+        units = units_from_sections(split_sections(chapter("## A\n\nsome words here.")))
+
+        assert units[0].token_count > 0
+
+    def test_no_section_is_lost(self):
+        sections = split_sections(
+            chapter("".join(f"## S{i}\n\nbody {i}.\n\n" for i in range(6)))
+        )
+        units = units_from_sections(sections)
+
+        assert [u.headings[0] for u in units] == [s.heading for s in sections]
+```
+
+Append to `tests/test_canon/test_cache.py`:
+
+```python
+class TestGetBest:
+    def test_prefers_the_transcript_with_more_structure(self, tmp_path):
+        """The source PDF repeats every page, and the two transcriptions differ.
+
+        Keeping whichever came first discarded better-structured text: chapter 3
+        lost two keyed sections that way.
+        """
+        cache = TranscriptCache(tmp_path)
+        cache.put(
+            PageTranscript(
+                page_number=80,
+                markdown="Some prose with no headings at all.",
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
+        cache.put(
+            PageTranscript(
+                page_number=81,
+                markdown="## E1. Bildrath's Mercantile\n\nProse.\n\n## E2. Tavern\n\nMore.",
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
+
+        best = cache.get_best([80, 81], "a" * 64)
+
+        assert best is not None
+        assert best.page_number == 81
+
+    def test_falls_back_to_length_when_structure_ties(self, tmp_path):
+        cache = TranscriptCache(tmp_path)
+        cache.put(PageTranscript(80, "short", "b" * 64, "gpt-4o"))
+        cache.put(PageTranscript(81, "considerably longer prose here", "b" * 64, "gpt-4o"))
+
+        assert cache.get_best([80, 81], "b" * 64).page_number == 81
+
+    def test_returns_none_when_nothing_is_cached(self, tmp_path):
+        assert TranscriptCache(tmp_path).get_best([1, 2], "c" * 64) is None
+
+    def test_a_single_page_still_works(self, tmp_path):
+        cache = TranscriptCache(tmp_path)
+        cache.put(PageTranscript(5, "body", "d" * 64, "gpt-4o"))
+
+        assert cache.get_best([5], "d" * 64).page_number == 5
+```
+
+Add `units_from_sections` and `ExtractionUnit` to the relevant imports.
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `uv run pytest tests/test_canon/test_cache.py::TestGetBest tests/test_canon/test_sections.py::TestUnitsFromSections -v`
+Expected: FAIL — `get_best` and `units_from_sections` do not exist. Capture the output.
+
+- [ ] **Step 3: Add `get_best` to the cache**
+
+In `backend/canon/cache.py`:
+
+```python
+    def get_best(self, page_numbers: list[int], sha256: str) -> PageTranscript | None:
+        """The richest cached transcript among pages sharing one image.
+
+        The source PDF repeats every page, and because the vision model is
+        non-deterministic the two transcriptions of one image differ. Taking
+        whichever came first discarded structure: chapter 3 lost two keyed
+        sections that way. Prefer more markdown headings, then more text.
+        """
+        candidates = [
+            t for n in page_numbers if (t := self.get(n, sha256)) is not None
+        ]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda t: (t.markdown.count("\n## "), len(t.markdown)),
+        )
+```
+
+- [ ] **Step 4: Add `units_from_sections`**
+
+In `backend/canon/sections.py`:
+
+```python
+def units_from_sections(sections: list[Section]) -> list[ExtractionUnit]:
+    """One extraction unit per section, so a candidate's provenance is exact.
+
+    Packing several sections into one call saves a few cents across the corpus
+    and costs the ability to say which section a candidate came from -- which
+    structural derivation and stage 2b's resolution both depend on. At
+    gpt-4o-mini prices that is a bad trade.
+    """
+    return [
+        ExtractionUnit(
+            chapter_slug=s.chapter_slug,
+            chapter_title=s.chapter_title,
+            headings=[s.heading],
+            markdown=s.markdown,
+            token_count=_count(s.markdown),
+        )
+        for s in sections
+    ]
+```
+
+`pack_sections` stays — it is tested and may be wanted for a cheaper bulk mode — but the
+CLI stops using it. Note that in your report so the final review can decide whether to keep
+it.
+
+<!-- SUPERSEDED by commit b7d405d: the final review decided the other way and
+`pack_sections` was deleted along with its tests. Nothing packs sections now;
+the cheaper bulk mode, if it is ever wanted, starts from `units_from_sections`.
+The try-a-few-first cost valve that shipped instead is `--limit N` (task 10). -->
+
+
+- [ ] **Step 5: Use both in the CLI**
+
+In `backend/scripts/extract_canon.py`:
+- `load_chapters` currently calls `cache.get(page.page_number, page.sha256)` per page. Since
+  `PageExtractor.extract()` now skips duplicates, it only ever sees one page number per
+  image. Change it to extract with `dedup=False`, group page numbers by `sha256` in order,
+  and call `cache.get_best(numbers, sha256)` once per distinct image. The result is one
+  transcript per real page, chosen for richness.
+- Replace `pack_sections(split_sections(chapter))` with `units_from_sections(sections)`.
+
+- [ ] **Step 6: Run the tests**
+
+Run: `uv run pytest tests/test_canon/ -v`
+Expected: all pass. If a pre-existing test fails, report it rather than editing it.
+
+- [ ] **Step 7: Re-check chapter 3's structure, free**
+
+```bash
+uv run python -c "
+from backend.scripts.extract_canon import load_chapters, find_chapter
+from backend.canon.sections import split_sections
+ch3 = find_chapter(load_chapters(), 'Chapter 3')
+for s in split_sections(ch3):
+    print(' ', s.heading)
+"
+```
+
+Expected: more keyed `E<n>.` sections than the two it had. Report the list. If it is still
+two, say so — that would mean the better transcription never had them either, which is a
+different problem.
+
+- [ ] **Step 8: Re-run chapter 3 and report**
+
+```bash
+SP=/private/tmp/claude-501/-Users-csinger-projects-agentic-dm/52a0dd1b-7233-44b1-b4e8-ed61a72765e5/scratchpad
+uv run python -m backend.scripts.extract_canon "Chapter 3" --grade ch3 -o "$SP/ch3-candidates-v4.json"
+```
+
+Report both recall figures, the derived-edge count, and the remaining misses by relationship
+type. **Do not tune the extraction prompt.**
+
+Note recall varies between identical runs — node recall was 0.89 then 0.83 on unchanged
+code, because the extractor is non-deterministic. Treat a single run as ±1 node, and do not
+read a small movement as signal.
+
+- [ ] **Step 9: Run the whole suite and commit**
+
+```bash
+uv run pytest -q
+git add backend/canon/cache.py backend/canon/sections.py backend/canon/extract.py \
+        backend/scripts/extract_canon.py tests/test_canon/test_cache.py \
+        tests/test_canon/test_sections.py tests/test_canon/test_extract.py
+git commit -m "fix(canon): exact per-section provenance, and prefer the richer transcript"
 ```
 
 ---

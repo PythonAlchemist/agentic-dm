@@ -61,3 +61,95 @@ class TestTranscriptCache:
         )
 
         assert cache.get(7, "c" * 64) is None
+
+
+class TestGetBest:
+    def test_prefers_the_transcript_with_more_structure(self, tmp_path):
+        """The source PDF repeats every page, and the two transcriptions differ.
+
+        Keeping whichever came first discarded better-structured text: chapter 3
+        lost two keyed sections that way. The richer transcript is deliberately
+        the SECOND one here -- with it first, `return candidates[0]` (the exact
+        original bug) still returned the richer page and this test passed while
+        proving nothing. It also opens directly on a heading, no blank line
+        before it, which a naive "\\n## " substring count misses entirely; and
+        the poorer page is padded long enough to win on length alone if its one
+        real heading tied the richer page's undercounted total.
+        """
+        cache = TranscriptCache(tmp_path)
+        cache.put(
+            PageTranscript(
+                page_number=80,
+                markdown=(
+                    "Some prose with only one heading and no structure otherwise, "
+                    "padded long enough that a naive length tiebreak would wrongly "
+                    "prefer it.\n\n## E1. Only Heading\n\n" + ("filler " * 20)
+                ),
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
+        cache.put(
+            PageTranscript(
+                page_number=81,
+                markdown=(
+                    "## E1. Bildrath's Mercantile\n\nProse.\n\n"
+                    "## E2. Blood on the Vine Tavern\n\nMore."
+                ),
+                image_sha256="a" * 64,
+                model="gpt-4o",
+            )
+        )
+
+        best = cache.get_best([80, 81], "a" * 64)
+
+        assert best is not None
+        assert best.page_number == 81
+
+    def test_falls_back_to_length_when_structure_ties(self, tmp_path):
+        cache = TranscriptCache(tmp_path)
+        cache.put(PageTranscript(80, "short", "b" * 64, "gpt-4o"))
+        cache.put(PageTranscript(81, "considerably longer prose here", "b" * 64, "gpt-4o"))
+
+        assert cache.get_best([80, 81], "b" * 64).page_number == 81
+
+    def test_returns_none_when_nothing_is_cached(self, tmp_path):
+        assert TranscriptCache(tmp_path).get_best([1, 2], "c" * 64) is None
+
+    def test_a_single_page_still_works(self, tmp_path):
+        cache = TranscriptCache(tmp_path)
+        cache.put(PageTranscript(5, "body", "d" * 64, "gpt-4o"))
+
+        assert cache.get_best([5], "d" * 64).page_number == 5
+
+    def test_headings_inside_a_fenced_code_block_do_not_count(self, tmp_path):
+        """A `##` inside a fenced code block is example text, not a real heading.
+
+        Page 80 has one genuine heading plus two `##` lines fenced off as a code
+        sample, padded long enough to win on length if the fenced lines were
+        wrongly counted as structure. Page 81 has two genuine headings and must
+        still win.
+        """
+        cache = TranscriptCache(tmp_path)
+        cache.put(
+            PageTranscript(
+                page_number=80,
+                markdown=(
+                    "## Real Heading\n\nProse before a long example.\n\n"
+                    "```\n## Not a heading\n## Also not a heading\n```\n"
+                    + ("padding " * 20)
+                ),
+                image_sha256="f" * 64,
+                model="gpt-4o",
+            )
+        )
+        cache.put(
+            PageTranscript(
+                page_number=81,
+                markdown="## Real Heading\n\nShort.\n\n## Another Real Heading\n\nShort.",
+                image_sha256="f" * 64,
+                model="gpt-4o",
+            )
+        )
+
+        assert cache.get_best([80, 81], "f" * 64).page_number == 81

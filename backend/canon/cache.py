@@ -1,9 +1,22 @@
 """Content-hash-validated cache for page transcriptions."""
 
 import json
+import re
 from pathlib import Path
 
 from backend.canon.models import PageTranscript
+
+# A real heading starts a line. Counting the substring "\n## " instead misses a
+# heading that opens the document with no preceding newline -- 16 of 200
+# sampled pages do exactly that.
+_HEADING = re.compile(r"(?m)^##\s+")
+# Example markdown inside a fenced code block can itself contain "##"; that is
+# not document structure and must not count as one.
+_FENCE = re.compile(r"```.*?```", re.DOTALL)
+
+
+def _heading_count(markdown: str) -> int:
+    return len(_HEADING.findall(_FENCE.sub("", markdown)))
 
 
 class TranscriptCache:
@@ -43,6 +56,22 @@ class TranscriptCache:
             status="ok",
             input_tokens=meta.get("input_tokens", 0),
             output_tokens=meta.get("output_tokens", 0),
+        )
+
+    def get_best(self, page_numbers: list[int], sha256: str) -> PageTranscript | None:
+        """The richest cached transcript among pages sharing one image.
+
+        The source PDF repeats every page, and because the vision model is
+        non-deterministic the two transcriptions of one image differ. Taking
+        whichever came first discarded structure: chapter 3 lost two keyed
+        sections that way. Prefer more markdown headings, then more text.
+        """
+        candidates = [t for n in page_numbers if (t := self.get(n, sha256)) is not None]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda t: (_heading_count(t.markdown), len(t.markdown)),
         )
 
     def put(self, transcript: PageTranscript) -> None:

@@ -198,7 +198,6 @@ class TestExtractionProvenance:
         subset = extractable_subset(seed_data)
         ids = {n["id"] for n in subset["nodes"]}
 
-        assert "cos:npc:tatyana" not in ids, "Tatyana's own history is chapter 1"
         assert "cos:item:tome-of-strahd" not in ids, "the Tome's sites are chapter 1"
         assert "cos:npc:ireena-kolyana" in ids
         assert "cos:npc:kolyan-indirovich" in ids
@@ -217,10 +216,69 @@ class TestExtractionProvenance:
         assert len(subset["edges"]) < len(seed_data["edges"])
 
     def test_requesting_a_marked_source_returns_only_that_source(self, seed_data):
+        """Only ch1-marked entries, plus the endpoints its own edges reach for --
+        the three sites the Tarokka reading can place the Tome in are chapter-3
+        locations, and a RESOLVES_TO edge that named one of them without offering
+        it as a node could never be matched."""
         ch1 = extractable_subset(seed_data, source="ch1")
-        assert {n["id"] for n in ch1["nodes"]} == {"cos:item:tome-of-strahd", "cos:npc:tatyana"}
+        marked = {n["id"] for n in ch1["nodes"] if n.get("extractable_from") == "ch1"}
+
+        assert marked == {"cos:item:tome-of-strahd", "cos:npc:tatyana"}
         assert all(e["type"] == "RESOLVES_TO" for e in ch1["edges"])
         assert len(ch1["edges"]) == 3
+        assert {n["id"] for n in ch1["nodes"]} - marked == {
+            "cos:location:church-of-barovia",
+            "cos:location:burgomasters-mansion",
+            "cos:location:blood-on-the-vine",
+        }
+
+    def test_no_subset_emits_an_edge_whose_endpoint_it_omits(self, seed_data):
+        """An edge whose endpoint is not in the same subset is unmatchable at any
+        looseness -- `by_id.get()` returns an empty name set, so `any(...)` is
+        unconditionally False. Measured: `ireena-kolyana IDENTITY_OF tatyana` was
+        a permanent 4-point floor on chapter-3 edge recall, read for four review
+        rounds as an extraction failure.
+        """
+        from backend.canon.seed_loader import DEFAULT_SOURCE, EXTRACTABLE_SOURCES
+
+        for source in (DEFAULT_SOURCE, *sorted(EXTRACTABLE_SOURCES)):
+            subset = extractable_subset(seed_data, source)
+            ids = {n["id"] for n in subset["nodes"]}
+            for e in subset["edges"]:
+                assert e["source"] in ids, f"{source}: unmatchable source in {e}"
+                assert e["target"] in ids, f"{source}: unmatchable target in {e}"
+
+    def test_the_identity_edges_endpoint_is_pulled_into_the_chapter_three_subset(
+        self, seed_data
+    ):
+        """Chapter 3 states that Ireena carries Tatyana's soul, so the edge stays
+        in the key -- and an extractor that is asked for the edge is being asked
+        to name both of its ends."""
+        subset = extractable_subset(seed_data)
+
+        assert "cos:npc:tatyana" in {n["id"] for n in subset["nodes"]}
+
+    def test_an_endpoint_is_pulled_in_only_when_an_edge_needs_it(self, seed_data):
+        """The Tome is marked ch1 and no chapter-3 edge touches it, so it stays
+        out. Pulling in must not degrade into ignoring the markers."""
+        subset = extractable_subset(seed_data)
+
+        assert "cos:item:tome-of-strahd" not in {n["id"] for n in subset["nodes"]}
+
+    def test_pulled_in_endpoints_keep_the_seeds_order(self):
+        data = {
+            "nodes": [
+                {"id": "cos:npc:a", "name": "A", "entity_type": "NPC"},
+                {"id": "cos:npc:b", "name": "B", "entity_type": "NPC",
+                 "extractable_from": "ch1"},
+                {"id": "cos:npc:c", "name": "C", "entity_type": "NPC"},
+            ],
+            "edges": [{"source": "cos:npc:a", "target": "cos:npc:b", "type": "KNOWS"}],
+        }
+
+        subset = extractable_subset(data)
+
+        assert [n["id"] for n in subset["nodes"]] == ["cos:npc:a", "cos:npc:b", "cos:npc:c"]
 
     def test_unknown_marker_is_reported(self):
         problems = validate_seed(
