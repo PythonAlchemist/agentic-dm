@@ -1,0 +1,99 @@
+{
+ "batchcomplete": true,
+ "query": {
+  "normalized": [
+   {
+    "fromencoded": false,
+    "from": "carousel",
+    "to": "Carousel"
+   }
+  ],
+  "pages": [
+   {
+    "ns": 0,
+    "title": "Ireena Kolyana",
+    "missing": true
+   },
+   {
+    "pageid": 14858,
+    "ns": 0,
+    "title": "Spectre",
+    "revisions": [
+     {
+      "slots": {
+       "main": {
+        "contentmodel": "wikitext",
+        "contentformat": "text/x-wiki",
+        "content": "#REDIRECT [[Specter]]"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "pageid": 119012,
+    "ns": 0,
+    "title": "Blood of the Vine",
+    "revisions": [
+     {
+      "slots": {
+       "main": {
+        "contentmodel": "wikitext",
+        "contentformat": "text/x-wiki",
+        "content": "{{Building\n| image         = \n| caption       = \n| name          = Blood of the Vine\n| aliases       = Blood O' the Vine<ref name=\"RGVI-p38\">{{Cite book/Ravenloft Gazetteer Volume I|38}}</ref><br/>Blood on the Vine<ref name=\"NW.R\">{{Cite game/Neverwinter: Ravenloft}}</ref>\n| type          = Tavern\n| architecture  = \n| floors        = 2\n| location      = [[Barovia (vilage)|Barovia]], [[Barovia]], [[Domains of Dread]]\n| built         = \n| destroyed     = \n| owner         = [[Alenka]], [[Mirabel (Vistani)|Mirabel]], and [[Sorvia]]\n| staff         = [[Arik Lorensk]]\n| occupants     = \n| services      = Food & Drink<br />Lodging\n| worship       = \n| basicrefs     = <ref name=\"CoS-p45-46\">{{Cite book/Curse of Strahd|45-46}}</ref>\n| ownertable    = \n| stafftable    = \n| histrefs      = \n| pipes         = \n| tankards      = \n| coins         = \n| daggers       = \n| stars         = \n| coinstacks    = \n| skulls        = \n| quality       = \n| price         = \n| volorefs      = \n| usethe        = \n| useon         = \n| inhabitants   = \n| locations     = \n| organizations = \n}}\n'''Blood of the Vine''' was a shoddy tavern in the village of [[Barovia (village)|Barovia]], in the [[Domains of Dread|Domain of Dread]] of the [[Barovia|same name]].<ref name=\"CoS-p45-46\" />\n\n==Structure==\nThis building measured around {{SI|60|sq ft|long=yes}} in total. Outside of it hung a sign bearing the name of the establishment.<ref name=\"CoS-p45-46\" />\n===Interior===\nThe tavern's central lounge contained a blazing hearth.<ref name=\"CoS-p45-46\" /> Every door featured a stout bar that could be swung down to bar it against forceful intrusion. And additionally, its backrooms and upper rooms acted as guestrooms, with chimneys poking out from each of them.<ref name=\"TT.VVtB\" />\n\nThe establishment overall was lacking in luxuries, but felt as comfortable as any home.<ref name=\"TT.VVtB\" />\n\n==Services==\nBefitting its name, this tavern primarily offered its patrons wine. Selling a small glass for a single [[copper piece]] and a pitcher of wine for a single [[silver piece]].<ref name=\"CoS-p45-46\" /> Food on offer included [[ale]], stews, round loaves of dark nut [[bread]], and strong yellow-green [[cheese]]s.<ref name=\"TT.VVtB\" /> These foods were all rather simple and cheap, but thickly spiced compared to most food one would find in Barovia.<ref name=\"RGVI-p38\" />\n\nBeyond food the tavern offered lodgings, though the sale of food outstripped these so much that the owners didn't see fit to call themselves an inn. These were primarily utilized by weary travelers far from home or those who were temporarily apart from their family for whatever reason.<ref name=\"TT.VVtB\" />\n===Atmosphere===\nThe tavern acted as a neutral meeting ground for [[vistani]] to gossip, trade, and pursue hobbies that their family members would disapprove of, such as gambling.<ref name=\"TT.VVtB\" /> Around night time local [[minstrel]]s would make their presence, serenading patrons with tragic ballads.<ref name=\"RGVI-p38\" />\n\n==Inhabitants==\nThe tavern was owned by three vistani sisters named [[Alenka]], [[Mirabel (Vistani)|Mirabel]], and [[Sorvia]]. They all saw to it that visitors paid their tabs. The bar itself was tended by a man named [[Arik Lorensk]].<ref name=\"CoS-p45-46\" />\n\n==History==\nAt some point in the tavern's history a traveler from late-15{{th}} century [[DR]] [[Toril]], [[Volothamp Geddarm]], came barging in after sprinting there on the recommendation of [[Ezmerelda d'Avenir]]. While there he took time to note down aspects of the tavern and its atmosphere before speaking with Arik, who he mistook to be its owner. From Arik the man was regaled with the layout of the domain Barovia, given the names of the many notable locations one could find within it.<ref name=\"TT.VVtB\" />\n\nAfter informing Arik that he had been recommended the tavern by Ezmerelda, he suggested to Volo that he seek out another newcomer, a [[half-elf]] [[bard]] named [[Rictavio]] that resided in the village of [[Vallaki]] across [[Lake Baratok]]. Intrigued by his words, Volo stayed the night and headed out in search of Rictavio the next morning.<ref name=\"TT.VVtB\">{{Cite dragon+/6/Travel Talk: Volo's Visit to Barovia}}</ref>\n\nAt some point a group of adventurers from Toril, who had been helping the [[Harpell]]s track down a missing [[owlbear]], wandered into Barovia and took shelter in the tavern against the hordes of monsters chasing after them. Therein they fought against [[bat]]s, [[giant rat]]s, and a [[skeleton|minotaur skeleton]].<ref>{{Cite game/Idle Champions of the Forgotten Realms}}</ref>\n\n==Appendix==\n===Appearances===\n{{Appearances\n|adventures = ''[[Curse of Strahd]]''\n|video games = {{DDOapp|MoR}};{{NWapp|Ravenloft}};''[[Idle Champions of the Forgotten Realms]]''\n}}\n\n===References===\n{{Refs}}\n[[Category:Taverns]]\n[[Category:Locations in Barovia (village)]]\n[[Category:Locations in Barovia]]\n[[Category:Locations in the Domains of Dread]]"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "pageid": 119013,
+    "ns": 0,
+    "title": "Arik Lorensk",
+    "revisions": [
+     {
+      "slots": {
+       "main": {
+        "contentmodel": "wikitext",
+        "contentformat": "text/x-wiki",
+        "content": "{{DEFAULTSORT:Lorensk, Arik}}\n{{Person\n| image          = Arik Lorensk.jpg\n| caption        = \n| name           = Arik Lorensk\n| alt_spelling   = \n| titles         = \n| aliases        = \n| nicknames      = \n| true name      = \n| home           = [[Barovia (vilage)|Barovia]], [[Barovia]], [[Domains of Dread]]\n| formerhomes    = \n| sex            = Male\n| gender         = \n| race           = [[Human]]\n| ethnicity      = \n| occupation     = Barkeeper\n| age            = \n| patron deity   = \n| languages      = \n| basicrefs      = <ref name=\"CoS-p45-46\">{{Cite book/Curse of Strahd|45-46}}</ref>\n| reckoning      = \n| dob            = \n| dobnotes       = \n| turned         = \n| turnednotes    = \n| death          = \n| deathnotes     = \n| destroyed      = \n| destroyednotes = \n| daterefs       = \n| parents        = \n| spouses        = \n| siblings       = \n| children       = \n| familyrefs     = \n| dynasty        = \n| start of reign = \n| end of reign   = \n| predecessor    = \n| successor      = \n| successionrefs = \n| alignment1e    = \n| class1e        = \n| refs1e         = \n| alignment2e    = \n| class2e        = \n| refs2e         = \n| alignment3e    = \n| challenge3e    = \n| class3e        = \n| refs3e         = \n| alignment35    = \n| challenge35    = \n| class35        = \n| refs35         = \n| alignment4e    = \n| class4e        = \n| refs4e         = \n| alignment5e    = [[Chaotic neutral]]\n| challenge5e    = 0\n| class5e        = \n| refs5e         = <ref name=\"CoS-p45-46\" /><ref>{{Cite book/Monster Manual 5th edition|345}}</ref><ref group=\"note\" name=\"stats\">''Curse of Strahd'' suggests using the statistics of a commoner from the 5{{th}} edition [[Monster Manual 5th edition|''Monster Manual'']] for Arik.</ref>\n\n}}\n'''Arik Lorensk''' was a [[human]] barkeeper at the [[Blood of the Vine]] tavern in the village of [[Barovia (vilage)|Barovia]].<ref name=\"CoS-p45-46\" />\n\n==Description==\nArik was a short man with a pudgy body. He spoke in a dull, hollow voice,<ref name=\"CoS-p45-46\" /> and looked wary.<ref name=\"TT.VVtB\">{{Cite dragon+/6/Travel Talk: Volo's Visit to Barovia}}</ref>\n\n==Personality==\nArik was quite a quiet man,<ref name=\"TT.VVtB\" /> often ignoring attempts to question him.<ref name=\"CoS-p45-46\" />\n\n==History==\nAt some point in the Blood in the Vine's history, a traveler from late-15{{th}} century [[DR]] [[Toril]] by the name of [[Volothamp Geddarm]] came barging into the tavern, having sprinted there on the recommendation of [[Ezmerelda d'Avenir]]. While there he struck up a conversation with Arik, who he mistook to be its owner. Arik regaled the man with the layout of the domain [[Barovia]], giving him the names of many notable locations one could find within it. And after Volo informed him that the tavern had been recommended by Ezmerelda, Arik suggested that he seek out a [[half-elf]] [[bard]] by the name of [[Rictavio]] on an island in [[Lake Baratok]].<ref name=\"TT.VVtB\" />\n\n==Appendix==\n===Notes===\n{{Notes}}\n===Appearances===\n{{Appearances\n|adventures = ''[[Curse of Strahd]]''\n|video games = {{DDOapp|MoR}};{{NWapp|Ravenloft}}\n}}\n\n===References===\n{{Refs}}\n[[Category:Barkeeps]]\n[[Category:Humans]]\n[[Category:Inhabitants of Barovia (village)]]\n[[Category:Inhabitants of Barovia]]\n[[Category:Inhabitants of the Domains of Dread]]"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "pageid": 124237,
+    "ns": 0,
+    "title": "Carousel",
+    "revisions": [
+     {
+      "slots": {
+       "main": {
+        "contentmodel": "wikitext",
+        "contentformat": "text/x-wiki",
+        "content": "'''Carousels''',<ref name=\"AR\" /> also known as '''merry-go-rounds''',<ref name=\"IRB-p21\">{{Cite book/Inside Ravens Bluff, the Living City|21}}</ref> were a type of amusement ride found in the Realms.<ref name=\"AR\" /><ref name=\"IRB-p21\" /> They were typically constructed by the various [[artificer]]s, [[smith]]s, and tinkerers of the [[Church of Gond]].<ref name=\"AR\">{{Cite web/theedverse/2020-10-12 - Amusement Rides}}</ref>\n[[File:Diana, carnival.png|thumb|290px|''An elabrote carousel in the [[Witchlight Carnival]].'']]\n==History==\nAround [[1375 DR]], [[Noralli|Mistress Norali]] had created an approximation of a carousel in the [[Undermountain]] community of [[Spiderhaven]]. But unlike the carousels of the Gondsmen, which were mechanical in nature, hers utilized relatively benign [[undead]] animals.<ref>{{Cite book/Expedition to Undermountain|116}}</ref>\n\nIn the late 14{{th}} century [[DR]], Father [[Otis Gregor]] of the temple [[Turning Wheel]] in [[Ravens Bluff]], believed that his clergy needed to take a more visible role in their community. To that end he had his clergy construct and maintain children's playgrounds in the parks of Ravens Bluff, which featured carousels.<ref>{{Cite polyhedron/135/City Stories: The Temple of Gond|11}}</ref>\n\n==Notable Users==\n* The [[Jack Mooney & Sons Circus]] had a merry-go-round that was built by the [[gnome]] [[Tarontuttle]] and cost a [[copper piece]] to ride. It notably had a [[pipe organ]] in its center, whose valves were opened and closed by the ride's various cams and levers as its outer ring rotated. Rather than being self-propelled, it was provided motive power by a team of six [[horse]]s attached by spokes and harnesses. Its riding animals were wooden and painted, consisting of [[griffon]]s, [[unicorn]]s, [[pegasi]], and [[dragon]]s. Each of these animals had its own system of wheels, cranks, and cams to make it go up and down as the outer ring platforms rotated. The dragons in particular moved their wings in beat with the pipe organ's music.<ref name=\"IRB-p21\" />\n* Beyond the [[Prime Material]], the [[planes]]-faring [[Witchlight Carnival]] had a carousel. Its riding vehicles were [[magic]]al wooden unicorns that could speak.<ref name=\"WBW-p35\">{{Cite book/The Wild Beyond the Witchlight|35}}</ref>\n\n==Appendix==\n===Appearances===\n{{Appearances\n|adventures = ''[[The Wild Beyond the Witchlight]]''\n|novel refs = ''[[The Abduction]]''\n|comics = ''[[Dungeons & Dragons Annual 2022]]''\n|organized play = ''[[A Day at the Circus]]'';''[[Coming Attractions]]''\n}}\n\n===External Links===\n{{External link disclaimer}}\n* {{Wikipedia external link}}\n===References===\n{{Refs}}\n[[Category:Mechanical devices]]\n[[Category:Items from Toril]]"
+       }
+      }
+     }
+    ]
+   },
+   {
+    "pageid": 166474,
+    "ns": 0,
+    "title": "Wererabbit",
+    "revisions": [
+     {
+      "slots": {
+       "main": {
+        "contentmodel": "wikitext",
+        "contentformat": "text/x-wiki",
+        "content": "{{Creature\n| image        = \n| caption      = \n| name         = Wererabbit\n| othernames   = Werehare<ref name=\"CoS-p102\" />\n| size5e       = \n| type5e       = \n| subtype5e    = \n| alignment5e  = \n| challenge5e  = \n| refs5e       = \n| size4e       = \n| origin4e     = \n| type4e       = \n| subtype4e    = \n| alignment4e  = \n| refs4e       = \n| size3e       = \n| type3e       = \n| subtype3e    = \n| alignment3e  = \n| challenge3e  = \n| refs3e       = \n| size2e       = \n| alignment2e  = \n| refs2e       = \n| size1e       = \n| alignment1e  = \n| refs1e       = \n| patron deity = \n| movement     = \n| vision       = \n| activecycle  = \n| diet         = \n| lifespan     = \n| location     = \n| intelligence = \n| language     = \n| subraces     = \n| climate      = \n| terrain      = \n| genrefs      = \n| height       = \n| length       = \n| wingspan     = \n| weight       = \n| skincolor    = \n| haircolor    = \n| hairstyles   = \n| feathers     = \n| eyecolor     = \n| build        = Humanoid, Leporidae\n| distinctions = \n| appearrefs   = <ref name=\"VRGW-p24\" /><ref name=\"GG\" />\n| first        = \n| based        = \n| histrefs     = \n}}\nA '''wererabbit''' was type of [[lycanthrope]] that could take the form of a [[rabbit]] or a rabbit-like [[humanoid]] hybrid.<ref name=\"VRGW-p24\">{{Cite book/Van Richten's Guide to Werebeasts|24}}</ref><ref name=\"GG\">{{Cite archive/Greenwood's Grotto/2023-08-21/How many kinds of lycanthropes are there?}}</ref> They existed on [[Toril]]<ref name=\"GG\" /> and in the [[Domains of Dread]],<ref name=\"VRGW-p24\" /> though like all lycanthropes derived from prey animals they were very rare.<ref name=\"GG\" />\n\n==History==\nRavenloft's famed monster hunter, [[Rudolph van Richten]], once dismissed the existence of wererabbits in his seminal work ''[[Van Richten's Guide to Werebeasts (in-universe)|Van Richten's Guide to Werebeasts]]''. Therein he stated that they and any other lycanthropes derived from herbivores were merely figments of imagination, born by [[hallucinations]] and drunkards.<ref name=\"VRGW-p24\" /> However, Van Richten himself would later claim to have once encountered in his travels what he referred to as a \"werehare\", a young child that would transform into a rabbit on nights of the full moon.<ref name=\"CoS-p102\">{{Cite book/Curse of Strahd|102}}</ref>\n\n==Appendix==\n===Appearances===\n{{Appearances\n| adventure refs = ''[[Curse of Strahd]]''\n}}\n===References===\n{{Refs}}\n===Connections===\n{{Lycanthropes}}\n[[Category:Lycanthropes]]\n[[Category:Shapechangers]]\n[[Category:Creatures found in the Domains of Dread]]"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ }
+}
