@@ -177,6 +177,37 @@ class TestValidEdgesPass:
 
         assert covered == set(RELATIONSHIP_DOMAIN_RANGE)
 
+    @pytest.mark.parametrize(
+        ("source", "source_type", "rel_type", "target", "target_type"),
+        [
+            ("four wooden chests", "ITEM", "CONTAINS", "500 pp", "ITEM"),
+            ("iron chest", "ITEM", "CONTAINS", "Strahd's family crest", "ITEM"),
+            ("wardrobe", "ITEM", "CONTAINS", "dancing dress", "ITEM"),
+            ("gemstones", "ITEM", "LOCATED_IN", "belt pouches", "ITEM"),
+            ("Burgomaster", "NPC", "LOCATED_IN", "Coffin", "ITEM"),
+        ],
+    )
+    def test_a_container_may_be_an_item(
+        self, source, source_type, rel_type, target, target_type
+    ):
+        """The table's first proposal made every container a LOCATION, and the
+        corpus is full of real treasure-in-a-chest facts it rejected: chapter 4
+        alone has four `Treasure` sections. `LOCATION CONTAINS ITEM` was already
+        legal, so refusing `ITEM CONTAINS ITEM` asserted that a coin may sit in a
+        room but not in the chest standing in it."""
+        nodes = [node(source, source_type), node(target, target_type)]
+
+        assert check_edges(nodes, [edge(source, rel_type, target)]) == []
+
+    def test_widening_the_container_types_does_not_readmit_a_person(self):
+        """`Chapel LOCATED_IN Donavich` must still fail: an NPC is not a
+        container, however item-like the corpus's keyed rooms are typed."""
+        nodes = [node("Chapel", "LOCATION"), node("Donavich", "NPC")]
+
+        violations = check_edges(nodes, [edge("Chapel", "LOCATED_IN", "Donavich")])
+
+        assert [v.reason for v in violations] == ["range"]
+
     def test_a_whole_valid_chapter_yields_nothing(self):
         """Per-edge cases cannot catch cross-edge contamination -- a name typed
         by one edge's node leaking into another's lookup."""
@@ -250,6 +281,43 @@ class TestTheNineFalseEdges:
         ]
 
         assert [v.edge_index for v in check_edges(nodes, edges)] == [2]
+
+
+# Rows of the table that no golden edge and none of the nine exercise, each
+# pinned by a real candidate edge from the chapter-3 or chapter-4 artifacts.
+# Without these, widening any of these four rows to every canon entity type
+# leaves the whole suite green -- found by mutating the table, not by reading it.
+NEGATIVE_CASES = [
+    # A person is not a container: the treasure is in the room, not in Strahd.
+    ("Strahd von Zarovich", "NPC", "CONTAINS", "300 pp", "ITEM", "domain"),
+    # Lore is not located anywhere; the text about it merely sits in a section.
+    ("Strahd's ancestors", "LORE", "LOCATED_IN", "Hall of Heroes", "LOCATION", "domain"),
+    # An event OCCURS somewhere -- which is a type the extractor is not offered,
+    # so the model reaches for the nearest one it has.
+    ("March of the Dead", "EVENT", "LOCATED_IN", "Cemetery", "LOCATION", "domain"),
+    # People are not property. Strahd SEEKS Ireena; he does not own her.
+    ("Strahd", "NPC", "OWNS", "Ireena Kolyana", "NPC", "range"),
+    ("Morgantha", "NPC", "OWNS", "Lucian Jarov", "NPC", "range"),
+    # RELATED_TO is kin ONLY -- "parent, child, sibling, cousin, uncle, nephew".
+    # Widening it to any agent readmits the group-membership noise MEMBER_OF and
+    # SERVES exist for, and blunts the IDENTITY_OF / RELATED_TO contrast the
+    # glosses were written to fix.
+    ("Barovian witches", "FACTION", "RELATED_TO", "Strahd", "NPC", "domain"),
+    ("Strahd", "NPC", "RELATED_TO", "Barovian witches", "FACTION", "range"),
+]
+
+
+class TestNegativeCasesTheGoldenSetDoesNotReach:
+    @pytest.mark.parametrize(
+        ("source", "source_type", "rel_type", "target", "target_type", "reason"),
+        NEGATIVE_CASES,
+    )
+    def test_it_is_flagged(self, source, source_type, rel_type, target, target_type, reason):
+        nodes = [node(source, source_type), node(target, target_type)]
+
+        violations = check_edges(nodes, [edge(source, rel_type, target)])
+
+        assert [v.reason for v in violations] == [reason]
 
 
 class TestUntypedEndpointsAreUnchecked:

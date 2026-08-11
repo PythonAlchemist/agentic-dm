@@ -223,6 +223,13 @@ _ANIMATE: frozenset[EntityType] = frozenset({EntityType.NPC, EntityType.MONSTER}
 # wielded, contained, or carry a family tie.
 _AGENT: frozenset[EntityType] = _ANIMATE | {EntityType.FACTION}
 _PHYSICAL: frozenset[EntityType] = _ANIMATE | {EntityType.ITEM, EntityType.LOCATION}
+# What one thing can sit inside. A chest is not a place, but a coin is inside it,
+# and `LOCATION CONTAINS ITEM` was already legal -- refusing the item container
+# would say a coin may sit in a room but not in the chest standing in that room.
+# Measured on chapter 4: restricting containers to LOCATION rejected 19 real
+# treasure facts (`four wooden chests CONTAINS 500 pp`) and 18 derived structural
+# edges whose keyed area the extractor happened to type ITEM.
+_CONTAINER: frozenset[EntityType] = frozenset({EntityType.LOCATION, EntityType.ITEM})
 
 # What each relationship's endpoints may be: `(domain, range)`, the domain
 # constraining the SOURCE and the range the TARGET. This makes the direction the
@@ -257,11 +264,8 @@ RELATIONSHIP_DOMAIN_RANGE: dict[
         frozenset({EntityType.LOCATION}),
         frozenset({EntityType.LOCATION}),
     ),
-    RelationshipType.CONTAINS: (frozenset({EntityType.LOCATION}), _PHYSICAL),
-    RelationshipType.LOCATED_IN: (
-        _PHYSICAL | {EntityType.FACTION},
-        frozenset({EntityType.LOCATION}),
-    ),
+    RelationshipType.CONTAINS: (_CONTAINER, _PHYSICAL),
+    RelationshipType.LOCATED_IN: (_PHYSICAL | {EntityType.FACTION}, _CONTAINER),
     RelationshipType.TRAVELED_TO: (_AGENT, frozenset({EntityType.LOCATION})),
     # Social
     RelationshipType.ALLIED_WITH: (_AGENT, _AGENT),
