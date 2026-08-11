@@ -330,7 +330,7 @@ class TestCeilingReporting:
         assert summary["edge_ceiling"] == 1.0
 
 
-def _sampling_extractor(draws, seen_seeds=None, seen_node_args=None):
+def _sampling_extractor(draws, seen_seeds=None, rejected=0):
     """Stands in for CandidateExtractor across N samples.
 
     `draws` is one `(nodes, edges, failed)` per sample, handed out by the seed
@@ -341,7 +341,7 @@ def _sampling_extractor(draws, seen_seeds=None, seen_node_args=None):
         def __init__(self, *a, seed=EXTRACTION_SEED, **kw):
             self.seed = seed
             self.index = seed - EXTRACTION_SEED
-            self.rejected_entity_types = 0
+            self.rejected_entity_types = rejected
             self.model = "fake-model"
             self.temperature = 0.0
             if seen_seeds is not None:
@@ -513,6 +513,26 @@ class TestConsensusInTheCli:
 
         assert "no candidate can reach" in capsys.readouterr().out
 
+    @pytest.mark.asyncio
+    async def test_the_unreachable_k_warning_names_only_the_side_it_applies_to(
+        self, monkeypatch, capsys
+    ):
+        """node_k and edge_k are separate knobs. With node_k=1 and edge_k=5 over
+        3 samples only the edge set is emptied, and a warning that claimed the
+        whole result was empty would overstate."""
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 3)
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=1, edge_k=5
+        )
+
+        out = capsys.readouterr().out
+        assert "edge_k=5 over 3 voting sample(s)" in out
+        assert "node_k" not in out, "node_k=1 is reachable and must not be warned about"
+
 
 class TestFailedSamplesAreExcluded:
     """Section 3: a truncated sample makes every candidate in it look rarer
@@ -578,6 +598,87 @@ class TestFailedSamplesAreExcluded:
         assert run["sample_failures"] == [0, 2, 0]
         assert run["samples_voting"] == 2
         assert run["complete"] is False
+
+    @pytest.mark.asyncio
+    async def test_an_excluded_sample_does_not_block_the_write(self, monkeypatch, tmp_path):
+        """The no-clobber guard asks whether THIS OUTPUT is truncated. After
+        exclusion the candidates came only from clean samples, so refusing to
+        write throws away every paid call in the run -- on chapter 4 that is
+        ~2,205 calls, where one failure somewhere is close to expected."""
+        out_path = tmp_path / "candidates.json"
+        out_path.write_text('{"last": "good output"}')
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=2, edge_k=2
+        )
+
+        written = json.loads(out_path.read_text())
+        assert [n["name"] for n in written["nodes"]] == ["Doru"]
+        assert written["run"]["failed"] == 2, "the failure is still recorded, not hidden"
+        assert written["run"]["complete"] is False
+
+    @pytest.mark.asyncio
+    async def test_every_sample_failing_still_blocks_the_write(self, monkeypatch, tmp_path):
+        """Nothing voted, so the artifact would be empty -- and an empty
+        artifact must not clobber a good one."""
+        out_path = tmp_path / "candidates.json"
+        out_path.write_text('{"last": "good output"}')
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 1)] * 3)
+        )
+
+        summary = await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=1, edge_k=1
+        )
+
+        assert out_path.read_text() == '{"last": "good output"}'
+        assert summary["samples_voting"] == 0
+        assert summary["nodes"] == 0
+
+    @pytest.mark.asyncio
+    async def test_every_sample_failing_writes_a_first_artifact_marked_incomplete(
+        self, monkeypatch, tmp_path
+    ):
+        """With nothing to clobber the artifact is still written, and reading it
+        must be enough to tell it apart from a chapter that was simply quiet."""
+        out_path = tmp_path / "candidates.json"
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 1)] * 3)
+        )
+
+        await extract_canon.run(
+            "Chapter 3", None, None, out_path, samples=3, node_k=1, edge_k=1
+        )
+
+        run = json.loads(out_path.read_text())["run"]
+        assert run["samples_voting"] == 0
+        assert run["complete"] is False
+
+    @pytest.mark.asyncio
+    async def test_rejected_entity_types_are_counted_only_for_voting_samples(
+        self, monkeypatch, capsys
+    ):
+        """A candidate rejected inside an excluded sample never reached the
+        output, so counting it describes candidates this run did not produce."""
+        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(
+            extract_canon,
+            "CandidateExtractor",
+            _sampling_extractor([([], [], 0), ([], [], 1), ([], [], 0)], rejected=4),
+        )
+
+        summary = await extract_canon.run(
+            "Chapter 3", None, None, None, samples=3, node_k=1, edge_k=1
+        )
+
+        assert summary["rejected_entity_types"] == 8, "two voting samples, not three"
+        assert "rejected 8 nodes" in capsys.readouterr().out
 
     @pytest.mark.asyncio
     async def test_a_single_sample_run_is_not_excluded_by_its_own_failure(

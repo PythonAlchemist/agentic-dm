@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
-from backend.canon.consensus import consense, format_votes, vote_histograms
+from backend.canon.consensus import Sample, consense, format_votes, vote_histograms
 from backend.canon.extract import (
     EXTRACTION_MODEL,
     EXTRACTION_SEED,
@@ -166,7 +166,7 @@ async def run(
     calls_per_sample = len(units) * len(layers or list(Layer))
     total_calls = calls_per_sample * samples
 
-    drawn: list[tuple[list, list]] = []
+    drawn: list[Sample] = []
     sample_failures: list[int] = []
     rejected_entity_types = 0
     model = EXTRACTION_MODEL
@@ -175,41 +175,47 @@ async def run(
         extractor = CandidateExtractor(seed=seed)
         s_nodes, s_edges, s_failed = await extractor.extract_units(units, layers=layers)
         sample_failures.append(s_failed)
-        rejected_entity_types += extractor.rejected_entity_types
         model, temperature = extractor.model, extractor.temperature
+        # A sample with any failed call is dropped from the vote, not counted
+        # weakly: a truncated sample makes every candidate in it look rarer than
+        # it is, which is a false negative dressed as evidence. One sample is
+        # not a vote, so there is nothing to exclude it from -- a partial single
+        # run still writes its candidates, flagged partial, exactly as it did
+        # before consensus existed.
+        votes = samples == 1 or s_failed == 0
         if samples > 1:
-            # A sample with any failed call is dropped from the vote, not
-            # counted weakly: a truncated sample makes every candidate in it
-            # look rarer than it is, which is a false negative dressed as
-            # evidence. Reported per sample so the loss is never silent.
-            if s_failed:
-                print(
-                    f"  !! sample {i + 1} (seed {seed}): {s_failed} of {calls_per_sample} "
-                    "calls FAILED -- excluded from the vote entirely !!"
-                )
-            else:
+            if votes:
                 print(
                     f"  sample {i + 1} (seed {seed}): "
                     f"{len(s_nodes)} nodes, {len(s_edges)} edges"
                 )
-                drawn.append((s_nodes, s_edges))
-        else:
-            # One sample is not a vote, so there is nothing to exclude it from:
-            # a partial single run still writes its candidates, flagged partial,
-            # exactly as it did before consensus existed.
+            else:
+                print(
+                    f"  !! sample {i + 1} (seed {seed}): {s_failed} of {calls_per_sample} "
+                    "calls FAILED -- excluded from the vote entirely !!"
+                )
+        if votes:
             drawn.append((s_nodes, s_edges))
+            # Counted only for samples that vote. A rejected candidate in an
+            # excluded sample never reached the output, so reporting it would
+            # describe candidates this run did not produce.
+            rejected_entity_types += extractor.rejected_entity_types
     failed = sum(sample_failures)
 
     if samples > 1:
         node_hist, edge_hist = vote_histograms(drawn)
         print(f"  nodes  by votes: {format_votes(node_hist)}")
         print(f"  edges  by votes: {format_votes(edge_hist)}")
-        if max(node_k, edge_k) > len(drawn):
-            print(
-                f"  !! k={max(node_k, edge_k)} over {len(drawn)} voting sample(s): "
-                "no candidate can reach it, so an empty result below means the "
-                "threshold, not the chapter !!"
-            )
+        # Named per side, because they are separate knobs: node_k=1 with
+        # edge_k=5 over 3 samples empties the edges and leaves the nodes alone,
+        # and a warning that claimed the whole result was empty would overstate.
+        for label, k in (("node_k", node_k), ("edge_k", edge_k)):
+            if k > len(drawn):
+                print(
+                    f"  !! {label}={k} over {len(drawn)} voting sample(s): no candidate "
+                    f"can reach it, so an empty {label[:4]} set below means the threshold, "
+                    "not the chapter !!"
+                )
         nodes, edges = consense(drawn, node_k, edge_k)
     else:
         nodes, edges = drawn[0]
@@ -272,8 +278,19 @@ async def run(
         "complete": failed == 0 and len(units) == units_available,
     }
 
+    # The guard asks whether THIS OUTPUT is truncated, not whether a call failed
+    # somewhere. With `samples > 1` a failed sample is excluded from the vote, so
+    # the candidates below came only from clean samples and are not truncated --
+    # refusing to write them would throw away every paid call in the run to
+    # protect the output from a sample that did not contribute to it. On chapter
+    # 4 (147 units x 3 layers x 5 samples ~= 2,205 calls) at least one failure
+    # somewhere is close to expected, so that refusal would be the normal case.
+    # Every sample failing is different: there is nothing left to write, and an
+    # empty artifact must not clobber a good one.
+    output_truncated = failed > 0 if samples == 1 else not drawn
+
     if out_path:
-        if failed and out_path.exists():
+        if output_truncated and out_path.exists():
             print(
                 f"  NOT writing {out_path}: this run had failures and would "
                 "clobber the last good output"

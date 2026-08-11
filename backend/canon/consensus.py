@@ -14,6 +14,17 @@ Only LLM candidates are voted on. Structural edges (`backend.canon.structure`)
 are derived deterministically from a node set, so running them N times would
 produce N identical copies -- voting on that measures nothing. The caller
 derives them ONCE, from the consensus node set, after this module has run.
+
+DUPLICATE SEMANTICS DIFFER BY FLAG, and a consumer of the candidate artifact
+has to know which it is holding. `--samples 1` bypasses this module entirely,
+so the artifact carries within-section duplicates exactly as the three layer
+passes emitted them -- one entity named by all three passes appears three
+times, with `votes: 0`. `--samples N` (N > 1) routes through `consense`, which
+collapses each `node_key`/`edge_key` to ONE record carrying its vote count. So
+a 5-sample chapter-3 run yields 166 distinct nodes where a single run yields
+246 rows over the same entities. Anything downstream that counts candidates,
+or that assumes it must deduplicate, must read `run.samples` in the artifact
+rather than infer the shape from the rows.
 """
 
 from collections.abc import Callable, Iterable
