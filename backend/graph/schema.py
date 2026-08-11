@@ -215,6 +215,96 @@ RELATIONSHIP_GLOSS: dict[RelationshipType, str] = {
     RelationshipType.THREATENS: "A THREATENS B - A endangers B.",
 }
 
+# Shorthands for the domain/range table below. Named for what they have in
+# common rather than enumerated at each use, so widening "what can act" is one
+# edit rather than twelve.
+_ANIMATE: frozenset[EntityType] = frozenset({EntityType.NPC, EntityType.MONSTER})
+# A FACTION acts, but has no body: it can ally, own and threaten, but cannot be
+# wielded, contained, or carry a family tie.
+_AGENT: frozenset[EntityType] = _ANIMATE | {EntityType.FACTION}
+_PHYSICAL: frozenset[EntityType] = _ANIMATE | {EntityType.ITEM, EntityType.LOCATION}
+# What one thing can sit inside. A chest is not a place, but a coin is inside it,
+# and `LOCATION CONTAINS ITEM` was already legal -- refusing the item container
+# would say a coin may sit in a room but not in the chest standing in that room.
+# Measured on chapter 4: restricting containers to LOCATION rejected 19 real
+# treasure facts (`four wooden chests CONTAINS 500 pp`) and 18 derived structural
+# edges whose keyed area the extractor happened to type ITEM.
+_CONTAINER: frozenset[EntityType] = frozenset({EntityType.LOCATION, EntityType.ITEM})
+
+# What each relationship's endpoints may be: `(domain, range)`, the domain
+# constraining the SOURCE and the range the TARGET. This makes the direction the
+# gloss states machine-checkable -- "A OWNS B - A is the owner" already says an
+# owner is an agent and a possession is not -- at no cost in LLM calls or
+# external sources.
+#
+# Motivating measurement: a hand read of 30 chapter-4 extracted edges found 16
+# false, of which NINE are impossible by type rather than by fact, e.g.
+# `Chapel -LOCATED_IN-> Donavich` (a location inside a priest) and
+# `Guards' Post -GUARDS-> Skeleton` (a room standing watch).
+#
+# Only the types the extractor is offered are constrained -- i.e. exactly the
+# types in a layer vocabulary, the same set RELATIONSHIP_GLOSS covers. Runtime
+# and character-sheet edges are not proposed by any extractor, so a constraint
+# on them would assert an ontology nothing can violate. Tests assert this
+# totality by iterating Layer and layer_vocabulary, so a type added to LAYER_MAP
+# fails until it is given a domain and range.
+#
+# Two entries look wrong until checked against the data:
+# - RELATED_TO is NPC->NPC only. Its gloss is "kin ... Family ties ONLY", and
+#   widening it to _AGENT would blunt the IDENTITY_OF / RELATED_TO contrast the
+#   glosses were written to fix.
+# - RESOLVES_TO has ITEM in its domain. Not a slip: the Tarokka reading resolves
+#   an item to a place, and `tome-of-strahd RESOLVES_TO church-of-barovia` is a
+#   real golden edge.
+RELATIONSHIP_DOMAIN_RANGE: dict[
+    RelationshipType, tuple[frozenset[EntityType], frozenset[EntityType]]
+] = {
+    # Spatial
+    RelationshipType.CONNECTED_TO: (
+        frozenset({EntityType.LOCATION}),
+        frozenset({EntityType.LOCATION}),
+    ),
+    RelationshipType.CONTAINS: (_CONTAINER, _PHYSICAL),
+    RelationshipType.LOCATED_IN: (_PHYSICAL | {EntityType.FACTION}, _CONTAINER),
+    RelationshipType.TRAVELED_TO: (_AGENT, frozenset({EntityType.LOCATION})),
+    # Social
+    RelationshipType.ALLIED_WITH: (_AGENT, _AGENT),
+    RelationshipType.ENEMY_OF: (_AGENT, _AGENT),
+    RelationshipType.GUARDS: (_AGENT, _PHYSICAL),
+    RelationshipType.HOSTILE_TO: (_AGENT, _AGENT),
+    RelationshipType.KNOWS: (_ANIMATE, _ANIMATE),
+    RelationshipType.MEMBER_OF: (_ANIMATE, frozenset({EntityType.FACTION})),
+    RelationshipType.OWNS: (_AGENT, frozenset({EntityType.ITEM, EntityType.LOCATION})),
+    RelationshipType.RELATED_TO: (
+        frozenset({EntityType.NPC}),
+        frozenset({EntityType.NPC}),
+    ),
+    RelationshipType.SERVES: (_ANIMATE, _AGENT),
+    RelationshipType.WIELDS: (_ANIMATE, frozenset({EntityType.ITEM})),
+    # Narrative
+    RelationshipType.COMPLETED: (_AGENT, frozenset({EntityType.QUEST})),
+    RelationshipType.GAVE_QUEST: (_AGENT, frozenset({EntityType.QUEST})),
+    RelationshipType.IDENTITY_OF: (_ANIMATE, _ANIMATE),
+    RelationshipType.OBJECTIVE_AT: (
+        frozenset({EntityType.QUEST}),
+        frozenset({EntityType.LOCATION}),
+    ),
+    RelationshipType.OPPOSES: (_AGENT, _AGENT),
+    RelationshipType.PREREQUISITE_OF: (
+        frozenset({EntityType.QUEST, EntityType.EVENT}),
+        frozenset({EntityType.QUEST, EntityType.EVENT}),
+    ),
+    RelationshipType.RESOLVES_TO: (
+        frozenset({EntityType.ITEM, EntityType.QUEST, EntityType.EVENT}),
+        frozenset({EntityType.LOCATION, EntityType.NPC, EntityType.ITEM}),
+    ),
+    RelationshipType.SEEKS: (
+        _AGENT,
+        _PHYSICAL | {EntityType.QUEST, EntityType.LORE},
+    ),
+    RelationshipType.THREATENS: (_AGENT, _PHYSICAL | {EntityType.FACTION}),
+}
+
 # Campaign edges of these types SHADOW canon edges of the same type from the same
 # source, rather than adding to them. This is the Tarokka collapse: canon fans out to
 # ten candidate sites, a table's draw resolves it to one.

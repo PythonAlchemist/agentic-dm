@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
 from backend.canon.consensus import Sample, consense, format_votes, vote_histograms
+from backend.canon.constraints import enforce, format_report
 from backend.canon.extract import (
     EXTRACTION_MODEL,
     EXTRACTION_SEED,
@@ -144,6 +145,7 @@ async def run(
     samples: int = 1,
     node_k: int = 1,
     edge_k: int = 1,
+    reject_violations: bool = False,
 ) -> dict:
     # Validated before the paid extraction call below: a bad --grade value
     # must fail fast, not silently score 1.00/1.00 after money is spent.
@@ -251,6 +253,15 @@ async def run(
             f"and {dropped_edges} edge(s) with them"
         )
 
+    # Same position as `anchor_quests`, and for the same reason: an endpoint's
+    # type comes from a candidate node, and every node that will exist exists by
+    # here. Reporting by default -- the table is new, and this project has twice
+    # had silent filtering hide a defect for weeks.
+    edges, constraints = enforce(nodes, edges, reject=reject_violations)
+    print(format_report(constraints))
+    if reject_violations and constraints.violations:
+        print(f"  dropped {len(constraints.violations)} type-violating edges")
+
     # Provenance travels WITH the candidates, not just on stdout and the exit
     # code. A first-ever `--out ch4.json` whose run lost 12 of 180 calls to rate
     # limits cannot trip the no-clobber guard below -- there is nothing to
@@ -276,6 +287,16 @@ async def run(
         "total_calls": total_calls,
         "failed": failed,
         "complete": failed == 0 and len(units) == units_available,
+        # Both counts travel with the candidates, and the flag with them: a
+        # consumer cannot otherwise tell an artifact whose violations were
+        # dropped from one whose violations are still in the edge list.
+        "reject_violations": reject_violations,
+        "constraint_violations": len(constraints.violations),
+        "constraint_unchecked": constraints.unchecked,
+        # The evidence for whether an auto-repair pass is worth building. It is
+        # the reason the check records reversals at all, so it travels with the
+        # candidates rather than only across a terminal.
+        "constraint_reversals_would_pass": constraints.reversals_would_pass,
     }
 
     # The guard asks whether THIS OUTPUT is truncated, not whether a call failed
@@ -321,6 +342,9 @@ async def run(
         "dropped_quests": dropped_quests,
         "dropped_edges": dropped_edges,
         "derived_edges": len(derived),
+        "constraint_violations": len(constraints.violations),
+        "constraint_unchecked": constraints.unchecked,
+        "constraint_reversals_would_pass": constraints.reversals_would_pass,
     }
 
     if golden is not None:
@@ -375,13 +399,12 @@ async def run(
     return summary
 
 
-def main() -> None:
-    # No handler is configured anywhere else in this chain, so without this
-    # the extraction warnings logged on a swallowed exception (see extract.py)
-    # depend on logging.lastResort rather than a deliberate, discoverable
-    # configuration.
-    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+def build_parser() -> argparse.ArgumentParser:
+    """Built here rather than inline in `main` so the defaults are testable.
 
+    `--reject-violations` defaulting off is a decision, not an accident, and a
+    test has to be able to see it without spending a paid extraction run.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("chapter", help="Chapter title prefix, e.g. 'Chapter 3'")
     parser.add_argument("--grade", dest="grade_against", metavar="SOURCE",
@@ -406,6 +429,22 @@ def main() -> None:
                         help="Keep nodes found in at least K samples (default 1: no filtering)")
     parser.add_argument("--edge-k", type=int, default=1, metavar="K",
                         help="Keep edges found in at least K samples (default 1: no filtering)")
+    # Off by default: the domain/range table is new and validated against one
+    # chapter's golden set only, so it reports before it is trusted to filter.
+    # The counts are printed and written to the artifact either way.
+    parser.add_argument("--reject-violations", action="store_true",
+                        help="Drop edges violating RELATIONSHIP_DOMAIN_RANGE (default: report)")
+    return parser
+
+
+def main() -> None:
+    # No handler is configured anywhere else in this chain, so without this
+    # the extraction warnings logged on a swallowed exception (see extract.py)
+    # depend on logging.lastResort rather than a deliberate, discoverable
+    # configuration.
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.samples < 1:
@@ -419,6 +458,7 @@ def main() -> None:
             run(
                 args.chapter, args.grade_against, layers, args.out, args.limit,
                 samples=args.samples, node_k=args.node_k, edge_k=args.edge_k,
+                reject_violations=args.reject_violations,
             )
         )
     except ValueError as exc:
