@@ -36,6 +36,7 @@ from backend.canon.classify import (
     offered_options,
     pairs_from_edges,
     parse_types,
+    render_option,
     render_prompt,
     render_types,
 )
@@ -160,6 +161,16 @@ class TestOfferedVocabulary:
         prompt = render_prompt([pair(), pair(a_name="Strahd", b_name="Ireena", b_type="NPC")])
 
         assert prompt.count("- NONE") == 2
+
+    def test_the_answer_form_is_exactly_how_the_option_is_offered(self):
+        """One wire form, not two. A structured triple was tried first and the
+        model packed the whole rendered option into one field instead, which is
+        why validation is an exact match on the string it was shown."""
+        subject = pair(a_type="NPC", b_type="NPC")
+        prompt = render_prompt([subject])
+
+        for source, target, rel in offered_options(subject):
+            assert render_option(source, target, rel) in prompt
 
     def test_options_are_deterministic(self):
         subject = pair(a_type="NPC", b_type="NPC")
@@ -330,10 +341,8 @@ class TestNoLegalRelation:
         first = pair(a_name="Ireena", a_type="NPC", b_name="Ismark", b_type="NPC")
         second = pair(a_name="Barovia", a_type="LOCATION", b_name="Church", b_type="LOCATION")
         client = make_client({"answers": [
-            {"n": 1, "source": "Ireena", "target": "Ismark", "rel_type": "KNOWS",
-             "confidence": "clear"},
-            {"n": 2, "source": "Church", "target": "Barovia", "rel_type": "LOCATED_IN",
-             "confidence": "clear"},
+            {"n": 1, "answer": "Ireena -KNOWS-> Ismark", "confidence": "clear"},
+            {"n": 2, "answer": "Church -LOCATED_IN-> Barovia", "confidence": "clear"},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -347,7 +356,7 @@ class TestNoLegalRelation:
 class TestParsing:
     @pytest.mark.asyncio
     async def test_none_parses_to_empty_endpoints(self):
-        client = make_client({"answers": [{"n": 1, "rel_type": "NONE", "confidence": "unsure"}]})
+        client = make_client({"answers": [{"n": 1, "answer": "NONE", "confidence": "unsure"}]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         decisions = await classifier.classify([pair()])
@@ -366,8 +375,8 @@ class TestParsing:
             for i in range(10)
         ]
         client = make_client({"answers": [
-            {"n": n, "source": f"NPC{n - 1:02d}", "target": f"Town{n - 1:02d}",
-             "rel_type": "TRAVELED_TO", "confidence": "clear"}
+            {"n": n, "answer": f"NPC{n - 1:02d} -TRAVELED_TO-> Town{n - 1:02d}",
+             "confidence": "clear"}
             for n in (1, 2, 3, 5, 7, 9, 10)
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
@@ -405,11 +414,9 @@ class TestParsing:
             pair(a_name="Doru", a_type="NPC", b_name="Barovia", b_type="LOCATION"),
         ]
         client = make_client({"answers": [
-            {"n": 1, "source": "Ismark", "target": "Vallaki", "rel_type": "TRAVELED_TO",
-             "confidence": "clear"},
-            {"n": 2, "rel_type": ["not", "a", "string"]},
-            {"n": 3, "source": "Doru", "target": "Barovia", "rel_type": "LOCATED_IN",
-             "confidence": "implied"},
+            {"n": 1, "answer": "Ismark -TRAVELED_TO-> Vallaki", "confidence": "clear"},
+            {"n": 2, "answer": ["not", "a", "string"]},
+            {"n": 3, "answer": "Doru -LOCATED_IN-> Barovia", "confidence": "implied"},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -425,8 +432,7 @@ class TestParsing:
         """Not a quiet NONE: recording it as a decline would let an answer the
         ontology forbids feed the precision number it was meant to be caught by."""
         client = make_client({"answers": [
-            {"n": 1, "source": "Vallaki", "target": "Ismark", "rel_type": "LOCATED_IN",
-             "confidence": "clear"}
+            {"n": 1, "answer": "Vallaki -LOCATED_IN-> Ismark", "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -438,8 +444,7 @@ class TestParsing:
     @pytest.mark.asyncio
     async def test_an_endpoint_that_was_not_in_the_item_is_a_non_answer(self):
         client = make_client({"answers": [
-            {"n": 1, "source": "Ismark", "target": "Krezk", "rel_type": "TRAVELED_TO",
-             "confidence": "clear"}
+            {"n": 1, "answer": "Ismark -TRAVELED_TO-> Krezk", "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -454,8 +459,7 @@ class TestParsing:
         expressible, since a reversal is one of the diagnosed failures."""
         subject = pair(a_name="Strahd", a_type="NPC", b_name="Vampire Spawn", b_type="MONSTER")
         client = make_client({"answers": [
-            {"n": 1, "source": "Vampire Spawn", "target": "Strahd", "rel_type": "SERVES",
-             "confidence": "clear"}
+            {"n": 1, "answer": "Vampire Spawn -SERVES-> Strahd", "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -466,8 +470,7 @@ class TestParsing:
     @pytest.mark.asyncio
     async def test_endpoint_names_are_matched_case_insensitively(self):
         client = make_client({"answers": [
-            {"n": 1, "source": "ismark", "target": "  VALLAKI ", "rel_type": "traveled_to",
-             "confidence": "Clear"}
+            {"n": 1, "answer": "  ismark   -TRAVELED_TO->  VALLAKI ", "confidence": "Clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -478,8 +481,8 @@ class TestParsing:
     @pytest.mark.asyncio
     async def test_a_duplicated_number_does_not_answer_twice(self):
         client = make_client({"answers": [
-            {"n": 1, "rel_type": "NONE", "confidence": "clear"},
-            {"n": 1, "source": "Ismark", "target": "Vallaki", "rel_type": "TRAVELED_TO"},
+            {"n": 1, "answer": "NONE", "confidence": "clear"},
+            {"n": 1, "answer": "Ismark -TRAVELED_TO-> Vallaki"},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -500,13 +503,81 @@ class TestParsing:
     @pytest.mark.asyncio
     async def test_an_unnumbered_answer_is_ignored_rather_than_positioned(self):
         client = make_client({"answers": [
-            {"source": "Ismark", "target": "Vallaki", "rel_type": "TRAVELED_TO"}
+            {"answer": "Ismark -TRAVELED_TO-> Vallaki"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         (decision,) = await classifier.classify([pair()])
 
         assert decision.rel_type == NO_ANSWER
+
+
+class TestTheThreeKindsOfNonAnswer:
+    """A run problem, a model problem, and the constraint working are three
+    different events that all produce no edge. Summing them into one number
+    would hide which one happened, and the third is not a defect at all."""
+
+    @pytest.mark.asyncio
+    async def test_a_failed_call_is_counted_as_a_call_failure(self):
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(side_effect=RuntimeError("429"))
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([pair()])
+
+        assert (classifier.call_failures, classifier.unanswered, classifier.off_vocabulary) == (
+            1, 0, 0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_skipped_number_is_counted_as_unanswered(self):
+        client = make_client({"answers": []})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([pair()])
+
+        assert (classifier.call_failures, classifier.unanswered, classifier.off_vocabulary) == (
+            0, 1, 0,
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_answer_off_the_offered_list_is_counted_apart(self):
+        """This one is the TYPE CONSTRAINT BITING, not a defect: the model chose
+        a relation the endpoint types forbid and was refused. Its size is the
+        evidence for how much work the constraint does."""
+        client = make_client({"answers": [
+            {"n": 1, "answer": "Vallaki -LOCATED_IN-> Ismark", "confidence": "clear"}
+        ]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([pair()])
+
+        assert (classifier.call_failures, classifier.unanswered, classifier.off_vocabulary) == (
+            0, 0, 1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_failures_is_their_sum(self):
+        client = make_client({"answers": [
+            {"n": 1, "answer": "Vallaki -LOCATED_IN-> Ismark"},
+        ]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([pair(), pair(a_name="Doru"), pair(a_name="Erik")])
+
+        assert classifier.failures == 3
+        assert classifier.failures == (
+            classifier.call_failures + classifier.unanswered + classifier.off_vocabulary
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_decline_is_not_any_kind_of_failure(self):
+        client = make_client({"answers": [{"n": 1, "answer": "NONE"}]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([pair()])
+
+        assert classifier.failures == 0
 
 
 class TestFailureHandling:
@@ -542,8 +613,7 @@ class TestFailureHandling:
     @pytest.mark.asyncio
     async def test_one_failed_batch_leaves_the_others_answered(self):
         good = {"answers": [
-            {"n": n, "source": "Ismark", "target": "Vallaki", "rel_type": "TRAVELED_TO",
-             "confidence": "clear"}
+            {"n": n, "answer": "Ismark -TRAVELED_TO-> Vallaki", "confidence": "clear"}
             for n in range(1, 3)
         ]}
         message = MagicMock()
@@ -582,7 +652,7 @@ class TestBatchingAndCost:
             for i in range(7)
         ]
         client = make_client({"answers": [
-            {"n": n, "rel_type": "NONE", "confidence": "clear"} for n in range(1, 8)
+            {"n": n, "answer": "NONE", "confidence": "clear"} for n in range(1, 8)
         ]})
         classifier = RelationClassifier(client=client, model="test-model", batch_size=3)
 

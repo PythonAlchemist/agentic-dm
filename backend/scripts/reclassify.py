@@ -194,7 +194,11 @@ async def run(
     ]
     split = Counter(outcomes)
 
-    print(f"\n  {classifier.calls} calls, {classifier.failures} pairs with no answer")
+    print(
+        f"\n  {classifier.calls} calls, {classifier.failures} pairs with no answer "
+        f"(call failed {classifier.call_failures}, number skipped {classifier.unanswered}, "
+        f"answered off the offered list {classifier.off_vocabulary})"
+    )
     print("  four-way agreement split:")
     for outcome in (KEPT, FLIPPED, CHANGED, DECLINED, NO_RELATION_LEGAL, FAILED):
         count = split.get(outcome, 0)
@@ -255,6 +259,9 @@ async def run(
         "surviving_llm_edges": len(surviving),
         "calls": classifier.calls,
         "failures": classifier.failures,
+        "call_failures": classifier.call_failures,
+        "unanswered": classifier.unanswered,
+        "off_vocabulary": classifier.off_vocabulary,
         "no_legal_relation": classifier.no_legal_relation,
         "split": dict(split),
         "decline_rate": decline_rate,

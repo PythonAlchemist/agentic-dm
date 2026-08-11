@@ -251,19 +251,37 @@ Report your own confidence with each relationship:
   "unsure"  - you are guessing; prefer NONE
 
 Return JSON with exactly one answer per numbered item, every number answered
-once and no numbers invented:
+once and no numbers invented. Copy the option you choose EXACTLY as it is
+written, without its explanation in brackets:
 {"answers": [
-  {"n": 1, "rel_type": "NONE"},
-  {"n": 2, "source": "<exactly as written>", "target": "<exactly as written>",
-   "rel_type": "<one of that item's options>", "confidence": "clear"}
+  {"n": 1, "answer": "NONE"},
+  {"n": 2, "answer": "Ismark -KNOWS-> Ireena", "confidence": "clear"}
 ]}
 """
+
+
+def render_option(source: str, target: str, rel: RelationshipType) -> str:
+    """The one wire form for an answer: exactly how the option is offered.
+
+    A structured `{source, target, rel_type}` triple was tried first and the
+    model ignored it, packing the whole rendered option into `rel_type` instead
+    -- 8 of 20 pairs unparseable in a smoke run. Asking it to echo the string it
+    was shown is what it does unprompted, and it makes validation an EXACT match
+    against the offered set rather than three fields that can disagree.
+    """
+    return f"{source} -{rel.value}-> {target}"
+
+
+def _fold_option(text: str) -> str:
+    """Whitespace-normalised and case-folded, so an echo with different spacing
+    or casing still has to name an option that was actually offered."""
+    return " ".join(text.split()).casefold()
 
 
 def render_pair(number: int, pair: Pair) -> str:
     """One numbered item, options included. Never mentions any prior typing."""
     options = "\n".join(
-        f"     - {source} -{rel.value}-> {target}   ({RELATIONSHIP_GLOSS[rel]})"
+        f"     - {render_option(source, target, rel)}   ({RELATIONSHIP_GLOSS[rel]})"
         for source, target, rel in offered_options(pair)
     )
     return (
@@ -284,14 +302,26 @@ def render_prompt(batch: list[Pair]) -> str:
 class RelationClassifier:
     """Runs stage B over pairs. Never raises: a bad batch yields non-answers.
 
-    Counters are read after `classify` and belong in any report of its output:
+    Counters are read after `classify` and belong in any report of its output.
+    The three ways a pair can end up without an answer are counted APART,
+    because they mean three different things and only one of them is a defect
+    in the run:
 
-    - `calls` / `input_tokens` / `output_tokens` -- what the run cost.
-    - `failures` -- pairs that got no usable answer. Must be reported next to
-      the decline rate, since both look like "no edge" in the output.
+    - `call_failures` -- the API call for the batch failed. A run problem.
+    - `unanswered` -- the call succeeded but skipped this item's number. A model
+      problem.
+    - `off_vocabulary` -- the model answered with a relation that was not on
+      this item's list. NOT a defect at all: it is the type constraint biting,
+      and its size is evidence for how much work the constraint is doing.
+
+    `failures` is their sum, and is what a report must place next to the decline
+    rate -- both look like "no edge" in the output, and conflating them would
+    let a broken run advertise a precision mechanism it does not have.
+
     - `no_legal_relation` -- pairs the ontology admits nothing for, in either
       direction. Answered `NONE` without a call, and counted separately because
       they are a decision of the TABLE, not of the model.
+    - `calls` / `input_tokens` / `output_tokens` -- what the run cost.
     """
 
     def __init__(
@@ -310,10 +340,17 @@ class RelationClassifier:
         self.batch_size = batch_size
         self._semaphore = asyncio.Semaphore(concurrency)
         self.calls = 0
-        self.failures = 0
+        self.call_failures = 0
+        self.unanswered = 0
+        self.off_vocabulary = 0
         self.no_legal_relation = 0
         self.input_tokens = 0
         self.output_tokens = 0
+
+    @property
+    def failures(self) -> int:
+        """Every pair that got no usable answer, however it got there."""
+        return self.call_failures + self.unanswered + self.off_vocabulary
 
     async def classify(self, pairs: list[Pair]) -> list[Decision]:
         """One decision per pair, in the order the pairs were given."""
@@ -343,7 +380,7 @@ class RelationClassifier:
                 # `_classify_batch` already swallows its own errors, so reaching
                 # here means the task itself died. Charge every pair in it.
                 logger.warning("classification task failed: %s", result)
-                self.failures += len(batch)
+                self.call_failures += len(batch)
                 result = [Decision("", "", NO_ANSWER, "")] * len(batch)
             for (index, _), decision in zip(batch, result, strict=True):
                 decisions[index] = decision
@@ -375,7 +412,7 @@ class RelationClassifier:
             payload = json.loads(response.choices[0].message.content or "{}")
         except Exception as exc:  # one batch must not abort a chapter
             logger.warning("classification failed for %d pairs: %s", len(batch), exc)
-            self.failures += len(batch)
+            self.call_failures += len(batch)
             return [Decision("", "", NO_ANSWER, "")] * len(batch)
 
         return self._parse(payload, batch)
@@ -399,41 +436,36 @@ class RelationClassifier:
             # First answer for a number wins; a duplicate is not a second vote.
             by_number.setdefault(number, answer)
 
-        decisions: list[Decision] = []
-        for position, pair in enumerate(batch, start=1):
-            decision = self._decide(by_number.get(position), pair)
-            if decision.rel_type == NO_ANSWER:
-                self.failures += 1
-            decisions.append(decision)
-        return decisions
+        return [
+            self._decide(by_number.get(position), pair)
+            for position, pair in enumerate(batch, start=1)
+        ]
 
     def _decide(self, answer: dict | None, pair: Pair) -> Decision:
         if answer is None:
             logger.warning("no answer for %s / %s", pair.a_name, pair.b_name)
+            self.unanswered += 1
             return Decision("", "", NO_ANSWER, "")
 
-        rel_type = str(answer.get("rel_type", "") or "").strip().upper()
+        chosen = _fold_option(str(answer.get("answer", "") or ""))
         confidence = str(answer.get("confidence", "") or "").strip().lower()
-        if rel_type == NONE_RELATION:
-            return Decision("", "", NONE_RELATION, confidence)
-        if not rel_type:
-            logger.warning("empty rel_type for %s / %s", pair.a_name, pair.b_name)
+        if not chosen:
+            logger.warning("empty answer for %s / %s", pair.a_name, pair.b_name)
+            self.unanswered += 1
             return Decision("", "", NO_ANSWER, "")
+        if chosen == NONE_RELATION.casefold():
+            return Decision("", "", NONE_RELATION, confidence)
 
-        source = str(answer.get("source", "") or "").strip()
-        target = str(answer.get("target", "") or "").strip()
-        # Matched against the offered options rather than merely against the
-        # table: an answer naming an entity that was not in this item, or a type
-        # that was not on its list, is a non-answer and not a quiet NONE.
+        # Matched EXACTLY against the strings this item offered, so an answer
+        # naming an entity that was not in the item, or a relation that was not
+        # on its list, cannot be accepted and is never recorded as a decline.
         for option_source, option_target, option_rel in offered_options(pair):
-            if (
-                option_rel.value == rel_type
-                and fold_name(option_source) == fold_name(source)
-                and fold_name(option_target) == fold_name(target)
-            ):
+            if _fold_option(render_option(option_source, option_target, option_rel)) == chosen:
                 return Decision(option_source, option_target, option_rel.value, confidence)
 
         logger.warning(
-            "answer %r for %s / %s names no offered option", rel_type, pair.a_name, pair.b_name
+            "answer %r for %s / %s names no offered option",
+            answer.get("answer"), pair.a_name, pair.b_name,
         )
+        self.off_vocabulary += 1
         return Decision("", "", NO_ANSWER, "")
