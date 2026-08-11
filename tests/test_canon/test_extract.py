@@ -145,6 +145,31 @@ class TestExtractUnit:
         assert client.chat.completions.create.call_args.kwargs["temperature"] == 0.7
 
     @pytest.mark.asyncio
+    async def test_the_seed_is_overridable_so_samples_can_differ(self):
+        """Multi-sample consensus draws sample i at EXTRACTION_SEED + i. Voting
+        over five draws at the SAME seed would be voting on residual API
+        nondeterminism -- the very thing being measured -- rather than on five
+        independent reads of the passage."""
+        client = make_client({"nodes": [], "edges": []})
+        await CandidateExtractor(client=client, seed=EXTRACTION_SEED + 3).extract_unit(
+            unit(), Layer.SPATIAL
+        )
+
+        assert client.chat.completions.create.call_args.kwargs["seed"] == EXTRACTION_SEED + 3
+
+    @pytest.mark.asyncio
+    async def test_the_seed_is_reported_on_the_extractor(self):
+        """The run artifact records the seed each sample was drawn with, and it
+        reads it off the extractor rather than recomputing it."""
+        extractor = CandidateExtractor(client=make_client({}), seed=EXTRACTION_SEED + 2)
+
+        assert extractor.seed == EXTRACTION_SEED + 2
+
+    @pytest.mark.asyncio
+    async def test_the_default_seed_is_unchanged(self):
+        assert CandidateExtractor(client=make_client({})).seed == EXTRACTION_SEED
+
+    @pytest.mark.asyncio
     async def test_edges_of_the_wrong_layer_are_dropped(self):
         """A model that ignores its vocabulary must not smuggle in another layer."""
         client = make_client(
