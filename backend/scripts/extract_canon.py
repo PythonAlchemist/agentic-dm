@@ -293,6 +293,10 @@ async def run(
         "reject_violations": reject_violations,
         "constraint_violations": len(constraints.violations),
         "constraint_unchecked": constraints.unchecked,
+        # The evidence for whether an auto-repair pass is worth building. It is
+        # the reason the check records reversals at all, so it travels with the
+        # candidates rather than only across a terminal.
+        "constraint_reversals_would_pass": constraints.reversals_would_pass,
     }
 
     # The guard asks whether THIS OUTPUT is truncated, not whether a call failed
@@ -340,6 +344,7 @@ async def run(
         "derived_edges": len(derived),
         "constraint_violations": len(constraints.violations),
         "constraint_unchecked": constraints.unchecked,
+        "constraint_reversals_would_pass": constraints.reversals_would_pass,
     }
 
     if golden is not None:

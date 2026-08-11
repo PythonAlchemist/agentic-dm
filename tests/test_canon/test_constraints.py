@@ -37,6 +37,7 @@ from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
     CANON_ENTITY_TYPES,
     RELATIONSHIP_DOMAIN_RANGE,
+    EntityType,
     Layer,
     RelationshipType,
 )
@@ -113,6 +114,22 @@ class TestGoldenSet:
 
         assert report.checked == len(edges)
         assert report.unchecked == 0
+
+    def test_both_endpoints_of_every_golden_edge_resolve_to_a_type(self):
+        """`checked` only requires ONE typed endpoint, so it is not enough on its
+        own. A seed edge with a typo'd `target` id would leave that endpoint
+        unknown, still count as checked, and quietly stop exercising that row's
+        range while the zero-violations test stayed green."""
+        nodes, edges = as_candidates(seed())
+        typed = {n.name for n in nodes if n.entity_type in {t.value for t in EntityType}}
+
+        unresolved = sorted(
+            f"{e.source_name} -{e.rel_type}-> {e.target_name}"
+            for e in edges
+            if e.source_name not in typed or e.target_name not in typed
+        )
+
+        assert unresolved == []
 
     @pytest.mark.parametrize("source", _known_sources(seed()))
     def test_no_violation_in_any_per_source_subset(self, source):
@@ -283,18 +300,60 @@ class TestTheNineFalseEdges:
         assert [v.edge_index for v in check_edges(nodes, edges)] == [2]
 
 
-# Rows of the table that no golden edge and none of the nine exercise, each
-# pinned by a real candidate edge from the chapter-3 or chapter-4 artifacts.
-# Without these, widening any of these four rows to every canon entity type
-# leaves the whole suite green -- found by mutating the table, not by reading it.
+# One rejected edge per (relationship, side) of the table -- 46 sides in all.
+#
+# `VALID_CASES` above pins every row against being NARROWED. Nothing pinned them
+# against being WIDENED, and widening a side to every canon entity type deletes
+# that constraint outright. Swept exhaustively, 33 of the 46 sides could be
+# deleted with the whole suite still green. That is the failure this codebase has
+# hit repeatedly: someone silences a false positive by adding LOCATION to SERVES'
+# range, the tests stay green, the violation count quietly drops, and the next
+# hand read is drawn from a set the table stopped covering.
+#
+# A `both` case pins BOTH of its sides: widening either one changes the reason,
+# which the assertion below reads.
+#
+# Cases are real candidate edges lifted from the chapter-3 and chapter-4
+# artifacts wherever the corpus has one. The four marked INVENTED are the sides
+# no artifact exercises -- COMPLETED appears in no extraction run at all.
 NEGATIVE_CASES = [
+    # --- Spatial ---
+    # A place is not joined to a person by a passage.
+    ("Donavich", "NPC", "CONNECTED_TO", "the cemetery", "LOCATION", "domain"),
+    ("Castle Ravenloft", "LOCATION", "CONNECTED_TO", "Strahd", "NPC", "range"),
     # A person is not a container: the treasure is in the room, not in Strahd.
     ("Strahd von Zarovich", "NPC", "CONTAINS", "300 pp", "ITEM", "domain"),
+    # A shop does not contain a rules table. LORE has no place to sit.
+    ("Bildrath's Mercantile", "LOCATION", "CONTAINS", "Adventuring Gear table", "LORE", "range"),
     # Lore is not located anywhere; the text about it merely sits in a section.
     ("Strahd's ancestors", "LORE", "LOCATED_IN", "Hall of Heroes", "LOCATION", "domain"),
-    # An event OCCURS somewhere -- which is a type the extractor is not offered,
-    # so the model reaches for the nearest one it has.
+    # An event OCCURS somewhere -- a type the extractor is not offered, so the
+    # model reaches for the nearest one it has.
     ("March of the Dead", "EVENT", "LOCATED_IN", "Cemetery", "LOCATION", "domain"),
+    ("Chapel", "LOCATION", "LOCATED_IN", "Donavich", "NPC", "range"),
+    # A graveyard does not travel.
+    ("Graveyard", "LOCATION", "TRAVELED_TO", "Castle Ravenloft", "LOCATION", "domain"),
+    ("Doru", "MONSTER", "TRAVELED_TO", "Donavich", "NPC", "range"),
+    # --- Social ---
+    ("Morninglord", "LORE", "ALLIED_WITH", "Ulmist Inquisition", "FACTION", "domain"),
+    ("Ghostly Adventurers", "MONSTER", "ALLIED_WITH", "Castle Ravenloft", "LOCATION", "range"),
+    # INVENTED: no artifact edge has a non-agent enemy on the source side.
+    ("Castle Ravenloft", "LOCATION", "ENEMY_OF", "Strahd", "NPC", "domain"),
+    ("Gustav Herrenghast", "NPC", "ENEMY_OF", "Icon of Ravenloft", "ITEM", "range"),
+    # A room is not guarded by being a room, and a place does not stand watch.
+    ("Amber Temple", "LOCATION", "GUARDS", "Tsolenka Pass", "LOCATION", "domain"),
+    ("Strahd", "MONSTER", "GUARDS", "Amber Temple", "LORE", "range"),
+    ("Barovia", "LOCATION", "HOSTILE_TO", "Strahd", "NPC", "domain"),
+    ("Donavich", "NPC", "HOSTILE_TO", "Castle Ravenloft", "LOCATION", "range"),
+    # A tavern is not acquainted with anyone.
+    ("Blood of the Vine Tavern", "LOCATION", "KNOWS", "Ismark Kolyanovich", "NPC", "domain"),
+    ("bats", "MONSTER", "KNOWS", "Castle Ravenloft", "LOCATION", "range"),
+    # MEMBER_OF's group is a FACTION. A castle joins nothing, and a tavern is not
+    # a group its barkeep belongs to.
+    ("Tser Pool", "LOCATION", "MEMBER_OF", "Vistani", "FACTION", "domain"),
+    ("Arik Lorensk", "NPC", "MEMBER_OF", "Blood of the Vine Tavern", "LOCATION", "range"),
+    # A vintage does not own the winery that makes it -- an inverted OWNS.
+    ("Champagne du le Stomp", "ITEM", "OWNS", "Wizard of Wines winery", "LOCATION", "domain"),
     # People are not property. Strahd SEEKS Ireena; he does not own her.
     ("Strahd", "NPC", "OWNS", "Ireena Kolyana", "NPC", "range"),
     ("Morgantha", "NPC", "OWNS", "Lucian Jarov", "NPC", "range"),
@@ -304,10 +363,63 @@ NEGATIVE_CASES = [
     # glosses were written to fix.
     ("Barovian witches", "FACTION", "RELATED_TO", "Strahd", "NPC", "domain"),
     ("Strahd", "NPC", "RELATED_TO", "Barovian witches", "FACTION", "range"),
+    # A land does not serve, and a servant serves a master, not a building or a
+    # musical instrument.
+    ("Barovia", "SETTING", "SERVES", "Donavich", "NPC", "domain"),
+    ("Pidwick", "NPC", "SERVES", "harp", "ITEM", "range"),
+    # A chest carries nothing, and nobody wields a tower.
+    ("iron chest", "ITEM", "WIELDS", "Strahd's family crest", "ITEM", "domain"),
+    ("Prince Ariel du Plumette", "NPC", "WIELDS", "high tower", "LOCATION", "range"),
+    # --- Narrative ---
+    # INVENTED (both sides): COMPLETED appears in no extraction run on disk.
+    ("Church of Barovia", "LOCATION", "COMPLETED", "Free Doru", "QUEST", "domain"),
+    ("Ismark Kolyanovich", "NPC", "COMPLETED", "Blood on the Vine Tavern", "LOCATION", "range"),
+    # A quest does not hand out quests, and the quest given is not a person.
+    ("Convince Ireena to Open the Door", "QUEST", "GAVE_QUEST", "Ireena Kolyana", "NPC", "both"),
+    ("Cyrus Belview", "NPC", "GAVE_QUEST", "Iron Chest", "ITEM", "range"),
+    # IDENTITY_OF is one being under two names. A mansion is not a person's other
+    # life, and a group is not one either.
+    ("Burgomaster's Mansion", "LOCATION", "IDENTITY_OF", "Ireena Kolyana", "NPC", "domain"),
+    ("Cats", "MONSTER", "IDENTITY_OF", "Witches in area K56", "FACTION", "range"),
+    ("Masonry Wall", "ITEM", "OBJECTIVE_AT", "Castle's Wine Cellar", "LOCATION", "domain"),
+    ("Escort Ireena to Vallaki", "QUEST", "OBJECTIVE_AT", "Ireena Kolyana", "NPC", "range"),
+    ("Burgomaster's Mansion", "LOCATION", "OPPOSES", "Strahd", "NPC", "domain"),
+    ("Donavich", "NPC", "OPPOSES", "E5g. Undercroft", "LOCATION", "range"),
+    # PREREQUISITE_OF gates one happening on another; two priests gate nothing.
+    ("Kolyan Indirovich", "NPC", "PREREQUISITE_OF", "Donavich", "NPC", "both"),
+    # RESOLVES_TO collapses a canon fan-out. A tower is not a fan-out, and
+    # INVENTED on the range side: no artifact edge resolves to a non-place.
+    ("Morgatha", "NPC", "RESOLVES_TO", "Strahd", "NPC", "domain"),
+    ("Tome of Strahd", "ITEM", "RESOLVES_TO", "Escort Ireena to Vallaki", "QUEST", "range"),
+    # An event wants nothing, and a faction is not something to be obtained.
+    ("March of the Dead", "EVENT", "SEEKS", "Strahd", "NPC", "domain"),
+    ("Bildrath Cantemir", "NPC", "SEEKS", "Vistani", "FACTION", "range"),
+    # A land does not endanger, and an event is not endangered.
+    ("Barovia", "LOCATION", "THREATENS", "Strahd", "NPC", "domain"),
+    ("Cemetery", "LOCATION", "THREATENS", "March of the Dead", "EVENT", "both"),
 ]
 
 
 class TestNegativeCasesTheGoldenSetDoesNotReach:
+    def test_every_row_side_of_the_table_has_a_rejected_case(self):
+        """The sweep that found the 33 unpinned sides, as a standing assertion:
+        every side must appear as the offending one in at least one case above.
+        A relationship type added to LAYER_MAP fails this until both of its sides
+        are pinned, the same way the totality test works."""
+        pinned = set()
+        for _, _, rel, _, _, reason in NEGATIVE_CASES:
+            for side in ("domain", "range"):
+                if reason in (side, "both"):
+                    pinned.add((RelationshipType(rel), side))
+        missing = sorted(
+            f"{rel.value}.{side}"
+            for rel in RELATIONSHIP_DOMAIN_RANGE
+            for side in ("domain", "range")
+            if (rel, side) not in pinned
+        )
+
+        assert missing == []
+
     @pytest.mark.parametrize(
         ("source", "source_type", "rel_type", "target", "target_type", "reason"),
         NEGATIVE_CASES,
@@ -431,6 +543,28 @@ class TestReversal:
         violations = check_edges(nodes, [edge("Cyrus Belview", "GAVE_QUEST", "Iron Chest")])
 
         assert violations[0].reversal_would_pass is False
+
+    def test_the_report_counts_the_reversals_for_the_artifact(self):
+        """The count is written into the run object of the candidate artifact,
+        so it has to be readable off the report and not only off the printed
+        block -- it is the evidence for whether a repair pass is worth building,
+        and a terminal scrolls away."""
+        nodes = [
+            node("Chapel", "LOCATION"),
+            node("Donavich", "NPC"),
+            node("Iron Chest", "ITEM"),
+            node("Cyrus Belview", "NPC"),
+        ]
+        edges = [
+            edge("Chapel", "LOCATED_IN", "Donavich"),  # reversal passes
+            edge("Cyrus Belview", "GAVE_QUEST", "Iron Chest"),  # wrong both ways
+            edge("Donavich", "LOCATED_IN", "Chapel"),  # not a violation at all
+        ]
+
+        report = report_edges(nodes, edges)
+
+        assert len(report.violations) == 2
+        assert report.reversals_would_pass == 1
 
     def test_a_reversal_is_detected_but_never_performed(self):
         """No auto-repair: we cannot yet tell a genuine reversal from a

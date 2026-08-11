@@ -66,6 +66,17 @@ class ConstraintReport:
     checked: int = 0
     unchecked: int = 0
 
+    @property
+    def reversals_would_pass(self) -> int:
+        """How many violations would satisfy the table with endpoints swapped.
+
+        A field on the report rather than a number `format_report` alone
+        computes, because it is the stated evidence for whether a repair pass is
+        worth building later -- so it has to travel in the artifact, not only
+        across a terminal that scrolls away.
+        """
+        return sum(1 for violation in self.violations if violation.reversal_would_pass)
+
 
 def _fold(name: str) -> str:
     """Case-insensitive on the stripped string, as `anchor_quests` folds names.
@@ -190,10 +201,9 @@ def format_report(report: ConstraintReport) -> str:
     reasons = {reason: 0 for reason in ("domain", "range", "both")}
     for violation in report.violations:
         reasons[violation.reason] += 1
-    reversals = sum(1 for v in report.violations if v.reversal_would_pass)
     return (
         f"  constraint violations: {len(report.violations)} of {report.checked} typed edges "
         f"(domain {reasons['domain']}, range {reasons['range']}, both {reasons['both']})\n"
-        f"    of which reversal would pass: {reversals}\n"
+        f"    of which reversal would pass: {report.reversals_would_pass}\n"
         f"  unchecked (endpoint type unknown): {report.unchecked}"
     )
