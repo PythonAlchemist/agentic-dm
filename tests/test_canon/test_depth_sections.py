@@ -29,6 +29,7 @@ import pytest
 from backend.canon.models import Chapter
 from backend.canon.sections import (
     EXTRACTION_BUDGET_TOKENS,
+    _FIT_FRACTION,
     area_depth,
     split_chapter,
     split_sections,
@@ -179,6 +180,19 @@ class TestSizeDrivenRefinement:
 
     def test_the_budget_defaults_to_the_measured_value(self):
         assert EXTRACTION_BUDGET_TOKENS == 1000
+
+    def test_the_fit_fraction_defaults_to_the_measured_value(self):
+        """The rule's other headline constant, pinned for the same reason.
+
+        Both parameters were chosen mid-plateau rather than at the maximum:
+        budget 900/1000/1100 and fraction 0.70/0.75/0.80 all derive h3 for the
+        same 18 of 25 chapters, while the sweep's maximum (19-20) sits at 1200
+        or 0.85. Leaving this unpinned meant 0.75 -> 0.60 passed every test
+        while shifting the derived area depth on 7 of 25 chapters -- absorbed
+        today only because size-driven refinement happens to compensate on
+        *this* corpus, which is not a guarantee for the next book.
+        """
+        assert _FIT_FRACTION == 0.75
 
 
 class TestKeySplitterStillReachable:
