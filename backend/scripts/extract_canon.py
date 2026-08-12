@@ -32,15 +32,26 @@ from backend.canon.extract import (
 from backend.canon.grade import grade
 from backend.canon.models import Chapter, Section
 from backend.canon.page_extractor import PageExtractor
-from backend.canon.sections import split_sections, units_from_sections
+from backend.canon.sections import (
+    EXTRACTION_BUDGET_TOKENS,
+    SPLITTERS,
+    split_chapter,
+    units_from_sections,
+)
 from backend.canon.seed_loader import DEFAULT_SOURCE, EXTRACTABLE_FROM, SEED_DIR, extractable_subset
-from backend.canon.structure import place_of_section, structural_edges
+from backend.canon.structure import derive_structure, place_of_section
 from backend.core.config import settings
 from backend.graph.schema import Layer
 
 DEFAULT_PDF = Path("data/cos.pdf")
 
+CORPORA = ("ddb", "transcription")
+DEFAULT_CORPUS = "ddb"
+
 _CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
+
+# The document's own title line. D&D Beyond opens every chapter with exactly one.
+_H1 = re.compile(r"^#\s+(?!#)(.+?)\s*$", re.MULTILINE)
 
 
 def _known_sources(data: dict) -> list[str]:
@@ -96,7 +107,51 @@ def chapter_place(chapter: Chapter, sections: list[Section]) -> str | None:
     return stripped or None
 
 
-def load_chapters(pdf_path: Path = DEFAULT_PDF, book_slug: str = "cos") -> list[Chapter]:
+def _load_ddb_chapters(root: Path, book_slug: str) -> list[Chapter]:
+    """Read the harvested D&D Beyond cache: one markdown file per chapter.
+
+    No model in the loop and no PDF -- this is a directory walk. The manifest
+    fixes the order, because it is the book's order and the filesystem's is
+    alphabetical: `castle-ravenloft` sorts before `introduction`.
+
+    The title comes from the document's own H1 rather than the manifest, which
+    carries D&D Beyond's table-of-contents label ("Ch. 3: The Village of
+    Barovia"). `find_chapter` matches on "Chapter 3" and `chapter_place` strips
+    `^chapter \\d+[:.]`; the label would satisfy neither, and the chapter place
+    would silently become the literal string "Ch. 3: The Village of Barovia" on
+    every derived edge.
+    """
+    book = root / book_slug
+    manifest = book / "manifest.json"
+    if not manifest.exists():
+        raise FileNotFoundError(
+            f"no harvested corpus at {book}. Run "
+            f"`uv run python -m backend.scripts.harvest_ddb` to build it, or pass "
+            f"--corpus transcription."
+        )
+
+    chapters: list[Chapter] = []
+    for entry in json.loads(manifest.read_text())["chapters"]:
+        path = book / f"{entry['slug']}.md"
+        if not path.exists():
+            continue
+        markdown = path.read_text()
+        heading = _H1.search(markdown)
+        chapters.append(
+            Chapter(
+                slug=entry["slug"],
+                title=heading.group(1).strip() if heading else entry["title"],
+                # The DDB reader has no page numbers to report. Nothing
+                # downstream of the splitter reads them.
+                start_page=0,
+                end_page=0,
+                markdown=markdown,
+            )
+        )
+    return chapters
+
+
+def _load_transcription_chapters(pdf_path: Path, book_slug: str) -> list[Chapter]:
     """Rebuild chapters from the transcript cache. No API calls: cache only.
 
     The source PDF repeats every page, so pages are grouped by image hash --
@@ -119,6 +174,28 @@ def load_chapters(pdf_path: Path = DEFAULT_PDF, book_slug: str = "cos") -> list[
     finally:
         extractor.close()
     return assemble_chapters(transcripts)
+
+
+def load_chapters(
+    corpus: str = DEFAULT_CORPUS,
+    *,
+    pdf_path: Path = DEFAULT_PDF,
+    book_slug: str = "cos",
+    ddb_root: Path | None = None,
+) -> list[Chapter]:
+    """Every chapter of the book, as objects carrying `.title` and `.markdown`.
+
+    `ddb` is the default and the future: the user owns 35 books and wants one
+    reader for all of them, which the transcription path -- a PDF renderer plus a
+    vision model, per book -- can never be. `transcription` is kept reachable
+    because legs A and B of the splitter measurement need it, and because a
+    fallback is cheap insurance while the new path is young.
+    """
+    if corpus == "ddb":
+        return _load_ddb_chapters(ddb_root or settings.ddb_dir, book_slug)
+    if corpus == "transcription":
+        return _load_transcription_chapters(pdf_path, book_slug)
+    raise ValueError(f"unknown corpus {corpus!r}; expected one of {CORPORA}")
 
 
 def find_chapter(chapters: list[Chapter], needle: str) -> Chapter:
@@ -146,6 +223,8 @@ async def run(
     node_k: int = 1,
     edge_k: int = 1,
     reject_violations: bool = False,
+    corpus: str = DEFAULT_CORPUS,
+    splitter: str = "depth",
 ) -> dict:
     # Validated before the paid extraction call below: a bad --grade value
     # must fail fast, not silently score 1.00/1.00 after money is spent.
@@ -154,13 +233,28 @@ async def run(
         data = yaml.safe_load((SEED_DIR / "village-of-barovia.yaml").read_text())
         golden = _gradeable_subset(data, grade_against)
 
-    chapter = find_chapter(load_chapters(), chapter_title)
-    sections = split_sections(chapter)
+    chapter = find_chapter(load_chapters(corpus), chapter_title)
+    split = split_chapter(chapter, splitter=splitter)
+    sections = split.sections
     units = units_from_sections(sections)
     units_available = len(units)
     if limit is not None:
         units = units[:limit]
-    print(f"{chapter.title}: {len(units)} of {units_available} units")
+    print(f"{chapter.title} [{corpus} corpus, {splitter} splitter]: "
+          f"{len(units)} of {units_available} units")
+    if splitter == "depth":
+        # Printed on every run, not hidden behind a diagnostic flag: the derived
+        # area depth is the single assumption this splitter rests on, and a run
+        # that silently derived the wrong one would look exactly like a run that
+        # derived the right one.
+        print(f"  area depth: h{split.area_depth}"
+              f"{'' if split.depth_qualified else ' (NO DEPTH QUALIFIED -- deepest present)'}"
+              f"; {split.before_refinement} sections before refinement, "
+              f"{len(sections)} after, {split.subdivided} subdivided")
+        if split.unsplittable:
+            print(f"  !! {split.unsplittable} section(s) over the "
+                  f"{EXTRACTION_BUDGET_TOKENS}-token budget with no deeper heading to "
+                  "cut at -- left whole !!")
 
     # Sample i is drawn at EXTRACTION_SEED + i. Five draws at one seed would be
     # a vote on residual API nondeterminism, which is the thing being measured.
@@ -236,8 +330,13 @@ async def run(
     # N identical copies; voting on them would score one computation five times
     # and make the one layer that provably cannot hallucinate look like the
     # weakly-supported one. Their `votes` stays 0, meaning "never voted on".
-    derived = structural_edges(sections, nodes, chapter_place(chapter, sections))
-    print(f"  {len(derived)} derived structural edges")
+    structure = derive_structure(sections, nodes, chapter_place(chapter, sections))
+    derived = structure.edges
+    print(f"  {len(derived)} derived structural edges "
+          f"({structure.depth_derived} CONTAINS from depth, "
+          f"{structure.key_derived} from the key stem, "
+          f"{structure.chapter_derived} from the chapter, "
+          f"{structure.located_in} LOCATED_IN)")
     before_dedup = len(edges) + len(derived)
     edges = merge_edges(edges, derived)
     if before_dedup != len(edges):
@@ -269,6 +368,16 @@ async def run(
     # this object must be enough to tell a complete run from a partial one.
     run_meta = {
         "chapter": chapter.title,
+        "corpus": corpus,
+        "splitter": splitter,
+        "area_depth": split.area_depth,
+        "area_depth_qualified": split.depth_qualified,
+        "sections_before_refinement": split.before_refinement,
+        "sections_subdivided": split.subdivided,
+        "sections_over_budget_unsplittable": split.unsplittable,
+        "derived_from_depth": structure.depth_derived,
+        "derived_from_key": structure.key_derived,
+        "derived_from_chapter": structure.chapter_derived,
         "model": model,
         "temperature": temperature,
         "seed": EXTRACTION_SEED,
@@ -342,6 +451,9 @@ async def run(
         "dropped_quests": dropped_quests,
         "dropped_edges": dropped_edges,
         "derived_edges": len(derived),
+        "derived_from_depth": structure.depth_derived,
+        "derived_from_key": structure.key_derived,
+        "derived_from_chapter": structure.chapter_derived,
         "constraint_violations": len(constraints.violations),
         "constraint_unchecked": constraints.unchecked,
         "constraint_reversals_would_pass": constraints.reversals_would_pass,
@@ -434,6 +546,17 @@ def build_parser() -> argparse.ArgumentParser:
     # The counts are printed and written to the artifact either way.
     parser.add_argument("--reject-violations", action="store_true",
                         help="Drop edges violating RELATIONSHIP_DOMAIN_RANGE (default: report)")
+    # The pivot. `ddb` is the publisher's own markup for any of the 35 books the
+    # user owns; `transcription` is the retired per-book vision pass, kept
+    # reachable for the A/B and as a fallback while the new path is young.
+    parser.add_argument("--corpus", choices=CORPORA, default=DEFAULT_CORPUS,
+                        help=f"Which corpus to read (default {DEFAULT_CORPUS})")
+    # `key` is Curse of Strahd-specific by construction and cannot serve a book
+    # with no keyed rooms. It stays selectable because leg B of the measurement
+    # -- DDB text through the OLD splitter -- is the only thing that separates a
+    # corpus effect from a splitter effect.
+    parser.add_argument("--splitter", choices=SPLITTERS, default="depth",
+                        help="How to cut chapters into sections (default depth)")
     return parser
 
 
@@ -459,6 +582,7 @@ def main() -> None:
                 args.chapter, args.grade_against, layers, args.out, args.limit,
                 samples=args.samples, node_k=args.node_k, edge_k=args.edge_k,
                 reject_violations=args.reject_violations,
+                corpus=args.corpus, splitter=args.splitter,
             )
         )
     except ValueError as exc:
