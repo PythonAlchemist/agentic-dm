@@ -106,6 +106,34 @@ class TestHappyPath:
         assert rel["p"]["evidence"] == "derived from document structure"
 
 
+    def test_a_resolved_endpoint_is_visible_in_the_graph(self, graph):
+        """The verifier's constraint check is vacuous on these edges. A reader
+        of the graph must be able to tell which ones without re-deriving it."""
+        ireena = node("Ireena Kolyana", entity_type="NPC")
+        tatyana = node("Tatyana", entity_type="NPC")
+        resolved = WriteEdge(
+            source_id=ireena.id,
+            target_id=tatyana.id,
+            rel_type=RelationshipType.IDENTITY_OF,
+            chapter_slug=CHAPTER_A,
+            endpoint_resolved="constraint",
+        )
+        write_chapter(graph, CHAPTER_A, [ireena, tatyana], [resolved, link(tatyana, ireena)])
+
+        rows = graph.run(
+            """
+            MATCH ()-[r]->() WHERE r.chapter_slug = $slug
+            RETURN type(r) AS t, r.endpoint_resolved AS resolved
+            ORDER BY t
+            """,
+            {"slug": CHAPTER_A},
+        ).data()
+        assert rows == [
+            {"t": "IDENTITY_OF", "resolved": "constraint"},
+            {"t": "LOCATED_IN", "resolved": None},
+        ]
+
+
 class TestAtomicity:
     def test_a_write_that_raises_partway_leaves_the_graph_unchanged(self, graph):
         """The property everything else hangs off.

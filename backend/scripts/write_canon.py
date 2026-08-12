@@ -84,6 +84,10 @@ def format_report(report: FilterReport) -> str:
         f"    dangling (an endpoint has no node):              {report.dangling_edges}",
         f"    ambiguous (endpoint name has two types):         {report.ambiguous_edges}",
         f"    duplicate (same source, type and target):        {report.duplicate_edges}",
+        "  edges KEPT by endpoint resolution (not a drop):",
+        f"    constraint-unique endpoint chosen:               {report.endpoint_resolved}",
+        "      (the constraint check is vacuous on these -- they were CHOSEN to satisfy it,",
+        "       and each carries endpoint_resolved='constraint' in the graph to say so)",
         f"  to write: {report.written_nodes} nodes, {report.written_edges} edges",
     ]
     for label, dropped in (
@@ -92,6 +96,7 @@ def format_report(report: FilterReport) -> str:
         ("violation", report.dropped_violations),
         ("dangling", report.dropped_dangling),
         ("ambiguous", report.dropped_ambiguous),
+        ("resolved", report.resolved_endpoints),
     ):
         for item in dropped[:EXAMPLES]:
             lines.append(f"    - {label}: {item}")
@@ -144,6 +149,8 @@ def run_artifact(
             "deleted_nodes": replaced.get("deleted_nodes", 0),
             "deleted_edges": replaced.get("deleted_edges", 0),
             "ambiguous_names": report.ambiguous_names,
+            # The edges on which the verifier's constraint check proves nothing.
+            "resolved_endpoints": report.resolved_endpoints,
         },
         "nodes": candidate_nodes,
         "edges": candidate_edges,

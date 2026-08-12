@@ -127,8 +127,19 @@ class TestRunArtifact:
             "dangling_edges",
             "ambiguous_edges",
             "duplicate_edges",
+            "endpoint_resolved",
         ):
             assert key in filters, key
+
+    def test_the_resolved_edges_are_named_in_the_artifact(self):
+        """The verifier's constraint check proves nothing about these, so which
+        ones they are has to be recoverable without a graph query."""
+        report = FilterReport(candidate_nodes=3, candidate_edges=2)
+        report.endpoint_resolved = 1
+        report.resolved_endpoints = ["Ireena -IDENTITY_OF-> Tatyana  ->  cos:x:npc:tatyana"]
+        write = self.build(report=report)["write"]
+        assert write["resolved_endpoints"] == report.resolved_endpoints
+        assert write["filters"]["endpoint_resolved"] == 1
 
     def test_written_counts_are_broken_down_by_type(self):
         write = self.build()["write"]
@@ -145,6 +156,16 @@ class TestFormatReport:
         printed = format_report(FilterReport(candidate_nodes=1, candidate_edges=0))
         assert "self-loops:" in printed
         assert "gazetteer" in printed
+
+    def test_resolutions_are_printed_apart_from_drops(self):
+        report = FilterReport(candidate_nodes=1, candidate_edges=1)
+        report.endpoint_resolved = 1
+        report.resolved_endpoints = ["Ireena -IDENTITY_OF-> Tatyana  ->  cos:x:npc:tatyana"]
+        printed = format_report(report)
+        assert "KEPT by endpoint resolution (not a drop)" in printed
+        assert "constraint-unique endpoint chosen:               1" in printed
+        assert "vacuous" in printed
+        assert "- resolved: Ireena -IDENTITY_OF-> Tatyana" in printed
 
     def test_examples_are_capped_but_the_count_is_not(self):
         report = FilterReport(candidate_nodes=40, candidate_edges=0)

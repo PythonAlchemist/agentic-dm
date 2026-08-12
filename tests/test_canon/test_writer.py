@@ -10,8 +10,14 @@ import pytest
 
 from backend.canon.gazetteer import Gazetteer, GazetteerEntry
 from backend.canon.models import CandidateEdge, CandidateNode
-from backend.canon.writer import CANON_PLANE, mint_id, plan_write
-from backend.graph.schema import Layer, RelationshipType
+from backend.canon.writer import (
+    CANON_PLANE,
+    WriteNode,
+    _resolve_endpoint,
+    mint_id,
+    plan_write,
+)
+from backend.graph.schema import EntityType, Layer, RelationshipType
 
 SLUG = "the-village-of-barovia"
 
@@ -248,16 +254,17 @@ class TestDanglingEdges:
 
 
 class TestAmbiguousEndpoints:
-    def test_edge_whose_endpoint_name_has_two_types_is_dropped(self):
-        """Tatyana is typed NPC by one sample and LORE by four.
+    """A name answered by two surviving nodes of different types.
 
-        Both nodes are written -- the type is part of the id, and node
-        consensus cannot tell "unsupported entity" from "disputed type" -- but
-        an edge naming `Tatyana` cannot say which of the two it means. Picking
-        one would manufacture an assertion the extractor never made, so the
-        edge is dropped and counted, the same way a reversal is detected and
-        never performed.
-        """
+    Both nodes are written -- the type is part of the id, and node consensus
+    cannot tell "unsupported entity" from "disputed type" -- so an edge naming
+    `Tatyana` has two nodes it could mean. The domain/range table settles it
+    when it admits exactly one of them, and nothing settles it otherwise.
+    """
+
+    def test_the_only_reading_the_ontology_permits_is_taken(self):
+        """`IDENTITY_OF`'s range is {NPC, MONSTER}, so Tatyana-the-LORE cannot
+        stand there. This is the edge the whole reveal-filter design rests on."""
         nodes, edges, report = plan_write(
             [node("Tatyana", "NPC"), node("Tatyana", "LORE"), node("Ireena", "NPC")],
             [edge("Ireena", "Tatyana", "IDENTITY_OF")],
@@ -265,9 +272,131 @@ class TestAmbiguousEndpoints:
             SLUG,
         )
         assert len(nodes) == 3
+        assert report.ambiguous_edges == 0
+        assert report.endpoint_resolved == 1
+        assert [e.target_id for e in edges] == [mint_id(SLUG, "NPC", "Tatyana")]
+
+    def test_a_resolved_edge_is_stamped(self):
+        """An edge whose endpoint was CHOSEN to satisfy the constraint table
+        will always satisfy it afterwards, so the check is vacuous on exactly
+        these. Acceptable -- but it must be visible, not silent."""
+        _, edges, _ = plan_write(
+            [node("Tatyana", "NPC"), node("Tatyana", "LORE"), node("Ireena", "NPC")],
+            [edge("Ireena", "Tatyana", "IDENTITY_OF")],
+            gazetteer("Tatyana", "Ireena"),
+            SLUG,
+        )
+        assert edges[0].endpoint_resolved == "constraint"
+        assert edges[0].properties["endpoint_resolved"] == "constraint"
+
+    def test_an_unambiguous_edge_carries_no_resolution_stamp(self):
+        """Otherwise every edge would look like one the table had to rescue."""
+        _, edges, report = plan_write(
+            [node("Ireena", "NPC"), node("Ismark", "NPC")],
+            [edge("Ismark", "Ireena", "RELATED_TO")],
+            gazetteer("Ireena", "Ismark"),
+            SLUG,
+        )
+        assert report.endpoint_resolved == 0
+        assert edges[0].endpoint_resolved == ""
+        assert "endpoint_resolved" not in edges[0].properties
+
+    def test_the_source_side_resolves_too(self):
+        """`RELATED_TO`'s domain is NPC only, so Doru-the-MONSTER cannot be
+        the one doing the relating."""
+        _, edges, report = plan_write(
+            [node("Doru", "NPC"), node("Doru", "MONSTER"), node("Donavich", "NPC")],
+            [edge("Doru", "Donavich", "RELATED_TO")],
+            gazetteer("Doru", "Donavich"),
+            SLUG,
+        )
+        assert report.endpoint_resolved == 1
+        assert [e.source_id for e in edges] == [mint_id(SLUG, "NPC", "Doru")]
+
+    def test_two_candidates_that_both_satisfy_settle_nothing(self):
+        """`CONTAINS` admits NPC and MONSTER alike, so the table cannot say
+        which Doru is in the bedroom."""
+        _, edges, report = plan_write(
+            [
+                node("Doru", "NPC"),
+                node("Doru", "MONSTER"),
+                node("Doru's Bedroom", "LOCATION"),
+            ],
+            [edge("Doru's Bedroom", "Doru", "CONTAINS")],
+            gazetteer("Doru", "Doru's Bedroom"),
+            SLUG,
+        )
+        assert report.endpoint_resolved == 0
         assert report.ambiguous_edges == 1
         assert edges == []
-        assert "Ireena -IDENTITY_OF-> Tatyana" in report.dropped_ambiguous
+        assert "Doru's Bedroom -CONTAINS-> Doru" in report.dropped_ambiguous
+
+    def test_no_candidate_satisfying_settles_nothing(self):
+        """Tested on the helper, because `plan_write` cannot reach it.
+
+        An edge only arrives here having already passed `check_edges`, and that
+        passes only if at least one of the name's types fits -- so for a
+        constrained relationship the zero case is unreachable from above. The
+        branch is kept because zero and two-or-more must behave identically,
+        and a reader should not have to prove the unreachability to trust it.
+        """
+        by_id = {
+            "a": WriteNode(id="a", name="Barovia", entity_type="LOCATION", chapter_slug=SLUG),
+            "b": WriteNode(id="b", name="Barovia", entity_type="SETTING", chapter_slug=SLUG),
+        }
+        assert _resolve_endpoint({"a", "b"}, by_id, frozenset({EntityType.FACTION})) == (
+            None,
+            False,
+        )
+
+    def test_a_relationship_with_no_domain_range_entry_settles_nothing(self):
+        """`OCCURRED_AT` is a runtime edge with no row in the table, so there
+        is nothing to resolve WITH -- and a resolution rule that guessed in its
+        absence would be back to manufacturing assertions."""
+        _, edges, report = plan_write(
+            [node("Barovia", "LOCATION"), node("Barovia", "SETTING"), node("Ismark", "NPC")],
+            [edge("Ismark", "Barovia", "OCCURRED_AT")],
+            gazetteer("Barovia", "Ismark"),
+            SLUG,
+        )
+        assert report.endpoint_resolved == 0
+        assert report.ambiguous_edges == 1
+        assert edges == []
+
+    def test_an_untyped_candidate_is_never_the_unique_answer(self):
+        """`check_edges` treats an unknown type as unchecked, which is right for
+        "is this legal" and wrong for "which of these two is meant"."""
+        _, edges, report = plan_write(
+            [node("Tatyana", "NPC"), node("Tatyana", "BESTIARY"), node("Ireena", "NPC")],
+            [edge("Ireena", "Tatyana", "IDENTITY_OF")],
+            gazetteer("Tatyana", "Ireena"),
+            SLUG,
+        )
+        # NPC is the one satisfying candidate; the unknown type is not a rival.
+        assert report.endpoint_resolved == 1
+        assert [e.target_id for e in edges] == [mint_id(SLUG, "NPC", "Tatyana")]
+
+    def test_resolutions_are_counted_apart_from_drops(self):
+        nodes, edges, report = plan_write(
+            [
+                node("Tatyana", "NPC"),
+                node("Tatyana", "LORE"),
+                node("Ireena", "NPC"),
+                node("Doru", "NPC"),
+                node("Doru", "MONSTER"),
+                node("Doru's Bedroom", "LOCATION"),
+            ],
+            [
+                edge("Ireena", "Tatyana", "IDENTITY_OF"),
+                edge("Doru's Bedroom", "Doru", "CONTAINS"),
+            ],
+            gazetteer("Tatyana", "Ireena", "Doru", "Doru's Bedroom"),
+            SLUG,
+        )
+        assert report.endpoint_resolved == 1
+        assert report.ambiguous_edges == 1
+        assert report.written_edges == 1
+        assert len(edges) == 1
 
 
 class TestDeduplication:

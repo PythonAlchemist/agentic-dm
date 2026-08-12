@@ -25,7 +25,13 @@ from backend.canon.constraints import check_edges
 from backend.canon.gazetteer import Gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.sections import KEYED_HEADING
-from backend.graph.schema import GRAPH_SCHEMA, LAYER_MAP, RelationshipType
+from backend.graph.schema import (
+    GRAPH_SCHEMA,
+    LAYER_MAP,
+    RELATIONSHIP_DOMAIN_RANGE,
+    EntityType,
+    RelationshipType,
+)
 
 #: Nodes and edges written here are the book's own canon, shared by every
 #: campaign. The resolver filters on this property; an unstamped node is
@@ -136,6 +142,10 @@ class WriteEdge:
     section_heading: str = ""
     section_index: int = -1
     votes: int = 0
+    #: `"constraint"` when at least one endpoint was picked out of a disputed
+    #: name by `RELATIONSHIP_DOMAIN_RANGE` -- see `_resolve_endpoint`. Empty
+    #: when both endpoints were unambiguous.
+    endpoint_resolved: str = ""
 
     @property
     def properties(self) -> dict:
@@ -150,6 +160,14 @@ class WriteEdge:
         structure"` is the only thing downstream has to tell the deterministic
         layer from LLM output, and stage 2b is told to trust the two
         differently.
+
+        `endpoint_resolved` travels for a colder reason: an edge whose endpoint
+        was CHOSEN to satisfy the domain/range table will always satisfy that
+        table afterwards, so the verifier's constraint check is vacuous on it.
+        That is acceptable -- the alternative is dropping a real edge -- but it
+        must be visible on the edge rather than quietly weakening the check.
+        A filter that only offers legal options has a violation rate of zero by
+        construction, and nothing downstream may mistake that for evidence.
         """
         props: dict = {
             "plane": CANON_PLANE,
@@ -162,6 +180,10 @@ class WriteEdge:
         layer = LAYER_MAP[self.rel_type]
         if layer is not None:
             props["layer"] = layer.value
+        # Absent rather than "": an edge that needed no resolution must not look
+        # like one that was resolved into some other category.
+        if self.endpoint_resolved:
+            props["endpoint_resolved"] = self.endpoint_resolved
         return props
 
 
@@ -186,6 +208,10 @@ class FilterReport:
     dangling_edges: int = 0
     ambiguous_edges: int = 0
     duplicate_edges: int = 0
+    # NOT a drop: edges kept because the domain/range table picked one endpoint
+    # out of a disputed name. Counted apart from every drop above AND from the
+    # plain writes, because the constraint check is vacuous on exactly these.
+    endpoint_resolved: int = 0
     written_nodes: int = 0
     written_edges: int = 0
     # Samples, so a reader can see WHAT was dropped and not only how much.
@@ -194,6 +220,7 @@ class FilterReport:
     dropped_violations: list[str] = field(default_factory=list)
     dropped_dangling: list[str] = field(default_factory=list)
     dropped_ambiguous: list[str] = field(default_factory=list)
+    resolved_endpoints: list[str] = field(default_factory=list)
     ambiguous_names: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
@@ -209,6 +236,7 @@ class FilterReport:
             "dangling_edges": self.dangling_edges,
             "ambiguous_edges": self.ambiguous_edges,
             "duplicate_edges": self.duplicate_edges,
+            "endpoint_resolved": self.endpoint_resolved,
             "written_nodes": self.written_nodes,
             "written_edges": self.written_edges,
         }
@@ -221,6 +249,50 @@ def _fold(name: str) -> str:
     matching is how a regex shotgun came to outscore a real extractor.
     """
     return name.strip().casefold()
+
+
+def _entity_type(raw: str) -> EntityType | None:
+    """The ontology's type for a candidate's `entity_type`, or None if unknown."""
+    try:
+        return EntityType(raw.strip())
+    except ValueError:
+        return None
+
+
+def _resolve_endpoint(
+    ids: set[str],
+    by_id: dict[str, WriteNode],
+    allowed: frozenset[EntityType] | None,
+) -> tuple[str | None, bool]:
+    """Which node an edge's endpoint name means. `(id, was_resolved)`.
+
+    One id, no question -- that is every ordinary edge, and it is not
+    "resolved".
+
+    Two or more ids means one name is answered by nodes of different types,
+    because `entity_type` is part of the id: `Tatyana` typed NPC by one sample
+    and LORE by four is two nodes. When EXACTLY ONE of them has a type the
+    relationship's domain (or range) admits, that is the only reading of the
+    edge the ontology permits, so it is the reading taken. `IDENTITY_OF`'s range
+    is `{NPC, MONSTER}`, so `Ireena IDENTITY_OF Tatyana` can only mean the NPC.
+
+    Zero or two or more satisfy, or the relationship has no domain/range entry
+    at all: nothing decides it, and picking anyway would manufacture an
+    assertion the extractor never made. The caller drops the edge.
+
+    An endpoint whose `entity_type` is not in the ontology never counts as
+    satisfying. `check_edges` treats an unknown type as unCHECKED, which is
+    right when asking "is this edge legal"; it cannot make an unknown type the
+    unique answer to "which of these two nodes is meant".
+    """
+    if len(ids) == 1:
+        return next(iter(ids)), False
+    if allowed is None:
+        return None, False
+    satisfying = [i for i in ids if _entity_type(by_id[i].entity_type) in allowed]
+    if len(satisfying) == 1:
+        return satisfying[0], True
+    return None, False
 
 
 def keyed_place_names(nodes: list[CandidateNode]) -> set[str]:
@@ -262,7 +334,10 @@ def plan_write(
        place survives REGARDLESS: the wiki indexes 38 locations against the
        book's 414 keyed areas, so a keyed room's absence is expected and is not
        evidence against the room.
-    4. edges left dangling or ambiguous by a dropped or duplicated node
+    4. edges left dangling by a dropped node, and edges whose endpoint name is
+       answered by two nodes of different types -- unless the domain/range
+       table admits exactly one of them, in which case the edge is kept and
+       STAMPED `endpoint_resolved="constraint"` (see `_resolve_endpoint`)
 
     Raises ValueError on an unknown relationship type: a rel type cannot be
     parameterized in Cypher, so it is interpolated into the query text, and
@@ -342,16 +417,23 @@ def plan_write(
             report.dangling_edges += 1
             report.dropped_dangling.append(label)
             continue
-        if len(source_ids) > 1 or len(target_ids) > 1:
-            # Choosing one would manufacture an assertion the extractor never
-            # made -- the same reason a reversal is detected and never
-            # performed. Counted, so the disputed types are visible as the
-            # evidence for whether a type-reconciliation pass is worth building.
+        # A disputed name is settled by the domain/range table when the table
+        # admits exactly one of the candidates, and by nothing otherwise --
+        # choosing then would manufacture an assertion the extractor never
+        # made, the same reason a reversal is detected and never performed.
+        domain, range_ = RELATIONSHIP_DOMAIN_RANGE.get(rel, (None, None))
+        source_id, source_resolved = _resolve_endpoint(source_ids, by_id, domain)
+        target_id, target_resolved = _resolve_endpoint(target_ids, by_id, range_)
+        if source_id is None or target_id is None:
             report.ambiguous_edges += 1
             report.dropped_ambiguous.append(label)
             continue
-        source_id = next(iter(source_ids))
-        target_id = next(iter(target_ids))
+        resolved = "constraint" if (source_resolved or target_resolved) else ""
+        if resolved:
+            report.endpoint_resolved += 1
+            report.resolved_endpoints.append(
+                f"{label}  ->  {source_id if source_resolved else target_id}"
+            )
         key = (source_id, rel.value, target_id)
         if key in seen:
             report.duplicate_edges += 1
@@ -367,6 +449,7 @@ def plan_write(
                 section_heading=edge.section_heading,
                 section_index=edge.section_index,
                 votes=edge.votes,
+                endpoint_resolved=resolved,
             )
         )
 
