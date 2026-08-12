@@ -44,9 +44,9 @@ class Chapter:
 class Section:
     """One section of a chapter, with its chapter provenance.
 
-    A section starts at a keyed heading at any level (`E4. …`, `K18a. …`) or at
-    an unkeyed `##` -- see `sections.split_sections`. Not `##` alone: the vision
-    transcription assigns heading levels at random.
+    A section starts at a heading no deeper than the chapter's derived area
+    depth, and any section too large for one extraction pass is subdivided at
+    its own next heading level -- see `sections.split_sections`.
     """
 
     chapter_slug: str
@@ -54,6 +54,13 @@ class Section:
     heading: str
     index: int
     markdown: str
+    # The heading level this section starts at, or 0 for "unknown" -- the
+    # preamble, and every section from the `key` splitter, whose corpus assigns
+    # levels at random. `structure.py` derives containment from nesting, so a
+    # depth it cannot vouch for must be reported as absent rather than guessed.
+    depth: int = 0
+    # The index of the nearest enclosing section, or -1. Depth 0 never has one.
+    parent_index: int = -1
 
 
 @dataclass
