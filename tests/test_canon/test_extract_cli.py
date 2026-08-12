@@ -14,6 +14,16 @@ from backend.canon.structure import STRUCTURAL_EVIDENCE, structural_edges
 from backend.scripts.extract_canon import _gradeable_subset, _known_sources, find_chapter
 
 
+def _chapters(*chapters: Chapter):
+    """A `load_chapters` stand-in that ignores its corpus/splitter arguments.
+
+    `load_chapters` grew `corpus` and keyword-only parameters when the pipeline
+    pivoted to the D&D Beyond harvest, and a zero-argument lambda would fail on
+    the call rather than on anything these tests are about.
+    """
+    return lambda *_, **__: list(chapters)
+
+
 def chapter(title: str) -> Chapter:
     return Chapter(slug="s", title=title, start_page=1, end_page=2, markdown="x")
 
@@ -125,7 +135,7 @@ class TestExtractionFailureSignaling:
 
     @pytest.mark.asyncio
     async def test_run_carries_the_failure_count_in_its_summary(self, monkeypatch):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(failed=3))
 
         summary = await extract_canon.run("Chapter 3", None, None, None)
@@ -133,7 +143,7 @@ class TestExtractionFailureSignaling:
         assert summary["failed"] == 3
 
     def test_main_exits_nonzero_when_any_call_failed(self, monkeypatch):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(failed=1))
         monkeypatch.setattr("sys.argv", ["extract_canon.py", "Chapter 3"])
 
@@ -143,7 +153,7 @@ class TestExtractionFailureSignaling:
         assert exc.value.code != 0
 
     def test_main_exits_zero_on_a_clean_run(self, monkeypatch):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(failed=0))
         monkeypatch.setattr("sys.argv", ["extract_canon.py", "Chapter 3"])
 
@@ -155,7 +165,7 @@ class TestExtractionFailureSignaling:
     def test_main_exits_nonzero_and_prints_available_sources_for_a_bad_grade_source(
         self, monkeypatch, capsys
     ):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
         monkeypatch.setattr(
             "sys.argv", ["extract_canon.py", "Chapter 3", "--grade", "typo-source"]
@@ -170,7 +180,7 @@ class TestExtractionFailureSignaling:
     def test_out_path_is_not_overwritten_when_the_run_had_failures(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
         out_path.write_text('{"last": "good output"}')
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(failed=1))
 
         asyncio.run(extract_canon.run("Chapter 3", None, None, out_path))
@@ -180,7 +190,7 @@ class TestExtractionFailureSignaling:
     def test_out_path_is_written_on_a_clean_run(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
         out_path.write_text('{"stale": true}')
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(failed=0))
 
         asyncio.run(extract_canon.run("Chapter 3", None, None, out_path))
@@ -194,7 +204,7 @@ class TestRejectedEntityTypeReporting:
 
     @pytest.mark.asyncio
     async def test_printed_when_nonzero(self, monkeypatch, capsys):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _fake_extractor(rejected_entity_types=3)
         )
@@ -206,7 +216,7 @@ class TestRejectedEntityTypeReporting:
 
     @pytest.mark.asyncio
     async def test_not_printed_when_zero(self, monkeypatch, capsys):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
 
         await extract_canon.run("Chapter 3", None, None, None)
@@ -232,7 +242,7 @@ class TestRunProvenance:
 
     def _written(self, monkeypatch, tmp_path, **kw):
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(**kw))
         asyncio.run(extract_canon.run("Chapter 3", None, None, out_path))
         return json.loads(out_path.read_text())
@@ -267,7 +277,7 @@ class TestLimit:
     @pytest.mark.asyncio
     async def test_limit_caps_the_units_processed(self, monkeypatch):
         seen: list = []
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_three_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(seen=seen))
 
         summary = await extract_canon.run("Chapter 3", None, None, None, limit=2)
@@ -278,7 +288,7 @@ class TestLimit:
     @pytest.mark.asyncio
     async def test_no_limit_processes_every_unit(self, monkeypatch):
         seen: list = []
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_three_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(seen=seen))
 
         await extract_canon.run("Chapter 3", None, None, None)
@@ -290,7 +300,7 @@ class TestLimit:
         """A capped run covers part of the chapter, so its artifact must not
         claim to be a complete extraction of it."""
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_three_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
 
         await extract_canon.run("Chapter 3", None, None, out_path, limit=2)
@@ -302,7 +312,7 @@ class TestLimit:
 
     def test_the_flag_is_wired_to_the_parser(self, monkeypatch):
         seen: list = []
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_three_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_three_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor(seen=seen))
         monkeypatch.setattr("sys.argv", ["extract_canon.py", "Chapter 3", "--limit", "1"])
 
@@ -318,7 +328,7 @@ class TestCeilingReporting:
 
     @pytest.mark.asyncio
     async def test_recall_is_printed_against_the_ceiling(self, monkeypatch, capsys):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
 
         summary = await extract_canon.run("Chapter 3", "ch3", None, None)
@@ -374,7 +384,7 @@ class TestSampleSeeds:
     @pytest.mark.asyncio
     async def test_each_sample_is_drawn_with_its_own_seed(self, monkeypatch):
         seeds: list[int] = []
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon,
             "CandidateExtractor",
@@ -388,7 +398,7 @@ class TestSampleSeeds:
     @pytest.mark.asyncio
     async def test_a_single_sample_still_uses_the_pinned_seed(self, monkeypatch):
         seeds: list[int] = []
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon,
             "CandidateExtractor",
@@ -407,7 +417,7 @@ class TestConsensusInTheCli:
     ):
         doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
         draws = [([doru], [], 0), ([doru], [], 0), ([], [], 0)]
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _sampling_extractor(draws))
 
         at_2 = await extract_canon.run(
@@ -424,7 +434,7 @@ class TestConsensusInTheCli:
     async def test_the_vote_histogram_is_printed_before_the_scores(self, monkeypatch, capsys):
         doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
         draws = [([doru], [], 0), ([doru], [], 0), ([], [], 0)]
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _sampling_extractor(draws))
 
         await extract_canon.run("Chapter 3", "ch3", None, None, samples=3, node_k=1, edge_k=1)
@@ -436,7 +446,7 @@ class TestConsensusInTheCli:
 
     @pytest.mark.asyncio
     async def test_no_histogram_is_printed_for_a_single_sample(self, monkeypatch, capsys):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
 
         await extract_canon.run("Chapter 3", None, None, None)
@@ -446,7 +456,7 @@ class TestConsensusInTheCli:
     @pytest.mark.asyncio
     async def test_the_run_object_records_how_the_vote_was_run(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 3)
         )
@@ -468,7 +478,7 @@ class TestConsensusInTheCli:
         """Stage 2b weights by it, and it reads the artifact, not stdout."""
         out_path = tmp_path / "candidates.json"
         doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([doru], [], 0)] * 3)
         )
@@ -482,7 +492,7 @@ class TestConsensusInTheCli:
 
     def test_the_flags_are_wired_to_the_parser(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 4)
         )
@@ -502,7 +512,7 @@ class TestConsensusInTheCli:
     async def test_a_k_no_sample_count_can_satisfy_is_called_out(self, monkeypatch, capsys):
         """k=5 over 3 contributing samples silently empties the run. That must
         not read as 'the chapter contained nothing'."""
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 3)
         )
@@ -520,7 +530,7 @@ class TestConsensusInTheCli:
         """node_k and edge_k are separate knobs. With node_k=1 and edge_k=5 over
         3 samples only the edge set is emptied, and a warning that claimed the
         whole result was empty would overstate."""
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 0)] * 3)
         )
@@ -550,7 +560,7 @@ class TestFailedSamplesAreExcluded:
     @pytest.mark.asyncio
     async def test_a_failed_sample_casts_no_vote(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
         )
@@ -568,7 +578,7 @@ class TestFailedSamplesAreExcluded:
 
     @pytest.mark.asyncio
     async def test_the_excluded_sample_is_named_on_stdout(self, monkeypatch, capsys):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
         )
@@ -585,7 +595,7 @@ class TestFailedSamplesAreExcluded:
     @pytest.mark.asyncio
     async def test_the_artifact_records_which_samples_voted(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
         )
@@ -607,7 +617,7 @@ class TestFailedSamplesAreExcluded:
         ~2,205 calls, where one failure somewhere is close to expected."""
         out_path = tmp_path / "candidates.json"
         out_path.write_text('{"last": "good output"}')
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor(self._draws())
         )
@@ -627,7 +637,7 @@ class TestFailedSamplesAreExcluded:
         artifact must not clobber a good one."""
         out_path = tmp_path / "candidates.json"
         out_path.write_text('{"last": "good output"}')
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 1)] * 3)
         )
@@ -647,7 +657,7 @@ class TestFailedSamplesAreExcluded:
         """With nothing to clobber the artifact is still written, and reading it
         must be enough to tell it apart from a chapter that was simply quiet."""
         out_path = tmp_path / "candidates.json"
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([], [], 1)] * 3)
         )
@@ -666,7 +676,7 @@ class TestFailedSamplesAreExcluded:
     ):
         """A candidate rejected inside an excluded sample never reached the
         output, so counting it describes candidates this run did not produce."""
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon,
             "CandidateExtractor",
@@ -688,7 +698,7 @@ class TestFailedSamplesAreExcluded:
         flagged partial. Excluding it would turn a degraded run into an empty
         one."""
         doru = CandidateNode(name="Doru", entity_type="NPC", section_index=0)
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([doru], [], 2)])
         )
@@ -720,7 +730,7 @@ class TestSingleSamplePathIsUntouched:
         out_path = tmp_path / "candidates.json"
         nodes, edges = self._draw()
         chapter = _keyed_chapter()
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [chapter])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(chapter))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([(nodes, edges, 0)])
         )
@@ -744,7 +754,7 @@ class TestSingleSamplePathIsUntouched:
     async def test_samples_1_neither_deduplicates_nor_stamps_votes(self, monkeypatch, tmp_path):
         out_path = tmp_path / "candidates.json"
         nodes, edges = self._draw()
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_keyed_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_keyed_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([(nodes, edges, 0)])
         )
@@ -765,7 +775,7 @@ class TestStructuralEdgesAreDerivedAfterTheVote:
     @pytest.mark.asyncio
     async def test_derivation_runs_once_over_the_consensus_node_set(self, monkeypatch):
         calls: list[list[CandidateNode]] = []
-        real = extract_canon.structural_edges
+        real = extract_canon.derive_structure
 
         def spy(sections, nodes, place):
             calls.append(list(nodes))
@@ -774,8 +784,8 @@ class TestStructuralEdgesAreDerivedAfterTheVote:
         agreed = CandidateNode(name="Rope", entity_type="ITEM", section_index=0)
         lone = CandidateNode(name="Phantom", entity_type="ITEM", section_index=0)
         draws = [([agreed, lone], [], 0), ([agreed], [], 0), ([agreed], [], 0)]
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_keyed_chapter()])
-        monkeypatch.setattr(extract_canon, "structural_edges", spy)
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_keyed_chapter()))
+        monkeypatch.setattr(extract_canon, "derive_structure", spy)
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _sampling_extractor(draws))
 
         await extract_canon.run(
@@ -795,7 +805,7 @@ class TestStructuralEdgesAreDerivedAfterTheVote:
         the vote would carry 3 votes and be discarded here."""
         out_path = tmp_path / "candidates.json"
         agreed = CandidateNode(name="Rope", entity_type="ITEM", section_index=0)
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_keyed_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_keyed_chapter()))
         monkeypatch.setattr(
             extract_canon, "CandidateExtractor", _sampling_extractor([([agreed], [], 0)] * 3)
         )
@@ -824,7 +834,7 @@ class TestDroppedQuestReporting:
         orphan_edge = CandidateEdge(
             source_name="Free Doru", target_name="Undercroft", rel_type="OBJECTIVE_AT"
         )
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(
             extract_canon,
             "CandidateExtractor",
@@ -842,7 +852,7 @@ class TestDroppedQuestReporting:
 
     @pytest.mark.asyncio
     async def test_not_printed_when_zero(self, monkeypatch, capsys):
-        monkeypatch.setattr(extract_canon, "load_chapters", lambda: [_one_section_chapter()])
+        monkeypatch.setattr(extract_canon, "load_chapters", _chapters(_one_section_chapter()))
         monkeypatch.setattr(extract_canon, "CandidateExtractor", _fake_extractor())
 
         await extract_canon.run("Chapter 3", None, None, None)

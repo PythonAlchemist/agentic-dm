@@ -15,6 +15,17 @@ silently lost roughly 60% of the book's keyed areas, including
 any level whose text matches the keyed pattern now starts a section, so the
 counts are 21 / 147 / 32. Appendix D is unchanged at 32 because not one of its
 88 headings is keyed -- stat-block sub-headings still stay inside their creature.
+
+**Task 12 note: these counts are deliberately UNCHANGED at 21 / 147 / 32.** The
+default splitter is now `depth`, and the corpus is now D&D Beyond's text rather
+than the vision transcription -- but these three fixtures are skeletons of the
+*transcription*, and the transcription is only ever read by the `key` splitter.
+Re-baselining them against the depth splitter would be measuring a rule that
+reads heading levels against a corpus whose heading levels are noise, which
+would pin nonsense. The depth splitter's own behaviour is pinned in
+`test_depth_sections.py` against synthetic fixtures; its counts on the real DDB
+corpus are reported in the task report, because pinning them here would require
+committing the book's text.
 """
 
 import re
@@ -24,9 +35,23 @@ from pathlib import Path
 import pytest
 
 from backend.canon.models import Chapter
-from backend.canon.sections import KEYED_HEADING, split_sections, units_from_sections
+from backend.canon.sections import KEYED_HEADING, units_from_sections
+from backend.canon.sections import split_sections as _split_sections
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def split_sections(chapter: Chapter):
+    """Every test in this module is about the `key` splitter, so it says so.
+
+    `split_sections` now defaults to `splitter="depth"`. These tests and these
+    fixtures are the *transcription* corpus, and the depth splitter must never
+    be pointed at it: its heading levels were assigned essentially at random by
+    a vision model, so deriving anything from them would be deriving from noise.
+    Naming the splitter here keeps that separation visible at every call site
+    rather than resting on whichever default happens to be current.
+    """
+    return _split_sections(chapter, splitter="key")
 
 
 def chapter(markdown: str) -> Chapter:

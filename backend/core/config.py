@@ -1,7 +1,7 @@
 """Application configuration using pydantic-settings."""
 
-from pathlib import Path
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     chroma_dir: Path = data_dir / "chromadb"
     audio_dir: Path = data_dir / "audio"
     canon_dir: Path = data_dir / "canon"
+    # The harvested D&D Beyond markdown cache. Gitignored like everything under
+    # `data/`: the text is copyrighted and must never be committed.
+    ddb_dir: Path = data_dir / "ddb"
 
     # OpenAI
     openai_api_key: str = ""
