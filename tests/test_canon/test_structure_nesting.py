@@ -191,6 +191,20 @@ class TestLocatedIn:
 
         assert ("Ismark Kolyanovich", "Blood of the Vine Tavern") in located(edges)
 
+    def test_the_walk_passes_through_more_than_one_placeless_ancestor(self):
+        """Refinement can nest two placeless levels between a node and its room
+        -- `K7. Chapel` > `Treasure` > a further cut inside it -- and stopping
+        at the first ancestor would answer "nowhere" for everything below the
+        second. The walk continues until it finds a place or runs out."""
+        sections = [
+            section("K7. Chapel", 0, depth=2),
+            section("Treasure", 1, depth=3, parent_index=0),
+            section("The Reliquary", 2, depth=4, parent_index=1),
+        ]
+        edges = structural_edges(sections, [node("Silver Chalice", "ITEM", section_index=2)], None)
+
+        assert ("Silver Chalice", "Chapel") in located(edges)
+
     def test_a_location_node_is_not_located_in_anything(self):
         edges = structural_edges(NESTED, [node("Undercroft", "LOCATION", section_index=4)], CHAPTER)
 

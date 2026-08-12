@@ -511,6 +511,50 @@ async def run(
     return summary
 
 
+def report_structure(chapters: list[Chapter], splitter: str = "depth") -> list[dict]:
+    """What the splitter derives for every chapter, without spending anything.
+
+    The area depth is derived per chapter from that chapter's own headings, so
+    "it works on chapter 3" says nothing about the other 24. This walks all of
+    them for free -- no model, no network -- so a rule that lands one level wrong
+    somewhere is visible before a paid run rather than after one.
+    """
+    rows: list[dict] = []
+    for chapter in chapters:
+        split = split_chapter(chapter, splitter=splitter)
+        keyed = sum(1 for s in split.sections if place_of_section(s))
+        rows.append({
+            "slug": chapter.slug,
+            "title": chapter.title,
+            "area_depth": split.area_depth,
+            "qualified": split.depth_qualified,
+            "before": split.before_refinement,
+            "after": len(split.sections),
+            "subdivided": split.subdivided,
+            "unsplittable": split.unsplittable,
+            "keyed_sections": keyed,
+        })
+    return rows
+
+
+def print_structure_report(rows: list[dict]) -> None:
+    print(f"{'chapter':34s} depth  before  after  split  stuck  keyed")
+    for row in rows:
+        depth = f"h{row['area_depth']}" + ("" if row["qualified"] else "!")
+        print(
+            f"{row['slug']:34s} {depth:>5s}  {row['before']:6d}  {row['after']:5d}  "
+            f"{row['subdivided']:5d}  {row['unsplittable']:5d}  {row['keyed_sections']:5d}"
+        )
+    off = [r["slug"] for r in rows if r["area_depth"] != 3]
+    stuck = sum(r["unsplittable"] for r in rows)
+    print(f"\n  {len(rows)} chapters; {len(rows) - len(off)} derived h3")
+    if off:
+        print("  NOT h3: " + ", ".join(f"{r['slug']} (h{r['area_depth']})"
+                                       for r in rows if r["area_depth"] != 3))
+    print("  `!` marks a chapter where no depth qualified and the deepest was used.")
+    print(f"  {stuck} section(s) over budget with no deeper heading to cut at.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Built here rather than inline in `main` so the defaults are testable.
 
@@ -518,7 +562,9 @@ def build_parser() -> argparse.ArgumentParser:
     test has to be able to see it without spending a paid extraction run.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("chapter", help="Chapter title prefix, e.g. 'Chapter 3'")
+    # Optional, because --report-structure walks every chapter and needs none.
+    parser.add_argument("chapter", nargs="?",
+                        help="Chapter title prefix, e.g. 'Chapter 3'")
     parser.add_argument("--grade", dest="grade_against", metavar="SOURCE",
                         help="Grade against the seed subset for this source, e.g. ch3")
     parser.add_argument("--layer", action="append", dest="layers",
@@ -557,6 +603,12 @@ def build_parser() -> argparse.ArgumentParser:
     # corpus effect from a splitter effect.
     parser.add_argument("--splitter", choices=SPLITTERS, default="depth",
                         help="How to cut chapters into sections (default depth)")
+    # Free: no model, no network, no money. Exists because the area depth is
+    # derived per chapter, so evidence from one chapter is not evidence about
+    # the book.
+    parser.add_argument("--report-structure", action="store_true",
+                        help="Print the derived area depth and section counts for every "
+                             "chapter, then exit without extracting")
     return parser
 
 
@@ -570,6 +622,12 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.report_structure:
+        print_structure_report(report_structure(load_chapters(args.corpus), args.splitter))
+        sys.exit(0)
+
+    if not args.chapter:
+        parser.error("a chapter is required unless --report-structure is given")
     if args.samples < 1:
         parser.error("--samples must be at least 1")
     if args.node_k < 1 or args.edge_k < 1:
