@@ -17,11 +17,14 @@ from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.scripts.reclassify import (
     CHANGED,
+    CONTRADICTORY_PAIRS,
     DECLINED,
     FAILED,
     FLIPPED,
     KEPT,
     NO_RELATION_LEGAL,
+    SELF_LOOP,
+    SYMMETRIC_RELATIONS,
     build_parser,
     classify_outcome,
     load_artifact,
@@ -61,7 +64,7 @@ class TestClassifyOutcome:
     def test_same_type_same_direction_is_kept(self):
         outcome = classify_outcome(
             edge("Ismark", "KNOWS", "Ireena"),
-            Decision("Ismark", "Ireena", "KNOWS", "clear"),
+            [Decision("Ismark", "Ireena", "KNOWS", "clear")],
             was_asked=True,
         )
 
@@ -73,7 +76,7 @@ class TestClassifyOutcome:
         diagnosed failure as agreement."""
         outcome = classify_outcome(
             edge("Strahd", "SERVES", "Vampire Spawn"),
-            Decision("Vampire Spawn", "Strahd", "SERVES", "clear"),
+            [Decision("Vampire Spawn", "Strahd", "SERVES", "clear")],
             was_asked=True,
         )
 
@@ -81,8 +84,8 @@ class TestClassifyOutcome:
 
     def test_a_different_type_is_a_change_whatever_the_direction(self):
         for decision in (
-            Decision("Strahd", "Vampire Spawn", "OWNS", "clear"),
-            Decision("Vampire Spawn", "Strahd", "SERVES", "clear"),
+            [Decision("Strahd", "Vampire Spawn", "OWNS", "clear")],
+            [Decision("Vampire Spawn", "Strahd", "SERVES", "clear")],
         ):
             outcome = classify_outcome(
                 edge("Strahd", "GUARDS", "Vampire Spawn"), decision, was_asked=True
@@ -91,28 +94,137 @@ class TestClassifyOutcome:
             assert outcome == CHANGED
 
     def test_a_decline_on_an_asked_pair_is_the_models_own(self):
-        outcome = classify_outcome(edge(), Decision("", "", NONE_RELATION, ""), was_asked=True)
+        outcome = classify_outcome(edge(), [Decision("", "", NONE_RELATION, "")], was_asked=True)
 
         assert outcome == DECLINED
 
     def test_a_decline_on_an_unasked_pair_belongs_to_the_table(self):
         """Counting a table decline as a model decline would manufacture the
         precision signal this whole experiment is measuring."""
-        outcome = classify_outcome(edge(), Decision("", "", NONE_RELATION, ""), was_asked=False)
+        outcome = classify_outcome(
+            edge(), [Decision("", "", NONE_RELATION, "")], was_asked=False
+        )
 
         assert outcome == NO_RELATION_LEGAL
         assert outcome != DECLINED
 
     def test_a_non_answer_is_never_a_decline(self):
-        outcome = classify_outcome(edge(), Decision("", "", NO_ANSWER, ""), was_asked=True)
+        outcome = classify_outcome(edge(), [Decision("", "", NO_ANSWER, "")], was_asked=True)
 
         assert outcome == FAILED
         assert outcome != DECLINED
 
-    def test_the_six_outcomes_are_distinct_labels(self):
-        labels = [KEPT, FLIPPED, CHANGED, DECLINED, NO_RELATION_LEGAL, FAILED]
+    def test_the_seven_outcomes_are_distinct_labels(self):
+        labels = [KEPT, FLIPPED, CHANGED, DECLINED, NO_RELATION_LEGAL, SELF_LOOP, FAILED]
 
         assert len(set(labels)) == len(labels)
+
+    def test_a_self_loop_decline_is_its_own_bucket(self):
+        """Three different authorities can produce a `NONE`: the model, the type
+        table, and the names being the same entity. Only the first is a decline."""
+        outcome = classify_outcome(
+            edge("Helga", "IDENTITY_OF", "Helga"),
+            [Decision("", "", NONE_RELATION, "")],
+            was_asked=False,
+            is_self_loop=True,
+        )
+
+        assert outcome == SELF_LOOP
+        assert outcome not in (DECLINED, NO_RELATION_LEGAL)
+
+
+class TestClassifyOutcomeWithSeveralRelations:
+    """`KEPT` now means "the original survives AMONG the answers" -- a weaker bar
+    than the one-relation run, since more answers is more chances to contain it.
+    That is why the answers-per-pair distribution is printed beside the split."""
+
+    def test_the_original_surviving_among_two_answers_is_kept(self):
+        outcome = classify_outcome(
+            edge("Ismark", "RELATED_TO", "Ireena"),
+            [
+                Decision("Ismark", "Ireena", "RELATED_TO", "clear"),
+                Decision("Ismark", "Ireena", "GUARDS", "clear"),
+            ],
+            was_asked=True,
+        )
+
+        assert outcome == KEPT
+
+    def test_two_answers_neither_of_them_the_original_is_a_change(self):
+        outcome = classify_outcome(
+            edge("Ismark", "TRAVELED_TO", "Ireena"),
+            [
+                Decision("Ismark", "Ireena", "RELATED_TO", "clear"),
+                Decision("Ismark", "Ireena", "GUARDS", "clear"),
+            ],
+            was_asked=True,
+        )
+
+        assert outcome == CHANGED
+
+    def test_the_original_type_reversed_among_the_answers_is_a_flip(self):
+        outcome = classify_outcome(
+            edge("Strahd", "SERVES", "Vampire Spawn"),
+            [
+                Decision("Vampire Spawn", "Strahd", "SERVES", "clear"),
+                Decision("Strahd", "Vampire Spawn", "GUARDS", "clear"),
+            ],
+            was_asked=True,
+        )
+
+        assert outcome == FLIPPED
+
+    def test_kept_beats_flipped_when_both_directions_come_back(self):
+        """A pair given the relation in both directions still contains the
+        original, and reporting that as a flip would claim a change stage B did
+        not make."""
+        outcome = classify_outcome(
+            edge("Ismark", "KNOWS", "Ireena"),
+            [
+                Decision("Ireena", "Ismark", "KNOWS", "clear"),
+                Decision("Ismark", "Ireena", "KNOWS", "clear"),
+            ],
+            was_asked=True,
+        )
+
+        assert outcome == KEPT
+
+    def test_a_non_answer_anywhere_fails_the_whole_pair(self):
+        outcome = classify_outcome(
+            edge(), [Decision("", "", NO_ANSWER, "")], was_asked=True
+        )
+
+        assert outcome == FAILED
+
+
+class TestContradictionDetection:
+    def test_identity_of_and_related_to_are_the_flagged_pair(self):
+        """One being under two names cannot also be its own kin. The live graph
+        holds both for Ireena/Tatyana; this experiment must report whether
+        allowing several relations per pair reproduces it."""
+        assert frozenset({"IDENTITY_OF", "RELATED_TO"}) in CONTRADICTORY_PAIRS
+
+    def test_a_decision_set_holding_both_is_detected(self):
+        emitted = {"IDENTITY_OF", "RELATED_TO"}
+
+        assert any(emitted >= banned for banned in CONTRADICTORY_PAIRS)
+
+    def test_either_alone_is_not_a_contradiction(self):
+        for emitted in ({"IDENTITY_OF"}, {"RELATED_TO"}, {"IDENTITY_OF", "KNOWS"}):
+            assert not any(emitted >= banned for banned in CONTRADICTORY_PAIRS)
+
+
+class TestSymmetricRelations:
+    def test_the_flagged_relations_have_a_symmetric_gloss(self):
+        """A flip on one of these costs golden recall without changing the
+        claim, because `grade.py` matches direction-sensitively. Listed so the
+        recall delta can be read honestly, never to silently repair anything."""
+        assert "RELATED_TO" in SYMMETRIC_RELATIONS
+        assert "CONNECTED_TO" in SYMMETRIC_RELATIONS
+
+    def test_a_directional_relation_is_not_listed(self):
+        for directional in ("LOCATED_IN", "CONTAINS", "SERVES", "GAVE_QUEST", "OWNS"):
+            assert directional not in SYMMETRIC_RELATIONS
 
 
 class TestRetypedEdge:

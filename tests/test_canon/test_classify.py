@@ -19,6 +19,15 @@ numbers mean, which is why they are tested rather than merely commented.
   three onto the wrong pairs, and a silence must never be recorded as a decline.
   Those two are the failure modes that would corrupt the measurement while
   looking like a result.
+
+Two more classes cover the corrections a hand read of the first run's output
+forced:
+
+- `TestSelfPairsAreRejectedBeforeTheModelSeesThem` -- `Helga Ruvak -IDENTITY_OF->
+  Helga Ruvak` survived that run and shipped in its fabrication sample.
+- `TestSeveralRelationsPerPair` -- one of the three golden edges that run lost
+  was a sentence stating TWO true relations where the design allowed one. The
+  cap is the risk here, so `capped` is tested as carefully as the feature.
 """
 
 import json
@@ -32,6 +41,7 @@ from backend.canon.classify import (
     Decision,
     Pair,
     RelationClassifier,
+    is_self_pair,
     legal_relations,
     offered_options,
     pairs_from_edges,
@@ -302,6 +312,180 @@ class TestTypeRendering:
         assert parse_types("") == frozenset()
 
 
+class TestSelfPairsAreRejectedBeforeTheModelSeesThem:
+    """`Helga Ruvak -IDENTITY_OF-> Helga Ruvak` survived the first measured run
+    and shipped in its fabrication sample. No relation in this ontology says
+    anything by relating a thing to itself, and the failure class has been known
+    on this project since its first fabrication check."""
+
+    def test_a_self_pair_is_offered_nothing(self):
+        assert offered_options(pair(a_name="Helga Ruvak", a_type="NPC",
+                                    b_name="Helga Ruvak", b_type="NPC")) == []
+
+    def test_the_match_is_on_the_shared_name_fold(self):
+        """An extractor that emitted a differently-cased or padded spelling has
+        still produced a self-loop."""
+        assert is_self_pair(pair(a_name="Strahd", a_type="NPC",
+                                 b_name="  strahd ", b_type="NPC"))
+        assert offered_options(pair(a_name="Strahd", a_type="NPC",
+                                    b_name="  strahd ", b_type="NPC")) == []
+
+    def test_two_different_entities_of_one_type_are_not_a_self_pair(self):
+        subject = pair(a_name="Ismark", a_type="NPC", b_name="Ireena", b_type="NPC")
+
+        assert not is_self_pair(subject)
+        assert offered_options(subject)
+
+    @pytest.mark.asyncio
+    async def test_a_self_pair_is_declined_without_a_call(self):
+        client = make_client({"answers": []})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        decisions = await classifier.classify(
+            [pair(a_name="Helga Ruvak", a_type="NPC", b_name="Helga Ruvak", b_type="NPC")]
+        )
+
+        client.chat.completions.create.assert_not_awaited()
+        assert decisions == [[Decision("", "", NONE_RELATION, "")]]
+        assert classifier.self_loops == 1
+        assert classifier.failures == 0
+
+    @pytest.mark.asyncio
+    async def test_it_is_counted_apart_from_the_tables_declines(self):
+        """One is a fact about the NAMES, the other about the TYPE TABLE.
+        Summing them would describe neither."""
+        self_pair = pair(a_name="Helga", a_type="NPC", b_name="Helga", b_type="NPC")
+        untypeable = pair(a_name="Curse", a_type="LORE", b_name="Mists", b_type="LORE")
+        client = make_client({"answers": []})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([self_pair, untypeable])
+
+        assert (classifier.self_loops, classifier.no_legal_relation) == (1, 1)
+
+    @pytest.mark.asyncio
+    async def test_a_self_pair_never_reaches_a_rendered_prompt(self):
+        self_pair = pair(a_name="Helga Ruvak", a_type="NPC",
+                         b_name="Helga Ruvak", b_type="NPC")
+        client = make_client({"answers": [{"n": 1, "relations": ["NONE"]}]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        await classifier.classify([self_pair, pair()])
+
+        assert "Helga Ruvak" not in sent_prompt(client)
+
+
+class TestSeveralRelationsPerPair:
+    """Of the three golden edges the first run lost, one was a single sentence
+    stating TWO true relations where the design permitted one answer. The cap is
+    low and the prompt demands each relation be independently stated, because
+    the obvious failure mode is a model filling the slots."""
+
+    @pytest.mark.asyncio
+    async def test_two_independently_stated_relations_both_survive(self):
+        subject = pair(a_name="Ireena", a_type="NPC", b_name="Ismark", b_type="NPC")
+        client = make_client({"answers": [{
+            "n": 1,
+            "relations": ["Ismark -RELATED_TO-> Ireena", "Ismark -GUARDS-> Ireena"],
+            "confidence": "clear",
+        }]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        (decisions,) = await classifier.classify([subject])
+
+        assert decisions == [
+            Decision("Ismark", "Ireena", "RELATED_TO", "clear"),
+            Decision("Ismark", "Ireena", "GUARDS", "clear"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_more_than_the_cap_is_truncated_and_recorded(self):
+        """`capped` is the evidence for whether the CAP or the EVIDENCE decides
+        how many relations a pair carries."""
+        subject = pair(a_name="Ireena", a_type="NPC", b_name="Ismark", b_type="NPC")
+        client = make_client({"answers": [{
+            "n": 1,
+            "relations": ["Ismark -RELATED_TO-> Ireena", "Ismark -GUARDS-> Ireena",
+                          "Ismark -KNOWS-> Ireena"],
+            "confidence": "clear",
+        }]})
+        classifier = RelationClassifier(client=client, model="test-model", max_relations=2)
+
+        (decisions,) = await classifier.classify([subject])
+
+        assert len(decisions) == 2
+        assert classifier.capped == 1
+
+    @pytest.mark.asyncio
+    async def test_within_the_cap_nothing_is_recorded_as_capped(self):
+        client = make_client({"answers": [
+            {"n": 1, "relations": ["Ismark -TRAVELED_TO-> Vallaki"], "confidence": "clear"}
+        ]})
+        classifier = RelationClassifier(client=client, model="test-model", max_relations=2)
+
+        await classifier.classify([pair()])
+
+        assert classifier.capped == 0
+
+    @pytest.mark.asyncio
+    async def test_the_same_relation_twice_is_one_relation(self):
+        client = make_client({"answers": [{
+            "n": 1,
+            "relations": ["Ismark -TRAVELED_TO-> Vallaki", "ISMARK -TRAVELED_TO-> VALLAKI"],
+            "confidence": "clear",
+        }]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        (decisions,) = await classifier.classify([pair()])
+
+        assert decisions == [Decision("Ismark", "Vallaki", "TRAVELED_TO", "clear")]
+        assert classifier.capped == 0
+
+    @pytest.mark.asyncio
+    async def test_an_empty_relation_list_is_a_decline_not_a_failure(self):
+        """"I chose nothing" is unambiguous in meaning. Counting it as a failure
+        would understate the decline rate, which is the number this experiment
+        turns on."""
+        client = make_client({"answers": [{"n": 1, "relations": [], "confidence": "clear"}]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        (decisions,) = await classifier.classify([pair()])
+
+        assert decisions == [Decision("", "", NONE_RELATION, "clear")]
+        assert classifier.failures == 0
+
+    @pytest.mark.asyncio
+    async def test_none_beside_a_real_relation_takes_the_relation(self):
+        """A contradiction in the answer. The model named something specific;
+        reading that as a decline would discard a positive answer it gave."""
+        client = make_client({"answers": [{
+            "n": 1,
+            "relations": ["NONE", "Ismark -TRAVELED_TO-> Vallaki"],
+            "confidence": "clear",
+        }]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        (decisions,) = await classifier.classify([pair()])
+
+        assert decisions == [Decision("Ismark", "Vallaki", "TRAVELED_TO", "clear")]
+
+    def test_the_prompt_states_the_cap_it_will_enforce(self):
+        prompt = render_prompt([pair()], max_relations=2)
+
+        assert "up to 2" in prompt
+
+    def test_the_worked_example_does_not_teach_a_measured_case(self):
+        """The first draft used `Ismark RELATED_TO/GUARDS Ireena` -- one of the
+        three golden edges the previous run LOST, and the exact case this change
+        exists to recover. Shipping that would have made its recovery worthless
+        as evidence."""
+        prompt = render_prompt([pair(a_name="Zed", a_type="NPC", b_name="Zeb", b_type="NPC")])
+        instructions = prompt.split("--- ITEMS ---")[0]
+
+        for corpus_name in ("Ismark", "Ireena", "Strahd", "Vallaki", "Morgantha", "Rahadin"):
+            assert corpus_name not in instructions
+
+
 class TestNoLegalRelation:
     @pytest.mark.asyncio
     async def test_a_pair_admitting_nothing_is_declined_without_a_call(self):
@@ -316,7 +500,7 @@ class TestNoLegalRelation:
         decisions = await classifier.classify([subject])
 
         client.chat.completions.create.assert_not_awaited()
-        assert decisions == [Decision("", "", NONE_RELATION, "")]
+        assert decisions == [[Decision("", "", NONE_RELATION, "")]]
         assert classifier.no_legal_relation == 1
         assert classifier.failures == 0
         assert classifier.calls == 0
@@ -341,27 +525,27 @@ class TestNoLegalRelation:
         first = pair(a_name="Ireena", a_type="NPC", b_name="Ismark", b_type="NPC")
         second = pair(a_name="Barovia", a_type="LOCATION", b_name="Church", b_type="LOCATION")
         client = make_client({"answers": [
-            {"n": 1, "answer": "Ireena -KNOWS-> Ismark", "confidence": "clear"},
-            {"n": 2, "answer": "Church -LOCATED_IN-> Barovia", "confidence": "clear"},
+            {"n": 1, "relations": ["Ireena -KNOWS-> Ismark"], "confidence": "clear"},
+            {"n": 2, "relations": ["Church -LOCATED_IN-> Barovia"], "confidence": "clear"},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         decisions = await classifier.classify([first, unaskable, second])
 
-        assert decisions[0] == Decision("Ireena", "Ismark", "KNOWS", "clear")
-        assert decisions[1] == Decision("", "", NONE_RELATION, "")
-        assert decisions[2] == Decision("Church", "Barovia", "LOCATED_IN", "clear")
+        assert decisions[0] == [Decision("Ireena", "Ismark", "KNOWS", "clear")]
+        assert decisions[1] == [Decision("", "", NONE_RELATION, "")]
+        assert decisions[2] == [Decision("Church", "Barovia", "LOCATED_IN", "clear")]
 
 
 class TestParsing:
     @pytest.mark.asyncio
     async def test_none_parses_to_empty_endpoints(self):
-        client = make_client({"answers": [{"n": 1, "answer": "NONE", "confidence": "unsure"}]})
+        client = make_client({"answers": [{"n": 1, "relations": ["NONE"], "confidence": "unsure"}]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         decisions = await classifier.classify([pair()])
 
-        assert decisions == [Decision("", "", NONE_RELATION, "unsure")]
+        assert decisions == [[Decision("", "", NONE_RELATION, "unsure")]]
         assert classifier.failures == 0
 
     @pytest.mark.asyncio
@@ -375,7 +559,7 @@ class TestParsing:
             for i in range(10)
         ]
         client = make_client({"answers": [
-            {"n": n, "answer": f"NPC{n - 1:02d} -TRAVELED_TO-> Town{n - 1:02d}",
+            {"n": n, "relations": [f"NPC{n - 1:02d} -TRAVELED_TO-> Town{n - 1:02d}"],
              "confidence": "clear"}
             for n in (1, 2, 3, 5, 7, 9, 10)
         ]})
@@ -386,11 +570,11 @@ class TestParsing:
         answered = {1, 2, 3, 5, 7, 9, 10}
         for position, decision in enumerate(decisions, start=1):
             if position in answered:
-                assert decision == Decision(
+                assert decision == [Decision(
                     f"NPC{position - 1:02d}", f"Town{position - 1:02d}", "TRAVELED_TO", "clear"
-                )
+                )]
             else:
-                assert decision == Decision("", "", NO_ANSWER, "")
+                assert decision == [Decision("", "", NO_ANSWER, "")]
         assert classifier.failures == 3
 
     @pytest.mark.asyncio
@@ -400,7 +584,7 @@ class TestParsing:
         client = make_client({"answers": []})
         classifier = RelationClassifier(client=client, model="test-model")
 
-        (decision,) = await classifier.classify([pair()])
+        ((decision,),) = await classifier.classify([pair()])
 
         assert decision.rel_type == NO_ANSWER
         assert decision.rel_type != NONE_RELATION
@@ -414,17 +598,17 @@ class TestParsing:
             pair(a_name="Doru", a_type="NPC", b_name="Barovia", b_type="LOCATION"),
         ]
         client = make_client({"answers": [
-            {"n": 1, "answer": "Ismark -TRAVELED_TO-> Vallaki", "confidence": "clear"},
-            {"n": 2, "answer": ["not", "a", "string"]},
-            {"n": 3, "answer": "Doru -LOCATED_IN-> Barovia", "confidence": "implied"},
+            {"n": 1, "relations": ["Ismark -TRAVELED_TO-> Vallaki"], "confidence": "clear"},
+            {"n": 2, "relations": "not a list"},
+            {"n": 3, "relations": ["Doru -LOCATED_IN-> Barovia"], "confidence": "implied"},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         decisions = await classifier.classify(pairs)
 
-        assert decisions[0] == Decision("Ismark", "Vallaki", "TRAVELED_TO", "clear")
-        assert decisions[1] == Decision("", "", NO_ANSWER, "")
-        assert decisions[2] == Decision("Doru", "Barovia", "LOCATED_IN", "implied")
+        assert decisions[0] == [Decision("Ismark", "Vallaki", "TRAVELED_TO", "clear")]
+        assert decisions[1] == [Decision("", "", NO_ANSWER, "")]
+        assert decisions[2] == [Decision("Doru", "Barovia", "LOCATED_IN", "implied")]
         assert classifier.failures == 1
 
     @pytest.mark.asyncio
@@ -432,11 +616,11 @@ class TestParsing:
         """Not a quiet NONE: recording it as a decline would let an answer the
         ontology forbids feed the precision number it was meant to be caught by."""
         client = make_client({"answers": [
-            {"n": 1, "answer": "Vallaki -LOCATED_IN-> Ismark", "confidence": "clear"}
+            {"n": 1, "relations": ["Vallaki -LOCATED_IN-> Ismark"], "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
-        (decision,) = await classifier.classify([pair()])
+        ((decision,),) = await classifier.classify([pair()])
 
         assert decision == Decision("", "", NO_ANSWER, "")
         assert classifier.failures == 1
@@ -444,11 +628,11 @@ class TestParsing:
     @pytest.mark.asyncio
     async def test_an_endpoint_that_was_not_in_the_item_is_a_non_answer(self):
         client = make_client({"answers": [
-            {"n": 1, "answer": "Ismark -TRAVELED_TO-> Krezk", "confidence": "clear"}
+            {"n": 1, "relations": ["Ismark -TRAVELED_TO-> Krezk"], "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
-        (decision,) = await classifier.classify([pair()])
+        ((decision,),) = await classifier.classify([pair()])
 
         assert decision == Decision("", "", NO_ANSWER, "")
         assert classifier.failures == 1
@@ -459,36 +643,36 @@ class TestParsing:
         expressible, since a reversal is one of the diagnosed failures."""
         subject = pair(a_name="Strahd", a_type="NPC", b_name="Vampire Spawn", b_type="MONSTER")
         client = make_client({"answers": [
-            {"n": 1, "answer": "Vampire Spawn -SERVES-> Strahd", "confidence": "clear"}
+            {"n": 1, "relations": ["Vampire Spawn -SERVES-> Strahd"], "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
-        (decision,) = await classifier.classify([subject])
+        ((decision,),) = await classifier.classify([subject])
 
         assert decision == Decision("Vampire Spawn", "Strahd", "SERVES", "clear")
 
     @pytest.mark.asyncio
     async def test_endpoint_names_are_matched_case_insensitively(self):
         client = make_client({"answers": [
-            {"n": 1, "answer": "  ismark   -TRAVELED_TO->  VALLAKI ", "confidence": "Clear"}
+            {"n": 1, "relations": ["  ismark   -TRAVELED_TO->  VALLAKI "], "confidence": "Clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
-        (decision,) = await classifier.classify([pair()])
+        ((decision,),) = await classifier.classify([pair()])
 
         assert decision == Decision("Ismark", "Vallaki", "TRAVELED_TO", "clear")
 
     @pytest.mark.asyncio
     async def test_a_duplicated_number_does_not_answer_twice(self):
         client = make_client({"answers": [
-            {"n": 1, "answer": "NONE", "confidence": "clear"},
-            {"n": 1, "answer": "Ismark -TRAVELED_TO-> Vallaki"},
+            {"n": 1, "relations": ["NONE"], "confidence": "clear"},
+            {"n": 1, "relations": ["Ismark -TRAVELED_TO-> Vallaki"]},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         decisions = await classifier.classify([pair()])
 
-        assert decisions == [Decision("", "", NONE_RELATION, "clear")]
+        assert decisions == [[Decision("", "", NONE_RELATION, "clear")]]
 
     @pytest.mark.asyncio
     async def test_a_payload_with_no_answers_list_fails_every_pair(self):
@@ -497,17 +681,17 @@ class TestParsing:
 
         decisions = await classifier.classify([pair(), pair(a_name="Doru")])
 
-        assert [d.rel_type for d in decisions] == [NO_ANSWER, NO_ANSWER]
+        assert [d[0].rel_type for d in decisions] == [NO_ANSWER, NO_ANSWER]
         assert classifier.failures == 2
 
     @pytest.mark.asyncio
     async def test_an_unnumbered_answer_is_ignored_rather_than_positioned(self):
         client = make_client({"answers": [
-            {"answer": "Ismark -TRAVELED_TO-> Vallaki"}
+            {"relations": ["Ismark -TRAVELED_TO-> Vallaki"]}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
-        (decision,) = await classifier.classify([pair()])
+        ((decision,),) = await classifier.classify([pair()])
 
         assert decision.rel_type == NO_ANSWER
 
@@ -515,7 +699,11 @@ class TestParsing:
 class TestTheThreeKindsOfNonAnswer:
     """A run problem, a model problem, and the constraint working are three
     different events that all produce no edge. Summing them into one number
-    would hide which one happened, and the third is not a defect at all."""
+    would hide which one happened, and the third is not a defect at all.
+
+    `failures` counts PAIRS; `off_vocabulary` counts RELATIONS, because with
+    several relations allowed per pair one can be refused while another stands.
+    Adding them would double-count the pair that lost only one of two."""
 
     @pytest.mark.asyncio
     async def test_a_failed_call_is_counted_as_a_call_failure(self):
@@ -525,7 +713,7 @@ class TestTheThreeKindsOfNonAnswer:
 
         await classifier.classify([pair()])
 
-        assert (classifier.call_failures, classifier.unanswered, classifier.off_vocabulary) == (
+        assert (classifier.call_failures, classifier.unanswered, classifier.unusable) == (
             1, 0, 0,
         )
 
@@ -536,9 +724,19 @@ class TestTheThreeKindsOfNonAnswer:
 
         await classifier.classify([pair()])
 
-        assert (classifier.call_failures, classifier.unanswered, classifier.off_vocabulary) == (
+        assert (classifier.call_failures, classifier.unanswered, classifier.unusable) == (
             0, 1, 0,
         )
+
+    @pytest.mark.asyncio
+    async def test_relations_that_is_not_a_list_is_unreadable(self):
+        client = make_client({"answers": [{"n": 1, "relations": "Ismark -KNOWS-> Vallaki"}]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        ((decision,),) = await classifier.classify([pair()])
+
+        assert decision.rel_type == NO_ANSWER
+        assert classifier.unanswered == 1
 
     @pytest.mark.asyncio
     async def test_an_answer_off_the_offered_list_is_counted_apart(self):
@@ -546,20 +744,39 @@ class TestTheThreeKindsOfNonAnswer:
         a relation the endpoint types forbid and was refused. Its size is the
         evidence for how much work the constraint does."""
         client = make_client({"answers": [
-            {"n": 1, "answer": "Vallaki -LOCATED_IN-> Ismark", "confidence": "clear"}
+            {"n": 1, "relations": ["Vallaki -LOCATED_IN-> Ismark"], "confidence": "clear"}
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         await classifier.classify([pair()])
 
-        assert (classifier.call_failures, classifier.unanswered, classifier.off_vocabulary) == (
+        assert classifier.off_vocabulary == 1
+        assert (classifier.call_failures, classifier.unanswered, classifier.unusable) == (
             0, 0, 1,
         )
 
     @pytest.mark.asyncio
+    async def test_a_refused_relation_does_not_take_its_valid_sibling_with_it(self):
+        """The reason `off_vocabulary` counts relations and `failures` counts
+        pairs. One bad name in a two-relation answer must cost that relation
+        and nothing else."""
+        client = make_client({"answers": [{
+            "n": 1,
+            "relations": ["Ismark -TRAVELED_TO-> Vallaki", "Vallaki -LOCATED_IN-> Ismark"],
+            "confidence": "clear",
+        }]})
+        classifier = RelationClassifier(client=client, model="test-model")
+
+        (decisions,) = await classifier.classify([pair()])
+
+        assert decisions == [Decision("Ismark", "Vallaki", "TRAVELED_TO", "clear")]
+        assert classifier.off_vocabulary == 1
+        assert classifier.failures == 0
+
+    @pytest.mark.asyncio
     async def test_failures_is_their_sum(self):
         client = make_client({"answers": [
-            {"n": 1, "answer": "Vallaki -LOCATED_IN-> Ismark"},
+            {"n": 1, "relations": ["Vallaki -LOCATED_IN-> Ismark"]},
         ]})
         classifier = RelationClassifier(client=client, model="test-model")
 
@@ -567,12 +784,12 @@ class TestTheThreeKindsOfNonAnswer:
 
         assert classifier.failures == 3
         assert classifier.failures == (
-            classifier.call_failures + classifier.unanswered + classifier.off_vocabulary
+            classifier.call_failures + classifier.unanswered + classifier.unusable
         )
 
     @pytest.mark.asyncio
     async def test_a_decline_is_not_any_kind_of_failure(self):
-        client = make_client({"answers": [{"n": 1, "answer": "NONE"}]})
+        client = make_client({"answers": [{"n": 1, "relations": ["NONE"]}]})
         classifier = RelationClassifier(client=client, model="test-model")
 
         await classifier.classify([pair()])
@@ -589,7 +806,7 @@ class TestFailureHandling:
 
         decisions = await classifier.classify([pair(), pair(a_name="Doru")])
 
-        assert [d.rel_type for d in decisions] == [NO_ANSWER, NO_ANSWER]
+        assert [d[0].rel_type for d in decisions] == [NO_ANSWER, NO_ANSWER]
         assert classifier.failures == 2
         assert classifier.calls == 0
 
@@ -607,13 +824,13 @@ class TestFailureHandling:
 
         decisions = await classifier.classify([pair()])
 
-        assert decisions[0].rel_type == NO_ANSWER
+        assert decisions[0][0].rel_type == NO_ANSWER
         assert classifier.failures == 1
 
     @pytest.mark.asyncio
     async def test_one_failed_batch_leaves_the_others_answered(self):
         good = {"answers": [
-            {"n": n, "answer": "Ismark -TRAVELED_TO-> Vallaki", "confidence": "clear"}
+            {"n": n, "relations": ["Ismark -TRAVELED_TO-> Vallaki"], "confidence": "clear"}
             for n in range(1, 3)
         ]}
         message = MagicMock()
@@ -629,8 +846,8 @@ class TestFailureHandling:
 
         decisions = await classifier.classify([pair()] * 4)
 
-        assert [d.rel_type for d in decisions] == [NO_ANSWER, NO_ANSWER,
-                                                   "TRAVELED_TO", "TRAVELED_TO"]
+        assert [d[0].rel_type for d in decisions] == [NO_ANSWER, NO_ANSWER,
+                                                      "TRAVELED_TO", "TRAVELED_TO"]
         assert classifier.failures == 2
 
 
@@ -652,14 +869,14 @@ class TestBatchingAndCost:
             for i in range(7)
         ]
         client = make_client({"answers": [
-            {"n": n, "answer": "NONE", "confidence": "clear"} for n in range(1, 8)
+            {"n": n, "relations": ["NONE"], "confidence": "clear"} for n in range(1, 8)
         ]})
         classifier = RelationClassifier(client=client, model="test-model", batch_size=3)
 
         decisions = await classifier.classify(pairs)
 
         assert len(decisions) == len(pairs)
-        assert all(d.rel_type == NONE_RELATION for d in decisions)
+        assert all(d == [Decision("", "", NONE_RELATION, "clear")] for d in decisions)
 
     @pytest.mark.asyncio
     async def test_token_usage_accumulates_across_calls(self):

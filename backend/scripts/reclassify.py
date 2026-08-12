@@ -40,10 +40,12 @@ import yaml
 
 from backend.canon.classify import (
     BATCH_SIZE,
+    MAX_RELATIONS,
     NO_ANSWER,
     NONE_RELATION,
     Decision,
     RelationClassifier,
+    is_self_pair,
     offered_options,
     pairs_from_edges,
 )
@@ -63,13 +65,29 @@ logger = logging.getLogger(__name__)
 INPUT_USD_PER_TOKEN = 0.150 / 1_000_000
 OUTPUT_USD_PER_TOKEN = 0.600 / 1_000_000
 
-#: The four ways stage B can respond to an edge, plus the two non-answers.
+#: The four ways stage B can respond to an edge, plus the three non-answers.
 KEPT = "kept"
 FLIPPED = "flipped direction"
 CHANGED = "changed type"
 DECLINED = "NONE"
 NO_RELATION_LEGAL = "NONE (no legal relation)"
+SELF_LOOP = "NONE (self-loop)"
 FAILED = "no answer"
+
+#: Relations whose gloss states no asymmetry, so swapping their endpoints
+#: changes the stored tuple and nothing about the claim. `grade.py` matches
+#: edges direction-sensitively, so a flip on one of these costs recall without
+#: being wrong -- reported, never silently corrected.
+SYMMETRIC_RELATIONS = frozenset({
+    "RELATED_TO", "KNOWS", "ALLIED_WITH", "CONNECTED_TO", "IDENTITY_OF", "ENEMY_OF",
+})
+
+#: Two relations that cannot both hold of one pair: one being under two names
+#: cannot also be its own kin. The live graph holds both for Ireena/Tatyana.
+#: Detected and REPORTED here, never repaired -- a mutual-exclusion check in
+#: `constraints.py` is separate work, and this experiment's job is to say
+#: whether allowing several relations per pair produces the contradiction.
+CONTRADICTORY_PAIRS = frozenset({frozenset({"IDENTITY_OF", "RELATED_TO"})})
 
 
 def load_artifact(path: Path) -> tuple[dict, list[CandidateNode], list[CandidateEdge]]:
@@ -86,27 +104,48 @@ def split_edges(edges: list[CandidateEdge]) -> tuple[list[int], list[int]]:
     return llm, derived
 
 
-def classify_outcome(edge: CandidateEdge, decision: Decision, *, was_asked: bool) -> str:
+def classify_outcome(
+    edge: CandidateEdge,
+    decisions: list[Decision],
+    *,
+    was_asked: bool,
+    is_self_loop: bool = False,
+) -> str:
     """Which of the four ways stage B answered this edge.
 
-    `NO_RELATION_LEGAL` is split out from `DECLINED` because it is a decision of
-    the TABLE, made without a call. Folding it into the decline rate would credit
-    the model with declines it was never asked to make, which is precisely the
-    way this experiment could report a precision mechanism it does not have.
+    The three `NONE`-shaped buckets are kept apart because they are decisions by
+    three different authorities: the model declined, the type TABLE admitted
+    nothing, or the two endpoints were the same entity. Folding any of them into
+    the decline rate would credit the model with declines it never made, which
+    is precisely how this experiment could report a precision mechanism it does
+    not have.
 
     A type change and a direction flip are separate outcomes even though both
     are "disagreement": they are the two different things stage B was built to
     re-decide, and one number could not say which of them it did.
+
+    WITH SEVERAL RELATIONS PER PAIR, `KEPT` MEANS "THE ORIGINAL SURVIVES AMONG
+    THE ANSWERS", which is a WEAKER bar than the previous run's "the single
+    answer was the original". More answers means more chances to contain it, so
+    `kept` and `flipped` can rise for mechanical reasons alone. Any comparison
+    with the one-relation run has to be read with the answers-per-pair
+    distribution beside it, which `run` prints for exactly this reason.
     """
-    if decision.rel_type == NO_ANSWER:
+    if any(d.rel_type == NO_ANSWER for d in decisions):
         return FAILED
-    if decision.rel_type == NONE_RELATION:
+    if all(d.rel_type == NONE_RELATION for d in decisions):
+        if is_self_loop:
+            return SELF_LOOP
         return DECLINED if was_asked else NO_RELATION_LEGAL
-    if decision.rel_type != edge.rel_type:
-        return CHANGED
-    if (decision.source_name, decision.target_name) == (edge.source_name, edge.target_name):
+    same_type = [d for d in decisions if d.rel_type == edge.rel_type]
+    if any(
+        (d.source_name, d.target_name) == (edge.source_name, edge.target_name)
+        for d in same_type
+    ):
         return KEPT
-    return FLIPPED
+    if same_type:
+        return FLIPPED
+    return CHANGED
 
 
 def retyped_edge(edge: CandidateEdge, decision: Decision) -> CandidateEdge:
@@ -162,6 +201,7 @@ async def run(
     limit: int | None = None,
     batch_size: int = BATCH_SIZE,
     model: str = EXTRACTION_MODEL,
+    max_relations: int = MAX_RELATIONS,
 ) -> dict:
     golden = golden_subset(grade_against) if grade_against else None
 
@@ -185,44 +225,98 @@ async def run(
             f"(out of 46 = 23 types x 2 directions)"
         )
 
-    classifier = RelationClassifier(model=model, batch_size=batch_size)
+    self_loops = [is_self_pair(p) for p in pairs]
+    classifier = RelationClassifier(
+        model=model, batch_size=batch_size, max_relations=max_relations
+    )
     decisions = await classifier.classify(pairs)
 
     outcomes = [
-        classify_outcome(edge, decision, was_asked=count > 0)
-        for edge, decision, count in zip(llm_edges, decisions, option_counts, strict=True)
+        classify_outcome(edge, decision, was_asked=count > 0, is_self_loop=loop)
+        for edge, decision, count, loop in zip(
+            llm_edges, decisions, option_counts, self_loops, strict=True
+        )
     ]
     split = Counter(outcomes)
+    kept_outcomes = (KEPT, FLIPPED, CHANGED)
 
     print(
         f"\n  {classifier.calls} calls, {classifier.failures} pairs with no answer "
-        f"(call failed {classifier.call_failures}, number skipped {classifier.unanswered}, "
-        f"answered off the offered list {classifier.off_vocabulary})"
+        f"(call failed {classifier.call_failures}, unreadable {classifier.unanswered}, "
+        f"every relation off the offered list {classifier.unusable})"
+    )
+    print(
+        f"  {classifier.off_vocabulary} individual relations refused as not offered; "
+        f"{classifier.self_loops} self-loops declined without a call"
     )
     print("  four-way agreement split:")
-    for outcome in (KEPT, FLIPPED, CHANGED, DECLINED, NO_RELATION_LEGAL, FAILED):
+    for outcome in (KEPT, FLIPPED, CHANGED, DECLINED, NO_RELATION_LEGAL, SELF_LOOP, FAILED):
         count = split.get(outcome, 0)
         share = count / len(llm_edges) if llm_edges else 0.0
         print(f"    {outcome:26s} {count:5d}  {share:6.1%}")
+    print(
+        "    (`kept`/`flipped` mean the original survives AMONG the answers, a weaker\n"
+        "     bar than the one-relation run -- read with the distribution below)"
+    )
 
     # The decline rate is the model's own, over the pairs it was actually asked
-    # about. A table decline is not evidence the model declines, and a failure
-    # is not evidence of anything -- both are reported, neither is counted in.
-    asked = len(llm_edges) - split.get(NO_RELATION_LEGAL, 0) - split.get(FAILED, 0)
+    # about. A table decline, a self-loop and a failure are not evidence the
+    # model declines -- all are reported, none are counted in.
+    asked = (
+        len(llm_edges)
+        - split.get(NO_RELATION_LEGAL, 0)
+        - split.get(SELF_LOOP, 0)
+        - split.get(FAILED, 0)
+    )
     decline_rate = split.get(DECLINED, 0) / asked if asked else 0.0
     print(f"\n  DECLINE RATE: {split.get(DECLINED, 0)}/{asked} = {decline_rate:.1%} "
           "of pairs the model was asked about")
 
-    confidences = Counter(
-        d.confidence for d, o in zip(decisions, outcomes, strict=True)
-        if o in (KEPT, FLIPPED, CHANGED)
+    # Whether the CAP or the EVIDENCE is deciding how many relations a pair
+    # carries. If nearly every answered pair uses every slot, the cap is doing
+    # the work and the number below is about the cap, not about the corpus.
+    answered = [d for d, o in zip(decisions, outcomes, strict=True) if o in kept_outcomes]
+    per_pair = Counter(len(d) for d in answered)
+    multi = sum(n for size, n in per_pair.items() if size > 1)
+    print(
+        f"  relations per surviving pair: {dict(sorted(per_pair.items()))} "
+        f"-- {multi}/{len(answered) or 1} = "
+        f"{(multi / len(answered) if answered else 0):.1%} used more than one slot"
     )
+    print(f"  pairs where the model named MORE than the cap of {max_relations}: "
+          f"{classifier.capped}")
+
+    # Does allowing several relations produce the known contradiction? Reported,
+    # never repaired: the mutual-exclusion check belongs in constraints.py.
+    contradictions = [
+        (edge, decision)
+        for edge, decision, outcome in zip(llm_edges, decisions, outcomes, strict=True)
+        if outcome in kept_outcomes
+        and any({d.rel_type for d in decision} >= banned for banned in CONTRADICTORY_PAIRS)
+    ]
+    print(f"  CONTRADICTORY relation sets emitted for one pair: {len(contradictions)}")
+    for edge, decision in contradictions[:10]:
+        print(f"    {edge.source_name} / {edge.target_name}: "
+              f"{sorted(d.rel_type for d in decision)}")
+
+    confidences = Counter(d.confidence for decision in answered for d in decision)
     print(f"  confidence on surviving edges: {dict(confidences)}")
 
+    # Symmetric flips cost golden recall without being wrong (see
+    # SYMMETRIC_RELATIONS). Counted so the recall delta can be read honestly.
+    symmetric_flips = sum(
+        1
+        for decision, outcome in zip(decisions, outcomes, strict=True)
+        if outcome == FLIPPED and any(d.rel_type in SYMMETRIC_RELATIONS for d in decision)
+    )
+    print(f"  of {split.get(FLIPPED, 0)} direction flips, {symmetric_flips} are on a "
+          "symmetric relation (a grader artifact, not a change of claim)")
+
     surviving = [
-        retyped_edge(edge, decision)
+        retyped_edge(edge, single)
         for edge, decision, outcome in zip(llm_edges, decisions, outcomes, strict=True)
-        if outcome in (KEPT, FLIPPED, CHANGED)
+        if outcome in kept_outcomes
+        for single in decision
     ]
     derived_edges = [edges[i] for i in derived_indices]
     new_edges = surviving + derived_edges
@@ -261,8 +355,16 @@ async def run(
         "failures": classifier.failures,
         "call_failures": classifier.call_failures,
         "unanswered": classifier.unanswered,
+        "unusable": classifier.unusable,
         "off_vocabulary": classifier.off_vocabulary,
+        "capped": classifier.capped,
+        "self_loops": classifier.self_loops,
         "no_legal_relation": classifier.no_legal_relation,
+        "max_relations": max_relations,
+        "relations_per_surviving_pair": dict(sorted(per_pair.items())),
+        "multi_relation_pairs": multi,
+        "contradictions": len(contradictions),
+        "symmetric_flips": symmetric_flips,
         "split": dict(split),
         "decline_rate": decline_rate,
         "asked": asked,
@@ -290,7 +392,7 @@ async def run(
                 "stage_b_decisions": [
                     {
                         "before": asdict(edge),
-                        "after": asdict(decision),
+                        "after": [asdict(d) for d in decision],
                         "outcome": outcome,
                     }
                     for edge, decision, outcome in zip(
@@ -313,6 +415,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Re-type only the first N LLM edges (the try-it-first valve)")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE, metavar="N",
                         help=f"Pairs per call (default {BATCH_SIZE})")
+    parser.add_argument("--max-relations", type=int, default=MAX_RELATIONS, metavar="N",
+                        help=f"Relations one pair may carry (default {MAX_RELATIONS})")
     parser.add_argument("--model", default=EXTRACTION_MODEL)
     return parser
 
@@ -324,6 +428,7 @@ def main() -> None:
         summary = asyncio.run(run(
             args.artifact, args.out, args.grade_against, args.limit,
             batch_size=args.batch_size, model=args.model,
+            max_relations=args.max_relations,
         ))
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
