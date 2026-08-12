@@ -258,6 +258,51 @@ class TestReplace:
             == 0
         )
 
+    def test_replace_leaves_campaign_data_carrying_the_same_chapter_slug(self, graph):
+        """`plane='canon'` is the only thing protecting somebody's game.
+
+        Both deletes are scoped by plane AND chapter_slug. The plane half is
+        inert today only because nothing on the campaign plane carries a
+        `chapter_slug` -- the moment stage 2b copies one across for provenance,
+        dropping that predicate would delete a table's own nodes and edges on
+        every canon re-run. So the campaign node here carries the SAME
+        chapter_slug as the canon it sits beside.
+        """
+        canon = node("Church")
+        write_chapter(graph, CHAPTER_A, [canon], [])
+        graph.run(
+            """
+            CREATE (a:Entity {id:$a, name:'party notes', plane:'campaign', chapter_slug:$slug})
+            CREATE (b:Entity {id:$b, name:'session 3', plane:'campaign', chapter_slug:$slug})
+            CREATE (a)-[:OCCURRED_AT {plane:'campaign', chapter_slug:$slug}]->(b)
+            """,
+            {
+                "a": f"{TEST_ID_PREFIX}campaign-a",
+                "b": f"{TEST_ID_PREFIX}campaign-b",
+                "slug": CHAPTER_A,
+            },
+        )
+
+        write_chapter(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
+
+        assert (
+            graph.run(
+                "MATCH (n:Entity {plane:'campaign', chapter_slug:$slug}) RETURN count(n) AS c",
+                {"slug": CHAPTER_A},
+            ).single()["c"]
+            == 2
+        )
+        assert (
+            graph.run(
+                "MATCH ()-[r]->() WHERE r.plane = 'campaign' AND r.chapter_slug = $slug "
+                "RETURN count(r) AS c",
+                {"slug": CHAPTER_A},
+            ).single()["c"]
+            == 1
+        )
+        # ...and the canon half was still replaced.
+        assert count_canon_nodes(graph, CHAPTER_A) == 1
+
     def test_replace_refuses_when_campaign_data_hangs_off_the_chapter(self, graph):
         """A campaign's own play is somebody's game.
 

@@ -6,7 +6,10 @@ without a live graph. The transactional half is pinned in
 `test_write_canon_neo4j.py`.
 """
 
+import logging
+
 import pytest
+from neo4j.exceptions import Neo4jError
 
 from backend.canon.gazetteer import Gazetteer, GazetteerEntry
 from backend.canon.models import CandidateEdge, CandidateNode
@@ -14,6 +17,7 @@ from backend.canon.writer import (
     CANON_PLANE,
     WriteNode,
     _resolve_endpoint,
+    ensure_schema,
     mint_id,
     plan_write,
 )
@@ -56,6 +60,215 @@ class TestIdMinting:
     def test_planned_nodes_carry_the_minted_id(self):
         nodes, _, _ = plan_write([node("Ismark")], [], gazetteer("Ismark"), SLUG)
         assert [n.id for n in nodes] == ["cos:the-village-of-barovia:location:ismark"]
+
+
+class TestKeyedIds:
+    """A keyed place resolves to (book, chapter, key), never to its name.
+
+    Chapter 4 holds `Closet` x2 and `Empty Cell` x3 as genuinely distinct rooms.
+    Chapter scoping does not separate them -- they are in ONE chapter -- so the
+    key has to be in the id or the book loses two of the three cells.
+    """
+
+    def test_a_keyed_place_carries_its_key_in_its_id(self):
+        nodes, _, _ = plan_write(
+            [node("Undercroft", section_heading="E5g. Undercroft", section_index=7)],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:location:e5g-undercroft"]
+
+    def test_an_entity_the_book_does_not_key_keeps_the_plain_form(self):
+        nodes, _, _ = plan_write(
+            [node("Ismark Kolyanovich", "NPC", section_heading="(preamble)", section_index=0)],
+            [],
+            gazetteer("Ismark Kolyanovich"),
+            SLUG,
+        )
+        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:npc:ismark-kolyanovich"]
+
+    def test_two_same_named_rooms_in_one_chapter_are_two_nodes(self):
+        """`K61a. Empty Cell` and `K62a. Empty Cell` are different rooms."""
+        nodes, _, report = plan_write(
+            [
+                node("Empty Cell", section_heading="K61a. Empty Cell", section_index=1),
+                node("Empty Cell", section_heading="K62a. Empty Cell", section_index=3),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert report.duplicate_nodes == 0
+        assert sorted(n.id for n in nodes) == [
+            "cos:the-village-of-barovia:location:k61a-empty-cell",
+            "cos:the-village-of-barovia:location:k62a-empty-cell",
+        ]
+
+    def test_a_mention_from_elsewhere_joins_the_room_the_book_keys(self):
+        """A name the chapter keys exactly once is that room wherever it is
+        mentioned -- otherwise the mention would mint a second Undercroft."""
+        nodes, _, report = plan_write(
+            [
+                node("Undercroft", section_heading="E5g. Undercroft", section_index=7),
+                node("Undercroft", section_heading="E5a. Hall", section_index=3),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert report.duplicate_nodes == 1
+        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:location:e5g-undercroft"]
+
+    def test_a_name_two_sections_key_mentioned_from_neither_is_dropped(self):
+        """`Empty Cell` in prose could be K61a's or K62a's. Picking invents a room."""
+        nodes, _, report = plan_write(
+            [
+                node("Empty Cell", section_heading="K61a. Empty Cell", section_index=1),
+                node("Empty Cell", section_heading="K62a. Empty Cell", section_index=3),
+                node("Empty Cell", section_heading="Approaching the Dungeon", section_index=5),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert report.undecidable_keyed == 1
+        assert len(nodes) == 2
+        assert "LOCATION Empty Cell (k61a/k62a)" in report.dropped_undecidable_keyed
+
+    def test_both_dungeons_keep_their_own_cell(self):
+        """`North Dungeon CONTAINS Empty Cell` and `South Dungeon CONTAINS Empty
+        Cell` are both real within one chapter. The section an edge was derived
+        from says which cell it means.
+
+        `Skeleton` sits in K61a alongside the cell, so the section narrowing has
+        to select the room the section KEYS rather than everything extracted
+        from that section -- a section-wide narrowing would hand `Empty Cell`
+        two candidates again and lose the edge to ambiguity.
+        """
+        _, edges, report = plan_write(
+            [
+                node("North Dungeon", section_heading="K61. North Dungeon", section_index=0),
+                node("Empty Cell", section_heading="K61a. Empty Cell", section_index=1),
+                node("Skeleton", "MONSTER", section_heading="K61a. Empty Cell", section_index=1),
+                node("South Dungeon", section_heading="K62. South Dungeon", section_index=2),
+                node("Empty Cell", section_heading="K62a. Empty Cell", section_index=3),
+            ],
+            [
+                edge("North Dungeon", "Empty Cell", "CONTAINS", section_index=1),
+                edge("South Dungeon", "Empty Cell", "CONTAINS", section_index=3),
+            ],
+            gazetteer("Skeleton"),
+            SLUG,
+        )
+        assert report.ambiguous_edges == 0
+        assert [(e.source_id.split(":")[-1], e.target_id.split(":")[-1]) for e in edges] == [
+            ("k61-north-dungeon", "k61a-empty-cell"),
+            ("k62-south-dungeon", "k62a-empty-cell"),
+        ]
+
+
+class TestKeyedProvenance:
+    """`section_heading` must name the section the book KEYS a room under.
+
+    First-candidate-wins alone records whichever section first mentioned it, so
+    a reader looking up the Chapel is sent to the Hall.
+    """
+
+    def test_the_keying_section_wins_over_an_earlier_mention(self):
+        nodes, _, _ = plan_write(
+            [
+                node("Chapel", section_heading="E5a. Hall", section_index=3),
+                node("Chapel", section_heading="E5f. Chapel", section_index=8),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert [n.section_heading for n in nodes] == ["E5f. Chapel"]
+        assert [n.section_index for n in nodes] == [8]
+
+    def test_the_keying_section_still_wins_when_it_comes_first(self):
+        nodes, _, _ = plan_write(
+            [
+                node("Chapel", section_heading="E5f. Chapel", section_index=8),
+                node("Chapel", section_heading="E5a. Hall", section_index=3),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert [n.section_heading for n in nodes] == ["E5f. Chapel"]
+
+    def test_the_heading_spelling_wins_over_a_prose_mention(self):
+        """The lowercase `burgomaster's mansion` in the graph came from prose
+        beating the `E4.` heading. Canon should carry the book's own casing."""
+        nodes, _, _ = plan_write(
+            [
+                node(
+                    "burgomaster's mansion",
+                    section_heading="Approaching the Village",
+                    section_index=1,
+                ),
+                node(
+                    "Burgomaster's Mansion",
+                    section_heading="E4. Burgomaster's Mansion",
+                    section_index=6,
+                ),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert [n.name for n in nodes] == ["Burgomaster's Mansion"]
+        assert [n.section_heading for n in nodes] == ["E4. Burgomaster's Mansion"]
+
+    def test_an_apostrophe_variant_joins_the_room_rather_than_minting_one(self):
+        """Found in the graph, not in a fixture.
+
+        The DDB corpus keeps the book's U+2019 while the extractor sometimes
+        emits an ASCII quote. Matching keyed places on folded TEXT let the ASCII
+        spelling miss its own heading, take the unkeyed id, and stand in the
+        graph as a second Bildrath's Mercantile. Keyed places match on the slug,
+        which is what the id is minted from, so anything that would mint one id
+        is one place.
+        """
+        nodes, _, report = plan_write(
+            [
+                node(
+                    "Bildrath's Mercantile",  # ASCII quote, from the extractor
+                    section_heading="E1. Bildrath’s Mercantile",
+                    section_index=2,
+                ),
+                node(
+                    "Bildrath’s Mercantile",  # U+2019, as the book spells it
+                    section_heading="E1. Bildrath’s Mercantile",
+                    section_index=2,
+                ),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert report.duplicate_nodes == 1
+        assert [n.id for n in nodes] == [
+            "cos:the-village-of-barovia:location:e1-bildrath-s-mercantile"
+        ]
+        # ...and canon carries the book's typography, not the extractor's.
+        assert nodes[0].name == "Bildrath’s Mercantile"
+
+    def test_an_unkeyed_entity_keeps_first_candidate_wins(self):
+        """Nothing keys an NPC, so the earliest mention stays the provenance."""
+        nodes, _, _ = plan_write(
+            [
+                node("Ismark", "NPC", section_heading="(preamble)", section_index=0),
+                node("Ismark", "NPC", section_heading="E2. Blood of the Vine", section_index=4),
+            ],
+            [],
+            gazetteer("Ismark"),
+            SLUG,
+        )
+        assert [n.section_heading for n in nodes] == ["(preamble)"]
 
 
 class TestSelfLoops:
@@ -376,6 +589,25 @@ class TestAmbiguousEndpoints:
         assert report.endpoint_resolved == 1
         assert [e.target_id for e in edges] == [mint_id(SLUG, "NPC", "Tatyana")]
 
+    def test_two_identical_resolved_candidates_are_counted_once(self):
+        """The resolved list is what downstream reads to know where the
+        constraint check is vacuous. A duplicate candidate that collapses into
+        one written edge must not leave a phantom entry naming an edge that
+        exists once."""
+        _, edges, report = plan_write(
+            [node("Tatyana", "NPC"), node("Tatyana", "LORE"), node("Ireena", "NPC")],
+            [
+                edge("Ireena", "Tatyana", "IDENTITY_OF", section_index=1),
+                edge("Ireena", "Tatyana", "IDENTITY_OF", section_index=4),
+            ],
+            gazetteer("Tatyana", "Ireena"),
+            SLUG,
+        )
+        assert report.duplicate_edges == 1
+        assert len(edges) == 1
+        assert report.endpoint_resolved == 1
+        assert len(report.resolved_endpoints) == 1
+
     def test_resolutions_are_counted_apart_from_drops(self):
         nodes, edges, report = plan_write(
             [
@@ -535,6 +767,70 @@ class TestChapterSlugIsAuthoritative:
         assert nodes[0].properties["chapter_slug"] == SLUG
 
 
+class TestEnsureSchema:
+    """A schema statement that fails for an unexpected reason must be audible.
+
+    Neo4j is not reachable from these tests, so the session is a stub whose
+    `run` raises what the driver would raise. That is the failure under test --
+    not the database.
+    """
+
+    class Session:
+        def __init__(self, error: Exception | None) -> None:
+            self.error = error
+            self.statements: list[str] = []
+
+        def run(self, statement: str):
+            self.statements.append(statement)
+            if self.error is not None:
+                raise self.error
+
+    class Failure(Neo4jError):
+        """A driver error with a chosen code. `Neo4jError.code` is a read-only
+        property, so a subclass is the only way to stand one up by hand."""
+
+        def __init__(self, code: str, message: str) -> None:
+            super().__init__(message)
+            self._code = code
+            self._message = message
+
+        @property
+        def code(self) -> str:
+            return self._code
+
+        @property
+        def message(self) -> str:
+            return self._message
+
+    def test_already_exists_is_silent(self, caplog):
+        session = self.Session(
+            self.Failure(
+                "Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists",
+                "An equivalent constraint already exists",
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            ensure_schema(session)
+        assert session.statements, "no schema statement was attempted"
+        assert caplog.records == []
+
+    def test_an_unexpected_neo4j_error_is_logged_with_its_statement(self, caplog):
+        session = self.Session(
+            self.Failure("Neo.ClientError.Security.Unauthorized", "Unable to authenticate")
+        )
+        with caplog.at_level(logging.WARNING):
+            ensure_schema(session)
+        assert caplog.records, "an unexpected schema failure was swallowed"
+        assert "Unable to authenticate" in caplog.text
+
+    def test_a_non_neo4j_error_is_not_swallowed_at_all(self):
+        """A bad URI or a typo raises TypeError/AttributeError, not Neo4jError,
+        and a bare `except Exception` would hide it until the write failed."""
+        session = self.Session(RuntimeError("driver is closed"))
+        with pytest.raises(RuntimeError, match="driver is closed"):
+            ensure_schema(session)
+
+
 class TestReportTotals:
     def test_every_candidate_is_accounted_for(self):
         """Silent filtering has twice hidden a defect here for weeks."""
@@ -562,6 +858,7 @@ class TestReportTotals:
             - report.gazetteer_dropped
             - report.duplicate_nodes
             - report.unnameable
+            - report.undecidable_keyed
             == len(nodes)
             == report.written_nodes
         )

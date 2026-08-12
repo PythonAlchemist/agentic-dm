@@ -128,8 +128,19 @@ class TestRunArtifact:
             "ambiguous_edges",
             "duplicate_edges",
             "endpoint_resolved",
+            "undecidable_keyed",
         ):
             assert key in filters, key
+
+    def test_the_undecidable_keyed_places_are_named(self):
+        """A room the book keys twice, mentioned from neither section, is the
+        one drop a reader cannot reconstruct from the graph -- it is not there."""
+        report = FilterReport(candidate_nodes=1, candidate_edges=0)
+        report.undecidable_keyed = 1
+        report.dropped_undecidable_keyed = ["LOCATION Empty Cell (k61a/k62a)"]
+        printed = format_report(report)
+        assert "undecidable keyed place (two keys, neither its):  1" in printed
+        assert "- undecidable keyed: LOCATION Empty Cell (k61a/k62a)" in printed
 
     def test_the_resolved_edges_are_named_in_the_artifact(self):
         """The verifier's constraint check proves nothing about these, so which

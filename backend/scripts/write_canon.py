@@ -77,6 +77,7 @@ def format_report(report: FilterReport) -> str:
         "  node drops:",
         f"    gazetteer (not a known name, not a keyed place): {report.gazetteer_dropped}",
         f"    unnameable (name slugifies to nothing):          {report.unnameable}",
+        f"    undecidable keyed place (two keys, neither its):  {report.undecidable_keyed}",
         f"    duplicate (same id as an earlier candidate):     {report.duplicate_nodes}",
         "  edge drops:",
         f"    self-loops:                                      {report.self_loops}",
@@ -92,6 +93,7 @@ def format_report(report: FilterReport) -> str:
     ]
     for label, dropped in (
         ("gazetteer", report.dropped_gazetteer),
+        ("undecidable keyed", report.dropped_undecidable_keyed),
         ("self-loop", report.dropped_self_loops),
         ("violation", report.dropped_violations),
         ("dangling", report.dropped_dangling),

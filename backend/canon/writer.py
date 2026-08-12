@@ -18,7 +18,10 @@ is somebody's game -- nothing here may delete it, which is why `--replace`
 refuses rather than reaching for DETACH DELETE.
 """
 
+import logging
 from dataclasses import dataclass, field
+
+from neo4j.exceptions import Neo4jError
 
 from backend.canon.assembler import slugify
 from backend.canon.constraints import check_edges
@@ -41,6 +44,18 @@ CANON_PLANE = "canon"
 #: Every id is prefixed with the book. Nothing merges across chapters -- see
 #: `mint_id` -- and nothing merges across books either.
 BOOK = "cos"
+
+logger = logging.getLogger(__name__)
+
+#: Neo4j's "you already created this" family. Expected on every run after the
+#: first, and the only schema errors `ensure_schema` passes over in silence.
+_SCHEMA_EXISTS_CODES = frozenset(
+    {
+        "Neo.ClientError.Schema.ConstraintAlreadyExists",
+        "Neo.ClientError.Schema.IndexAlreadyExists",
+        "Neo.ClientError.Schema.EquivalentSchemaRuleAlreadyExists",
+    }
+)
 
 
 class ChapterAlreadyWritten(Exception):
@@ -78,14 +93,25 @@ class CampaignDataAttached(Exception):
         self.relationships = relationships
 
 
-def mint_id(chapter_slug: str, entity_type: str, name: str) -> str:
-    """`cos:<chapter-slug>:<entity-type-lowercase>:<name-slug>`.
+def mint_id(chapter_slug: str, entity_type: str, name: str, key: str = "") -> str:
+    """`cos:<chapter-slug>:<entity-type>:<key>-<name-slug>`, key omitted when absent.
 
     Chapter-scoped because NOTHING merges across chapters in this pipeline.
-    Chapter 4 alone holds `Chapel`, `Closet` x2 and `Empty Cell` x3 as genuinely
-    distinct rooms, and both `North Dungeon CONTAINS Empty Cell` and `South
-    Dungeon CONTAINS Empty Cell` are real within that one chapter.
     Cross-chapter resolution is a separate pass with its own measurement.
+
+    A KEYED PLACE RESOLVES TO `(book, chapter, key)`, NEVER TO ITS NAME. Chapter
+    4 holds `Closet` x2 and `Empty Cell` x3 as genuinely distinct rooms, and
+    both `North Dungeon CONTAINS Empty Cell` and `South Dungeon CONTAINS Empty
+    Cell` are real within that one chapter -- so a name-only id would merge
+    three rooms into one and silently delete two of those edges. Chapter
+    scoping alone does not address this; the key does. `K61a. Empty Cell` and
+    `K62a. Empty Cell` mint `…:location:k61a-empty-cell` and
+    `…:location:k62a-empty-cell`.
+
+    The name is kept alongside the key rather than replaced by it: `k61a` alone
+    is opaque in a report, a query, or a stack trace, and the key already
+    carries the uniqueness. Entities the book does not key keep the plain
+    name-based form -- there is no key to resolve them to.
 
     `entity_type` is part of the id because a coined QUEST sharing a LOCATION's
     name is a measured occurrence in this corpus -- `anchor_quests` keys on
@@ -94,7 +120,8 @@ def mint_id(chapter_slug: str, entity_type: str, name: str) -> str:
     Reuses `assembler.slugify` rather than growing a second slugifier that
     drifts from it.
     """
-    return f"{BOOK}:{chapter_slug}:{entity_type.strip().lower()}:{slugify(name)}"
+    tail = "-".join(part for part in (key.strip().lower(), slugify(name)) if part)
+    return f"{BOOK}:{chapter_slug}:{entity_type.strip().lower()}:{tail}"
 
 
 @dataclass(frozen=True)
@@ -201,6 +228,7 @@ class FilterReport:
     # Node drops
     gazetteer_dropped: int = 0
     unnameable: int = 0
+    undecidable_keyed: int = 0
     duplicate_nodes: int = 0
     # Edge drops, in the order they are applied
     self_loops: int = 0
@@ -216,6 +244,7 @@ class FilterReport:
     written_edges: int = 0
     # Samples, so a reader can see WHAT was dropped and not only how much.
     dropped_gazetteer: list[str] = field(default_factory=list)
+    dropped_undecidable_keyed: list[str] = field(default_factory=list)
     dropped_self_loops: list[str] = field(default_factory=list)
     dropped_violations: list[str] = field(default_factory=list)
     dropped_dangling: list[str] = field(default_factory=list)
@@ -230,6 +259,7 @@ class FilterReport:
             "candidate_edges": self.candidate_edges,
             "gazetteer_dropped": self.gazetteer_dropped,
             "unnameable": self.unnameable,
+            "undecidable_keyed": self.undecidable_keyed,
             "duplicate_nodes": self.duplicate_nodes,
             "self_loops": self.self_loops,
             "constraint_violations": self.constraint_violations,
@@ -257,6 +287,133 @@ def _entity_type(raw: str) -> EntityType | None:
         return EntityType(raw.strip())
     except ValueError:
         return None
+
+
+@dataclass(frozen=True)
+class KeyedIndex:
+    """Every keyed area this chapter's sections name, by section and by name.
+
+    Read off the section headings the candidates carry, using the same
+    `KEYED_HEADING` the splitter and the structural deriver share -- `E5g.
+    Undercroft` keys the place `Undercroft` as `E5g`. A prose heading like
+    "Approaching the Village" is not keyed and confers nothing; treating it as
+    a place would invent one the book never keys.
+
+    Places are matched on their SLUG, not their folded text, so that two names
+    which would mint the same id are the same place here too. `Bildrath's
+    Mercantile` and `Bildrath’s Mercantile` differ by one invisible character --
+    the DDB corpus preserves the book's U+2019 while the extractor sometimes
+    emits an ASCII quote -- and matching on text alone let the ASCII spelling
+    miss its own keyed heading and mint a SECOND Bildrath's Mercantile. Anything
+    `slugify` already treats as one name is one name.
+    """
+
+    #: section_index -> (key, place slug, place as the heading writes it)
+    by_section: dict[int, tuple[str, str, str]]
+    #: place slug -> the distinct keys naming it, in first-seen order
+    keys_by_place: dict[str, list[str]]
+
+    @property
+    def place_slugs(self) -> set[str]:
+        """Slugs of every keyed place -- the gazetteer's exempt set."""
+        return set(self.keys_by_place)
+
+    def keys_own_name(self, name: str, section_index: int) -> bool:
+        """Whether this section's own heading keys this very name."""
+        entry = self.by_section.get(section_index)
+        return entry is not None and entry[1] == slugify(name)
+
+    def spells_it_as_the_book_does(self, name: str, section_index: int) -> bool:
+        """Whether this candidate spells the place exactly as its heading does.
+
+        The tiebreak within a tiebreak: two candidates can both be keyed by
+        their own section and disagree on typography, and canon should carry
+        the book's spelling rather than whichever the extractor emitted first.
+        """
+        entry = self.by_section.get(section_index)
+        return entry is not None and entry[2] == name.strip()
+
+    def key_for(self, name: str, section_index: int) -> tuple[str, bool]:
+        """`(key, undecidable)` for a candidate. `("", False)` means not keyed.
+
+        The section a candidate came from decides first: `Empty Cell` extracted
+        out of `K61a. Empty Cell` is K61a's cell, whatever else the chapter
+        keys by that name. Failing that, a name the chapter keys exactly once
+        is that room wherever it is mentioned -- which is what lets a mention
+        of `Undercroft` from inside `E5a. Hall` join the room keyed at `E5g`
+        rather than minting a second one.
+
+        A name keyed by two different sections, mentioned from neither, is
+        undecidable: `Empty Cell` in prose could be K61a's or K62a's, and
+        picking would invent a room. The caller drops it and counts it.
+        """
+        keys = self.keys_by_place.get(slugify(name))
+        if not keys:
+            return "", False
+        if self.keys_own_name(name, section_index):
+            return self.by_section[section_index][0], False
+        if len(keys) == 1:
+            return keys[0], False
+        return "", True
+
+
+def keyed_index(nodes: list[CandidateNode]) -> KeyedIndex:
+    """Build the chapter's keyed-area index from its candidates' provenance."""
+    by_section: dict[int, tuple[str, str, str]] = {}
+    keys_by_place: dict[str, list[str]] = {}
+    for node in nodes:
+        match = KEYED_HEADING.match(node.section_heading.strip())
+        if not match:
+            continue
+        key = f"{match.group('stem')}{match.group('suffix') or ''}".strip().lower()
+        place = match.group("name").strip()
+        by_section.setdefault(node.section_index, (key, slugify(place), place))
+        keys = keys_by_place.setdefault(slugify(place), [])
+        if key not in keys:
+            keys.append(key)
+    return KeyedIndex(by_section=by_section, keys_by_place=keys_by_place)
+
+
+def keyed_place_slugs(nodes: list[CandidateNode]) -> set[str]:
+    """The slugs of every keyed area this chapter's sections name."""
+    return keyed_index(nodes).place_slugs
+
+def _endpoint_ids(
+    name: str,
+    section_index: int,
+    keyed: KeyedIndex,
+    ids_by_name: dict[str, set[str]],
+    ids_by_section: dict[int, set[str]],
+) -> set[str]:
+    """The nodes an edge's endpoint name could mean, narrowed by its section.
+
+    An edge derived from `K61a. Empty Cell` naming `Empty Cell` means THAT
+    cell, not the one at K62a -- the section it came from is direct evidence,
+    and without it `North Dungeon CONTAINS Empty Cell` and `South Dungeon
+    CONTAINS Empty Cell` would both collapse into "ambiguous" and be dropped,
+    though the brief names both as real within one chapter.
+
+    Everything else falls through to the folded-name index unchanged.
+    """
+    if keyed.keys_own_name(name, section_index):
+        scoped = ids_by_section.get(section_index)
+        if scoped:
+            return scoped
+    return ids_by_name.get(_fold(name), set())
+
+
+def _as_write_node(node: CandidateNode, node_id: str, chapter_slug: str) -> WriteNode:
+    """A candidate with its id minted and the caller's chapter slug stamped."""
+    return WriteNode(
+        id=node_id,
+        name=node.name,
+        entity_type=node.entity_type,
+        chapter_slug=chapter_slug,
+        section_heading=node.section_heading,
+        section_index=node.section_index,
+        votes=node.votes,
+        description=node.description,
+    )
 
 
 def _resolve_endpoint(
@@ -294,22 +451,6 @@ def _resolve_endpoint(
         return satisfying[0], True
     return None, False
 
-
-def keyed_place_names(nodes: list[CandidateNode]) -> set[str]:
-    """The folded names of every keyed area this chapter's sections name.
-
-    Read off the section headings the candidates carry, using the same
-    `KEYED_HEADING` the splitter and the structural deriver share -- `E5g.
-    Undercroft` names the place `Undercroft`. A prose heading like "Approaching
-    the Village" is not keyed and confers nothing; treating it as a place would
-    invent one the book never keys.
-    """
-    keyed: set[str] = set()
-    for node in nodes:
-        match = KEYED_HEADING.match(node.section_heading.strip())
-        if match:
-            keyed.add(_fold(match.group("name")))
-    return keyed
 
 
 def plan_write(
@@ -365,40 +506,68 @@ def plan_write(
     surviving_edges = [e for i, e in enumerate(surviving_edges) if i not in violating]
 
     # 3 -- gazetteer junk, with keyed places exempt
-    keyed = keyed_place_names(nodes)
+    keyed = keyed_index(nodes)
     kept_nodes: list[CandidateNode] = []
     for node in nodes:
-        if gazetteer.is_known(node.name) or _fold(node.name) in keyed:
+        if gazetteer.is_known(node.name) or slugify(node.name) in keyed.place_slugs:
             kept_nodes.append(node)
             continue
         report.gazetteer_dropped += 1
         report.dropped_gazetteer.append(f"{node.entity_type} {node.name}")
 
-    # Ids, and the name index the edges resolve through. First candidate for an
-    # id wins: later ones are the same entity named again in another section,
-    # and the earliest occurrence is the provenance closest to its introduction.
+    # Ids, and the indexes the edges resolve through.
     by_id: dict[str, WriteNode] = {}
     ids_by_name: dict[str, set[str]] = {}
+    ids_by_section: dict[int, set[str]] = {}
+    provenance_rank: dict[str, int] = {}
     for node in kept_nodes:
-        if not slugify(node.name):
+        node_key, undecidable = keyed.key_for(node.name, node.section_index)
+        if undecidable:
+            # A name two sections key, mentioned from neither. Choosing one
+            # would invent a room; the count says how often the book's own
+            # repetition defeats this.
+            report.undecidable_keyed += 1
+            report.dropped_undecidable_keyed.append(
+                f"{node.entity_type} {node.name} "
+                f"({'/'.join(keyed.keys_by_place[slugify(node.name)])})"
+            )
+            continue
+        if not slugify(node.name) and not node_key:
             # A name that slugifies to nothing cannot be given an id at all.
             report.unnameable += 1
             continue
-        node_id = mint_id(chapter_slug, node.entity_type, node.name)
+        node_id = mint_id(chapter_slug, node.entity_type, node.name, node_key)
+        # Every kept candidate is indexed under its own folded name and its own
+        # section, duplicate or not: a second spelling of a name already written
+        # -- straight for curly apostrophe, say -- must still lead an edge to
+        # the node, and an edge derived from a section must be able to reach the
+        # room that section keys.
+        ids_by_name.setdefault(_fold(node.name), set()).add(node_id)
+        if keyed.keys_own_name(node.name, node.section_index):
+            ids_by_section.setdefault(node.section_index, set()).add(node_id)
+
+        # Provenance tiebreak, highest rank wins and the earliest wins a tie:
+        #   2  the section that keys this room, spelling it as the book does
+        #   1  the section that keys this room
+        #   0  anything else -- a passing mention, or an unkeyed entity
+        # First-candidate-wins alone records whichever section first MENTIONED a
+        # room rather than the one that keys it, which sends a reader of
+        # `section_heading` to the wrong part of the book -- the Chapel filed
+        # under `E5a. Hall`. Rank 2 exists because two candidates can both be
+        # keyed by their own section and disagree on typography, and canon
+        # should carry the book's spelling rather than the extractor's
+        # (`burgomaster's mansion` beat `E4. Burgomaster's Mansion`).
+        rank = 0
+        if keyed.keys_own_name(node.name, node.section_index):
+            rank = 2 if keyed.spells_it_as_the_book_does(node.name, node.section_index) else 1
         if node_id in by_id:
             report.duplicate_nodes += 1
+            if rank > provenance_rank[node_id]:
+                by_id[node_id] = _as_write_node(node, node_id, chapter_slug)
+                provenance_rank[node_id] = rank
             continue
-        by_id[node_id] = WriteNode(
-            id=node_id,
-            name=node.name,
-            entity_type=node.entity_type,
-            chapter_slug=chapter_slug,
-            section_heading=node.section_heading,
-            section_index=node.section_index,
-            votes=node.votes,
-            description=node.description,
-        )
-        ids_by_name.setdefault(_fold(node.name), set()).add(node_id)
+        by_id[node_id] = _as_write_node(node, node_id, chapter_slug)
+        provenance_rank[node_id] = rank
 
     report.ambiguous_names = sorted(name for name, ids in ids_by_name.items() if len(ids) > 1)
 
@@ -410,8 +579,10 @@ def plan_write(
         # Coerced before anything is built from it: this is the only thing
         # standing between a corrupt artifact and interpolated Cypher.
         rel = RelationshipType(edge.rel_type.strip())
-        source_ids = ids_by_name.get(_fold(edge.source_name))
-        target_ids = ids_by_name.get(_fold(edge.target_name))
+        source_ids = _endpoint_ids(edge.source_name, edge.section_index, keyed, ids_by_name,
+                                   ids_by_section)
+        target_ids = _endpoint_ids(edge.target_name, edge.section_index, keyed, ids_by_name,
+                                   ids_by_section)
         label = f"{edge.source_name} -{edge.rel_type}-> {edge.target_name}"
         if not source_ids or not target_ids:
             report.dangling_edges += 1
@@ -428,17 +599,21 @@ def plan_write(
             report.ambiguous_edges += 1
             report.dropped_ambiguous.append(label)
             continue
+        key = (source_id, rel.value, target_id)
+        if key in seen:
+            report.duplicate_edges += 1
+            continue
+        seen.add(key)
+        # Counted BELOW the duplicate check, not above it: this list is what
+        # downstream reads to know where the constraint check is vacuous, and
+        # two identical resolved candidates would otherwise put a phantom entry
+        # in it for an edge that was written once.
         resolved = "constraint" if (source_resolved or target_resolved) else ""
         if resolved:
             report.endpoint_resolved += 1
             report.resolved_endpoints.append(
                 f"{label}  ->  {source_id if source_resolved else target_id}"
             )
-        key = (source_id, rel.value, target_id)
-        if key in seen:
-            report.duplicate_edges += 1
-            continue
-        seen.add(key)
         write_edges.append(
             WriteEdge(
                 source_id=source_id,
@@ -466,12 +641,20 @@ def ensure_schema(session) -> None:
     restating any of it. Schema changes cannot share a transaction with writes
     in Neo4j, so this runs before the write rather than inside it -- it creates
     nothing a rollback would need to undo.
+
+    Only Neo4j's own errors are tolerated, and only the already-exists family is
+    silent: that is the normal case on every run after the first. Anything else
+    is logged with the statement that produced it. A bare `except Exception` here
+    would swallow a bad URI, an auth failure, or a malformed statement and leave
+    the write to fail later with no trace of the real cause.
     """
     for statement in [*GRAPH_SCHEMA["constraints"], *GRAPH_SCHEMA["indexes"]]:
         try:
             session.run(statement)
-        except Exception:  # noqa: BLE001 -- already exists is the normal case
-            pass
+        except Neo4jError as exc:
+            if (exc.code or "") in _SCHEMA_EXISTS_CODES:
+                continue
+            logger.warning("schema statement failed: %s -- %s", statement, exc)
 
 
 def count_canon_nodes(session, chapter_slug: str) -> int:
