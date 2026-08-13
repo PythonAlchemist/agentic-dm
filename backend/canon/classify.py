@@ -47,30 +47,26 @@ makes the measured numbers mean something other than what they appear to.
    no way to decline, and declining is where precision comes from. If the
    decline rate comes back near zero, the experiment changed nothing.
 
-TWO CORRECTIONS FROM THE FIRST MEASURED RUN, both found by a hand read of the
-30-edge fabrication sample it produced.
+A SELF-PAIR ADMITS NOTHING. `Helga Ruvak -IDENTITY_OF-> Helga Ruvak` survived
+the first measured run and shipped in its fabrication sample; chapter 4 carried
+three such edges and two of them reached the output. Nothing should spend a
+token deciding whether a thing relates to itself, and the failure class has been
+known on this project since its first fabrication check. `offered_options`
+returns `[]` when the two names fold equal, so a self-pair can neither be
+rendered into a prompt nor matched against an answer. It is counted in
+`self_loops`, apart from `no_legal_relation`: one is a fact about the names, the
+other about the type table, and summing them would describe neither.
 
-A. A SELF-PAIR ADMITS NOTHING. `Helga Ruvak -IDENTITY_OF-> Helga Ruvak` survived
-   the first run and shipped in the sample. Nothing should spend a token
-   deciding whether a thing relates to itself, and the failure class has been
-   known on this project since its first fabrication check. `offered_options`
-   now returns `[]` for a pair whose two names fold equal, so a self-pair can
-   neither be rendered nor answered. It is counted in `self_loops`, apart from
-   `no_legal_relation`: one is a fact about the names, the other about the type
-   table, and summing them would describe neither.
-
-B. A PAIR MAY CARRY MORE THAN ONE RELATION, up to `max_relations`. Of the three
-   golden edges the first run lost, one was a single sentence stating TWO true
-   relations -- "Ismark seeks to protect his adopted sister, Ireena Kolyana" is
-   both RELATED_TO and GUARDS -- where the design permitted one answer. That was
-   not a typing failure but a shape failure, so the shape changed: `classify`
-   returns a LIST of decisions per pair.
-
-   The cap is deliberately low and the prompt demands each relation be
-   INDEPENDENTLY stated rather than merely legal, because the obvious failure
-   mode is a model filling the slots. `capped` records how often the cap
-   actually bound; if the extra slot is used almost always, the cap is doing the
-   work rather than the evidence, and the number says so.
+ONE RELATION PER PAIR, DELIBERATELY. A version allowing two was built and
+measured, because one of the golden edges this experiment lost was a sentence
+stating two true relations. IT WAS USED ZERO TIMES IN 374 OPPORTUNITIES -- the
+model never named a second relation even when told it could and told each had to
+be separately stated -- while the prompt rewrite that carried it cost 8.4 points
+of decline rate on chapter 3 and turned one of the five diagnosed failures from
+a correct answer into a wrong one. Reverted. The general lesson is recorded in
+the report: PERMISSION IS NOT ELICITATION. Offering a capability the model does
+not reach for changes nothing, so a later attempt needs an explicit second
+question rather than a wider allowance.
 
 Endpoint types come from the candidate NODES by folded name, exactly as
 `constraints.py` resolves them, and via the same `fold_name`. A name may carry
@@ -118,12 +114,6 @@ NO_ANSWER = ""
 
 #: Pairs per call. 457 chapter-4 edges become ~46 calls at this size.
 BATCH_SIZE = 10
-
-#: How many relations one pair may carry. Two, not three: the demonstrated loss
-#: needs exactly one extra slot, and precision is the fragile side of this trade
-#: -- an under-extracted edge can be recovered later, a junk canon edge cannot.
-#: Raising it is a measurement, not a default; `capped` says whether it binds.
-MAX_RELATIONS = 2
 
 _TYPE_SEPARATOR = "|"
 
@@ -226,11 +216,11 @@ def offered_options(pair: Pair) -> list[tuple[str, str, RelationshipType]]:
     alphabet put it there, not because the extractor called it the source.
 
     A SELF-PAIR IS OFFERED NOTHING. `Helga Ruvak -IDENTITY_OF-> Helga Ruvak`
-    survived the first run and shipped in its fabrication sample. No relation in
-    this ontology says anything by relating a thing to itself, so the empty list
-    is the correct vocabulary, and returning it here -- rather than filtering
-    later -- means a self-pair can never be rendered into a prompt or matched
-    against an answer. One rule, one implementation.
+    survived the first measured run and shipped in its fabrication sample. No
+    relation in this ontology says anything by relating a thing to itself, so
+    the empty list is the correct vocabulary, and returning it HERE -- rather
+    than filtering later -- means a self-pair can never be rendered into a
+    prompt or matched against an answer. One rule, one implementation.
     """
     if is_self_pair(pair):
         return []
@@ -272,26 +262,18 @@ def pairs_from_edges(nodes: list[CandidateNode], edges: list[CandidateEdge]) -> 
     return [pair_from_edge(edge, by_name) for edge in edges]
 
 
-_INSTRUCTIONS_TEMPLATE = """\
+_INSTRUCTIONS = """\
 You are re-reading relationships in a D&D sourcebook.
 
 Each numbered item below gives two entities that were mentioned together, the
 span of book text they were mentioned in, and the section it came from. For each
-item, choose the options listed under that item that the evidence states, or
-answer NONE.
+item, choose AT MOST ONE of the options listed under that item, or answer NONE.
 
 MOST PAIRS OF ENTITIES MENTIONED NEAR EACH OTHER HAVE NO RELATIONSHIP. NONE is
 the right answer whenever the evidence does not state one of the offered
 relationships, and it is expected to be a common answer. Choose a relationship
 only when the evidence asserts it; if the evidence merely makes one plausible,
 answer NONE.
-
-ALMOST EVERY ITEM THAT HAS A RELATIONSHIP AT ALL HAS EXACTLY ONE. You may name
-up to {max_relations} for a single item, but only when the evidence makes each
-of them separately -- when it asserts one thing about the two entities and then
-asserts a further, different thing about them. Do NOT add a second because it is
-also legal, because it follows from the first, or because it seems likely. A
-second relation that restates or elaborates the first is wrong.
 
 Judge only the quoted evidence, as written. Do not use outside knowledge of the
 setting, and do not use the section heading as evidence -- it is context only.
@@ -300,33 +282,19 @@ Direction matters, and each option spells out which entity is the source. The
 options listed for an item are the only ones permitted for it; an option not
 listed is not available, however true it may seem.
 
-Report your own confidence for the item:
+Report your own confidence with each relationship:
   "clear"   - the evidence states the relationship outright
   "implied" - the evidence entails it without stating it
   "unsure"  - you are guessing; prefer NONE
 
-Return JSON with exactly one entry per numbered item, every number answered once
-and no numbers invented. `relations` is always a LIST. Copy each option you
-choose EXACTLY as it is written, without its explanation in brackets. Answer
-["NONE"] to decline:
-{{"answers": [
-  {{"n": 1, "relations": ["NONE"]}},
-  {{"n": 2, "relations": ["Halvard -KNOWS-> Emberhall"], "confidence": "clear"}},
-  {{"n": 3, "relations": ["Halvard -OWNS-> Emberhall", "Halvard -LOCATED_IN-> Emberhall"],
-   "confidence": "clear"}}
-]}}
+Return JSON with exactly one answer per numbered item, every number answered
+once and no numbers invented. Copy the option you choose EXACTLY as it is
+written, without its explanation in brackets:
+{"answers": [
+  {"n": 1, "answer": "NONE"},
+  {"n": 2, "answer": "Ismark -KNOWS-> Ireena", "confidence": "clear"}
+]}
 """
-
-# Invented names, and a relation pair the corpus never produces, so the worked
-# example cannot teach the answer to any measured case. The first draft of this
-# used `Ismark RELATED_TO/GUARDS Ireena` -- which is one of the three golden
-# edges the previous run LOST, and the exact case this change exists to recover.
-# Shipping that would have made its recovery worthless as evidence.
-_EXAMPLE_NAMES = ("Halvard", "Emberhall")
-
-
-def _instructions(max_relations: int) -> str:
-    return _INSTRUCTIONS_TEMPLATE.format(max_relations=max_relations)
 
 
 def render_option(source: str, target: str, rel: RelationshipType) -> str:
@@ -362,20 +330,14 @@ def render_pair(number: int, pair: Pair) -> str:
     )
 
 
-def render_prompt(batch: list[Pair], max_relations: int = MAX_RELATIONS) -> str:
+def render_prompt(batch: list[Pair]) -> str:
     """The full text sent for one batch. Exposed so a test can read it."""
     items = "\n".join(render_pair(i + 1, pair) for i, pair in enumerate(batch))
-    return f"{_instructions(max_relations)}\n--- ITEMS ---\n\n{items}"
+    return f"{_INSTRUCTIONS}\n--- ITEMS ---\n\n{items}"
 
 
 class RelationClassifier:
     """Runs stage B over pairs. Never raises: a bad batch yields non-answers.
-
-    `classify` returns a LIST of decisions per pair -- see correction B in the
-    module docstring. A decline is `[Decision(rel_type=NONE_RELATION)]` and a
-    non-answer is `[Decision(rel_type=NO_ANSWER)]`, both single-element: a
-    decline is a decision the model made and must stay countable as one, so it
-    is never represented by an empty list.
 
     Counters are read after `classify` and belong in any report of its output.
     The three ways a pair can end up without an answer are counted APART,
@@ -383,25 +345,15 @@ class RelationClassifier:
     in the run:
 
     - `call_failures` -- the API call for the batch failed. A run problem.
-    - `unanswered` -- the call succeeded but skipped this item's number, or gave
-      it nothing usable to read. A model problem.
-    - `unusable` -- every relation the model named for this pair was off its
-      offered list, so nothing survived. Not a run defect.
+    - `unanswered` -- the call succeeded but skipped this item's number. A model
+      problem.
+    - `off_vocabulary` -- the model answered with a relation that was not on
+      this item's list. NOT a defect at all: it is the type constraint biting,
+      and its size is evidence for how much work the constraint is doing.
 
     `failures` is their sum, and is what a report must place next to the decline
     rate -- both look like "no edge" in the output, and conflating them would
     let a broken run advertise a precision mechanism it does not have.
-
-    Two counters describe individual RELATIONS rather than pairs, and must not
-    be added to the three above:
-
-    - `off_vocabulary` -- relation strings rejected because they were not on the
-      item's list. NOT a defect: it is the type constraint biting, and its size
-      is evidence for how much work the constraint does. A pair can lose one
-      relation this way and still keep another.
-    - `capped` -- pairs where the model named MORE relations than the cap
-      allowed. This is the number that says whether the cap or the evidence is
-      deciding how many relations a pair carries.
 
     - `self_loops` -- pairs whose two endpoints are the same entity. Declined
       without a call, and apart from `no_legal_relation`: one is a fact about
@@ -420,21 +372,17 @@ class RelationClassifier:
         temperature: float = 0.0,
         seed: int = EXTRACTION_SEED,
         batch_size: int = BATCH_SIZE,
-        max_relations: int = MAX_RELATIONS,
     ):
         self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = model or EXTRACTION_MODEL
         self.temperature = temperature
         self.seed = seed
         self.batch_size = batch_size
-        self.max_relations = max_relations
         self._semaphore = asyncio.Semaphore(concurrency)
         self.calls = 0
         self.call_failures = 0
         self.unanswered = 0
-        self.unusable = 0
         self.off_vocabulary = 0
-        self.capped = 0
         self.self_loops = 0
         self.no_legal_relation = 0
         self.input_tokens = 0
@@ -442,25 +390,25 @@ class RelationClassifier:
 
     @property
     def failures(self) -> int:
-        """Every PAIR that got no usable answer, however it got there."""
-        return self.call_failures + self.unanswered + self.unusable
+        """Every pair that got no usable answer, however it got there."""
+        return self.call_failures + self.unanswered + self.off_vocabulary
 
-    async def classify(self, pairs: list[Pair]) -> list[list[Decision]]:
-        """The decisions for each pair, in the order the pairs were given."""
-        decisions: list[list[Decision] | None] = [None] * len(pairs)
+    async def classify(self, pairs: list[Pair]) -> list[Decision]:
+        """One decision per pair, in the order the pairs were given."""
+        decisions: list[Decision | None] = [None] * len(pairs)
 
         askable: list[tuple[int, Pair]] = []
         for index, pair in enumerate(pairs):
             # Two reasons a pair is never asked, kept apart because they are
-            # different facts: the names are the same entity, or no type admits
-            # any relation between them in either direction. Either way there is
-            # nothing to offer, so there is nothing to ask.
+            # different facts: the two names are the same entity, or no type
+            # admits any relation between them in either direction. Either way
+            # there is nothing to offer, so there is nothing to ask.
             if is_self_pair(pair):
                 self.self_loops += 1
-                decisions[index] = [Decision("", "", NONE_RELATION, "")]
+                decisions[index] = Decision("", "", NONE_RELATION, "")
             elif not offered_options(pair):
                 self.no_legal_relation += 1
-                decisions[index] = [Decision("", "", NONE_RELATION, "")]
+                decisions[index] = Decision("", "", NONE_RELATION, "")
             else:
                 askable.append((index, pair))
 
@@ -479,7 +427,7 @@ class RelationClassifier:
                 # here means the task itself died. Charge every pair in it.
                 logger.warning("classification task failed: %s", result)
                 self.call_failures += len(batch)
-                result = [[Decision("", "", NO_ANSWER, "")] for _ in batch]
+                result = [Decision("", "", NO_ANSWER, "")] * len(batch)
             for (index, _), decision in zip(batch, result, strict=True):
                 decisions[index] = decision
 
@@ -493,17 +441,12 @@ class RelationClassifier:
             raise RuntimeError("a pair was left undecided: batch/pair alignment is broken")
         return [decision for decision in decisions if decision is not None]
 
-    async def _classify_batch(self, batch: list[Pair]) -> list[list[Decision]]:
+    async def _classify_batch(self, batch: list[Pair]) -> list[Decision]:
         try:
             async with self._semaphore:
                 response = await self.client.chat.completions.create(
                     model=self.model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": render_prompt(batch, self.max_relations),
-                        }
-                    ],
+                    messages=[{"role": "user", "content": render_prompt(batch)}],
                     response_format={"type": "json_object"},
                     temperature=self.temperature,
                     seed=self.seed,
@@ -516,11 +459,11 @@ class RelationClassifier:
         except Exception as exc:  # one batch must not abort a chapter
             logger.warning("classification failed for %d pairs: %s", len(batch), exc)
             self.call_failures += len(batch)
-            return [[Decision("", "", NO_ANSWER, "")] for _ in batch]
+            return [Decision("", "", NO_ANSWER, "")] * len(batch)
 
         return self._parse(payload, batch)
 
-    def _parse(self, payload: dict, batch: list[Pair]) -> list[list[Decision]]:
+    def _parse(self, payload: dict, batch: list[Pair]) -> list[Decision]:
         """Answers keyed by their number, so one bad item cannot shift the rest.
 
         Reading the answer list positionally would make a batch that answered 7
@@ -544,81 +487,31 @@ class RelationClassifier:
             for position, pair in enumerate(batch, start=1)
         ]
 
-    def _decide(self, answer: dict | None, pair: Pair) -> list[Decision]:
+    def _decide(self, answer: dict | None, pair: Pair) -> Decision:
         if answer is None:
             logger.warning("no answer for %s / %s", pair.a_name, pair.b_name)
             self.unanswered += 1
-            return [Decision("", "", NO_ANSWER, "")]
+            return Decision("", "", NO_ANSWER, "")
 
-        raw = answer.get("relations")
-        if not isinstance(raw, list):
-            logger.warning(
-                "relations for %s / %s is %s, not a list",
-                pair.a_name, pair.b_name, type(raw).__name__,
-            )
-            self.unanswered += 1
-            return [Decision("", "", NO_ANSWER, "")]
-
+        chosen = _fold_option(str(answer.get("answer", "") or ""))
         confidence = str(answer.get("confidence", "") or "").strip().lower()
-        chosen = [_fold_option(entry) for entry in raw if isinstance(entry, str)]
-        declined = NONE_RELATION.casefold() in chosen
-        wanted = [entry for entry in chosen if entry and entry != NONE_RELATION.casefold()]
+        if not chosen:
+            logger.warning("empty answer for %s / %s", pair.a_name, pair.b_name)
+            self.unanswered += 1
+            return Decision("", "", NO_ANSWER, "")
+        if chosen == NONE_RELATION.casefold():
+            return Decision("", "", NONE_RELATION, confidence)
 
-        # An empty list is a decline, not a malformation: "I chose nothing" is
-        # unambiguous in meaning even though the prompt asks for ["NONE"].
-        # Counting it as a failure would understate the decline rate, which is
-        # the number this experiment turns on.
-        if not wanted:
-            return [Decision("", "", NONE_RELATION, confidence)]
+        # Matched EXACTLY against the strings this item offered, so an answer
+        # naming an entity that was not in the item, or a relation that was not
+        # on its list, cannot be accepted and is never recorded as a decline.
+        for option_source, option_target, option_rel in offered_options(pair):
+            if _fold_option(render_option(option_source, option_target, option_rel)) == chosen:
+                return Decision(option_source, option_target, option_rel.value, confidence)
 
-        # NONE alongside real relations is a contradiction. The relations are
-        # taken and the NONE ignored: the model named something specific, and
-        # reading that as a decline would discard a positive answer it gave.
-        if declined:
-            logger.warning(
-                "NONE alongside %d relation(s) for %s / %s -- taking the relations",
-                len(wanted), pair.a_name, pair.b_name,
-            )
-
-        # Matched EXACTLY against the strings this item offered, so a relation
-        # naming an entity that was not in the item, or a type that was not on
-        # its list, cannot be accepted and is never recorded as a decline.
-        by_option = {
-            _fold_option(render_option(source, target, rel)): (source, target, rel)
-            for source, target, rel in offered_options(pair)
-        }
-        decisions: list[Decision] = []
-        seen: set[str] = set()
-        for entry in wanted:
-            option = by_option.get(entry)
-            if option is None:
-                logger.warning(
-                    "relation %r for %s / %s names no offered option",
-                    entry, pair.a_name, pair.b_name,
-                )
-                self.off_vocabulary += 1
-                continue
-            if entry in seen:  # the same relation twice is one relation
-                continue
-            seen.add(entry)
-            source, target, rel = option
-            decisions.append(Decision(source, target, rel.value, confidence))
-
-        if not decisions:
-            # Everything named was off the list. Distinct from a decline: the
-            # model asserted relations, they were all refused, and nothing it
-            # said survives to be counted either way.
-            self.unusable += 1
-            return [Decision("", "", NO_ANSWER, "")]
-
-        if len(decisions) > self.max_relations:
-            # Recorded, then truncated. The count is the evidence for whether
-            # the cap or the evidence is deciding how many relations a pair
-            # carries -- if it is large, the cap is doing the work.
-            self.capped += 1
-            logger.warning(
-                "%d relations for %s / %s, capped to %d",
-                len(decisions), pair.a_name, pair.b_name, self.max_relations,
-            )
-            decisions = decisions[: self.max_relations]
-        return decisions
+        logger.warning(
+            "answer %r for %s / %s names no offered option",
+            answer.get("answer"), pair.a_name, pair.b_name,
+        )
+        self.off_vocabulary += 1
+        return Decision("", "", NO_ANSWER, "")
