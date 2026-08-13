@@ -26,19 +26,39 @@ inversion from a coincidence. The count is the evidence for whether a repair
 pass is worth building later, not a repair pass.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 
 from backend.canon.models import CandidateEdge, CandidateNode
-from backend.graph.schema import RELATIONSHIP_DOMAIN_RANGE, EntityType, RelationshipType
+from backend.graph.schema import (
+    MUTUALLY_EXCLUSIVE,
+    RELATIONSHIP_DOMAIN_RANGE,
+    EntityType,
+    RelationshipType,
+)
+
+#: `Violation.reason` for a mutual-exclusion conflict, distinct from the
+#: domain/range family ("domain" | "range" | "both"). One value rather than a
+#: parallel violation type: everything downstream that already knows how to
+#: print, count and carry a Violation keeps working.
+EXCLUSIVE_REASON = "exclusive"
 
 
 @dataclass(frozen=True)
 class Violation:
-    """One edge whose endpoint types the ontology forbids.
+    """One edge the ontology forbids -- by its endpoint types, or by its company.
+
+    `reason` says which check spoke: "domain" | "range" | "both" for the
+    endpoint-type table, and `EXCLUSIVE_REASON` for an edge that contradicts
+    another edge between the same ordered endpoints. The two are reported by
+    different functions and must not be summed: the first is a property of one
+    edge, the second of a pair, and one shared shape here is only so that
+    everything downstream can print and carry both.
 
     `source_type` / `target_type` are `""` when that endpoint had no typed node,
     and `"A|B"` when a name carried more than one type. An unknown endpoint can
     appear here only on the OTHER side's violation: it never causes one itself.
+    Both are `""` on an exclusion violation, which does not consult types.
     """
 
     edge_index: int
@@ -174,6 +194,105 @@ def check_edges(nodes: list[CandidateNode], edges: list[CandidateEdge]) -> list[
     return report_edges(nodes, edges).violations
 
 
+#: rel type -> every type it contradicts, expanded once from MUTUALLY_EXCLUSIVE.
+#: Built here rather than declared in the schema so there is one authored table
+#: and one derived index, never two authored tables that can disagree.
+_EXCLUDES: dict[RelationshipType, frozenset[RelationshipType]] = {}
+for _pair in MUTUALLY_EXCLUSIVE:
+    for _rel in _pair:
+        _EXCLUDES[_rel] = frozenset(_pair - {_rel}) | _EXCLUDES.get(_rel, frozenset())
+del _pair, _rel
+
+
+def exclusive_conflicts(
+    triples: list[tuple[str, str, RelationshipType]],
+) -> list[tuple[int, int]]:
+    """Index pairs `(i, j)`, i < j, whose types contradict between one ORDERED pair.
+
+    The endpoint keys are opaque strings, because the two callers key on
+    different things and both are right. `check_exclusive` keys on folded NAMES,
+    which is all that exists before ids are minted; `writer.plan_write` keys on
+    the minted IDS, because a name is not unique in canon -- a disputed
+    `entity_type` leaves `Tatyana` as two nodes, and a name-keyed conflict check
+    would charge an edge with contradicting an edge about a different node. One
+    algorithm serving both is the point: a second copy would drift, exactly as a
+    second slugifier or a second copy of LAYER_MAP would.
+
+    ORDERED, and that is the substance of the check rather than a detail.
+    `Church CONTAINS Undercroft` with `Undercroft LOCATED_IN Church` is the
+    ordinary inverse pair the derived structural layer emits in bulk, and
+    reading the endpoints unordered would report the cleanest layer in the graph
+    as self-contradictory.
+
+    Same type twice between one ordered pair is a DUPLICATE, which the writer
+    already counts, and never a conflict -- `_EXCLUDES` never contains a type's
+    own value, so this falls out rather than being special-cased.
+    """
+    by_endpoints: dict[tuple[str, str], list[tuple[int, RelationshipType]]] = {}
+    for index, (source, target, rel) in enumerate(triples):
+        by_endpoints.setdefault((source, target), []).append((index, rel))
+
+    conflicts: list[tuple[int, int]] = []
+    for entries in by_endpoints.values():
+        for position, (index, rel) in enumerate(entries):
+            excluded = _EXCLUDES.get(rel)
+            if not excluded:
+                continue
+            for other_index, other_rel in entries[position + 1 :]:
+                if other_rel in excluded:
+                    conflicts.append((index, other_index))
+    return sorted(conflicts)
+
+
+def check_exclusive(edges: list[CandidateEdge]) -> list[Violation]:
+    """Report every edge taking part in a mutual-exclusion conflict.
+
+    TWO violations per conflict, one per edge, each carrying its own
+    `edge_index` and `rel_type`. Which of the pair is right is NOT decided here
+    and must not be decided anywhere automatic: there is no oracle -- recall
+    cannot rank extractors and the wiki has no page for 8 of the 13 core NPCs --
+    and a silent guess is how a wrong edge becomes indistinguishable from a
+    checked one. So both are reported, both are kept, and a human at gate G3
+    reads them.
+
+    An unknown relationship type cannot conflict, for the same reason
+    `report_edges` treats an unknown type as unchecked: "we could not parse
+    this" is not evidence that it is wrong.
+
+    Endpoint TYPES are not consulted, so `source_type`/`target_type` are empty
+    and `reversal_would_pass` is False. A reversal is meaningless here: swapping
+    the endpoints of one half of a contradiction does not resolve it, it just
+    makes a different claim.
+    """
+    triples: list[tuple[str, str, RelationshipType]] = []
+    parsed: list[int] = []
+    for index, edge in enumerate(edges):
+        try:
+            rel = RelationshipType(edge.rel_type.strip())
+        except ValueError:
+            continue
+        triples.append((_fold(edge.source_name), _fold(edge.target_name), rel))
+        parsed.append(index)
+
+    flagged: set[int] = set()
+    for left, right in exclusive_conflicts(triples):
+        flagged.update({parsed[left], parsed[right]})
+
+    return [
+        Violation(
+            edge_index=index,
+            rel_type=edges[index].rel_type,
+            source_name=edges[index].source_name,
+            target_name=edges[index].target_name,
+            source_type="",
+            target_type="",
+            reason=EXCLUSIVE_REASON,
+            reversal_would_pass=False,
+        )
+        for index in sorted(flagged)
+    ]
+
+
 def enforce(
     nodes: list[CandidateNode],
     edges: list[CandidateEdge],
@@ -198,9 +317,10 @@ def enforce(
 def format_report(report: ConstraintReport) -> str:
     """The block printed before the scores. Printed even when clean: a silent
     pass is indistinguishable from a check that never ran."""
-    reasons = {reason: 0 for reason in ("domain", "range", "both")}
-    for violation in report.violations:
-        reasons[violation.reason] += 1
+    # Counter, not a fixed dict: `EXCLUSIVE_REASON` is a reason this function has
+    # never seen, and a KeyError here would take down the extraction CLI rather
+    # than print a count.
+    reasons = Counter(violation.reason for violation in report.violations)
     return (
         f"  constraint violations: {len(report.violations)} of {report.checked} typed edges "
         f"(domain {reasons['domain']}, range {reasons['range']}, both {reasons['both']})\n"

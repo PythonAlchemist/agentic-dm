@@ -9,6 +9,8 @@ Test chapters use slugs prefixed `pytest-`, so the fixture's cleanup can never
 reach a real chapter's canon.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from backend.canon.writer import (
@@ -24,6 +26,7 @@ from backend.canon.writer import (
 )
 from backend.core.database import neo4j_session
 from backend.graph.schema import RelationshipType
+from backend.scripts.review_queue import fetch_rows, render
 
 pytestmark = pytest.mark.neo4j
 
@@ -132,6 +135,77 @@ class TestHappyPath:
             {"t": "IDENTITY_OF", "resolved": "constraint"},
             {"t": "LOCATED_IN", "resolved": None},
         ]
+
+
+class TestStatusInTheGraph:
+    """The split has to be queryable, or it does not exist.
+
+    Recording it only in a run artifact would leave a DM or a generator reading
+    `Ismark OPPOSES Ireena` out of the graph with exactly the same authority as
+    `Church CONTAINS Undercroft`, which is the defect this whole layer answers.
+    """
+
+    def test_a_query_can_separate_accepted_from_proposed(self, graph):
+        church, undercroft = node("Church"), node("Undercroft")
+        ireena = node("Ireena Kolyana", entity_type="NPC")
+        derived = link(undercroft, church)
+        proposed = WriteEdge(
+            source_id=ireena.id,
+            target_id=church.id,
+            rel_type=RelationshipType.THREATENS,
+            chapter_slug=CHAPTER_A,
+            evidence="Ireena menaces the church.",
+        )
+        write_chapter(graph, CHAPTER_A, [church, undercroft, ireena], [derived, proposed])
+
+        rows = graph.run(
+            """
+            MATCH ()-[r]->() WHERE r.chapter_slug = $slug
+            RETURN type(r) AS t, r.status AS status ORDER BY t
+            """,
+            {"slug": CHAPTER_A},
+        ).data()
+        assert rows == [
+            {"t": "LOCATED_IN", "status": "accepted"},
+            {"t": "THREATENS", "status": "proposed"},
+        ]
+
+    def test_node_status_lands_too(self, graph):
+        accepted = replace(node("Church"), status="accepted")
+        write_chapter(graph, CHAPTER_A, [accepted, node("Gertruda", entity_type="NPC")], [])
+
+        rows = graph.run(
+            "MATCH (n:Entity {chapter_slug:$slug}) RETURN n.name AS name, n.status AS status "
+            "ORDER BY name",
+            {"slug": CHAPTER_A},
+        ).data()
+        assert rows == [
+            {"name": "Church", "status": "accepted"},
+            {"name": "Gertruda", "status": "proposed"},
+        ]
+
+    def test_the_review_queue_reads_the_proposed_edges_and_skips_the_accepted(self, graph):
+        """What a human sees at gate G3 comes out of the graph, not a file."""
+        church, undercroft = node("Church"), node("Undercroft")
+        ireena = node("Ireena Kolyana", entity_type="NPC")
+        proposed = WriteEdge(
+            source_id=ireena.id,
+            target_id=church.id,
+            rel_type=RelationshipType.THREATENS,
+            chapter_slug=CHAPTER_A,
+            evidence="Ireena menaces the church.",
+            conflict="IDENTITY_OF",
+        )
+        write_chapter(
+            graph, CHAPTER_A, [church, undercroft, ireena], [link(undercroft, church), proposed]
+        )
+
+        rows = fetch_rows(graph, CHAPTER_A)
+
+        assert [r["rel_type"] for r in rows] == ["THREATENS"]
+        assert rows[0]["evidence"] == "Ireena menaces the church."
+        assert rows[0]["conflict"] == "IDENTITY_OF"
+        assert "CONFLICTS WITH IDENTITY_OF" in render(CHAPTER_A, rows)
 
 
 class TestAtomicity:

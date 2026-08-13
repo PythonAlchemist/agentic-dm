@@ -305,6 +305,34 @@ RELATIONSHIP_DOMAIN_RANGE: dict[
     RelationshipType.THREATENS: (_AGENT, _PHYSICAL | {EntityType.FACTION}),
 }
 
+# Pairs of relationship types that CANNOT both hold between the same ORDERED pair
+# of entities. Exclusion is about contradiction, not redundancy or rarity: the bar
+# is that the contradiction can be stated in one sentence.
+#
+# Motivating measurement: the live chapter-3 graph holds both
+# `Ireena -IDENTITY_OF-> Tatyana` and `Ireena -RELATED_TO-> Tatyana`. One says they
+# are one soul, the other that they are kin. Nothing noticed, because
+# RELATIONSHIP_DOMAIN_RANGE checks each edge in isolation and both are legal alone.
+#
+# ORDERED is the whole of the second entry. `Church CONTAINS Undercroft` beside
+# `Undercroft LOCATED_IN Church` is the ordinary inverse pair -- the derived
+# structural layer emits exactly that, and it is the cleanest layer in the graph.
+# Only the SAME direction contradicts: A cannot both hold B and sit inside B.
+#
+# Deliberately NOT here, and why the table is short:
+# - KNOWS / ENEMY_OF -- both are true of plenty of people.
+# - ALLIED_WITH / HOSTILE_TO -- a betrayal arc makes both true of one ordered pair
+#   at different points of one book, and these edges carry no time index. Merely
+#   unusual is not exclusive.
+MUTUALLY_EXCLUSIVE: frozenset[frozenset[RelationshipType]] = frozenset(
+    {
+        # One being under two names cannot also be its own kin.
+        frozenset({RelationshipType.IDENTITY_OF, RelationshipType.RELATED_TO}),
+        # Mutual containment: A holds B and A is inside B.
+        frozenset({RelationshipType.CONTAINS, RelationshipType.LOCATED_IN}),
+    }
+)
+
 # Campaign edges of these types SHADOW canon edges of the same type from the same
 # source, rather than adding to them. This is the Tarokka collapse: canon fans out to
 # ten candidate sites, a table's draw resolves it to one.

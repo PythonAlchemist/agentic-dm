@@ -13,6 +13,7 @@ from neo4j.exceptions import Neo4jError
 
 from backend.canon.gazetteer import Gazetteer, GazetteerEntry
 from backend.canon.models import CandidateEdge, CandidateNode
+from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.canon.writer import (
     CANON_PLANE,
     WriteNode,
@@ -20,6 +21,7 @@ from backend.canon.writer import (
     ensure_schema,
     mint_id,
     plan_write,
+    restrict_to_accepted,
 )
 from backend.graph.schema import EntityType, Layer, RelationshipType
 
@@ -687,6 +689,9 @@ class TestWrittenProperties:
             "section_index": 0,
             "votes": 5,
             "description": "The burgomaster's son.",
+            # An unkeyed NPC with no accepted edge attached: nothing
+            # deterministic vouches for it.
+            "status": "proposed",
         }
 
     def test_a_node_without_a_description_omits_the_property(self):
@@ -877,3 +882,324 @@ class TestReportTotals:
         nodes, _, report = plan_write([node("---")], [], gazetteer("---"), SLUG)
         assert report.unnameable == 1
         assert nodes == []
+
+
+DERIVED = {"evidence": STRUCTURAL_EVIDENCE}
+
+
+class TestEdgeStatus:
+    """The trust split, which is the whole point of the stage.
+
+    A hand read of all 30 LLM edges in the live chapter-3 graph found about a
+    third wrong -- `Ismark OPPOSES Ireena`, who is her brother -- while all 37
+    deterministically derived edges were sound. Until this stamp existed, a
+    query could not tell the two apart.
+    """
+
+    def test_a_derived_edge_is_accepted(self):
+        _, edges, _ = plan_write(
+            [node("Church"), node("Undercroft")],
+            [edge("Undercroft", "Church", "LOCATED_IN", **DERIVED)],
+            gazetteer("Church", "Undercroft"),
+            SLUG,
+        )
+
+        assert [e.status for e in edges] == ["accepted"]
+        assert edges[0].properties["status"] == "accepted"
+
+    def test_an_llm_edge_is_proposed(self):
+        _, edges, _ = plan_write(
+            [node("Ismark", "NPC"), node("Ireena", "NPC")],
+            [edge("Ismark", "Ireena", "OPPOSES", evidence="Ismark stands against his sister.")],
+            gazetteer("Ismark", "Ireena"),
+            SLUG,
+        )
+
+        assert [e.status for e in edges] == ["proposed"]
+        assert edges[0].properties["status"] == "proposed"
+
+    def test_an_edge_with_no_evidence_at_all_is_proposed(self):
+        """Acceptance is EARNED from the structural marker. Absent evidence is
+        not evidence of derivation, and defaulting the other way would promote
+        every edge that merely lost its provenance."""
+        _, edges, _ = plan_write(
+            [node("Ismark", "NPC"), node("Ireena", "NPC")],
+            [edge("Ismark", "Ireena", "KNOWS")],
+            gazetteer("Ismark", "Ireena"),
+            SLUG,
+        )
+
+        assert [e.status for e in edges] == ["proposed"]
+
+    def test_the_counts_split_and_add_back_up(self):
+        _, edges, report = plan_write(
+            [node("Church"), node("Undercroft"), node("Ismark", "NPC")],
+            [
+                edge("Church", "Undercroft", "CONTAINS", **DERIVED),
+                edge("Ismark", "Church", "OWNS", evidence="Ismark owns the church."),
+            ],
+            gazetteer("Church", "Undercroft", "Ismark"),
+            SLUG,
+        )
+
+        assert report.accepted_edges == 1
+        assert report.proposed_edges == 1
+        assert report.accepted_edges + report.proposed_edges == len(edges) == report.written_edges
+
+
+class TestNodeStatus:
+    def test_a_node_an_accepted_edge_attaches_to_is_accepted(self):
+        nodes, _, _ = plan_write(
+            [node("Church"), node("Undercroft")],
+            [edge("Undercroft", "Church", "LOCATED_IN", **DERIVED)],
+            gazetteer("Church", "Undercroft"),
+            SLUG,
+        )
+
+        assert {n.name: n.status for n in nodes} == {
+            "Church": "accepted",
+            "Undercroft": "accepted",
+        }
+
+    def test_an_orphan_llm_node_is_proposed(self):
+        """Nothing deterministic vouches for it: it is a name a model emitted."""
+        nodes, _, report = plan_write(
+            [node("Mad Mary's Townhouse"), node("Gertruda", "NPC")],
+            [
+                edge(
+                    "Mad Mary's Townhouse",
+                    "Gertruda",
+                    "CONTAINS",
+                    evidence="Mad Mary's daughter is in the townhouse.",
+                )
+            ],
+            gazetteer("Mad Mary's Townhouse", "Gertruda"),
+            SLUG,
+        )
+
+        # The hook of the chapter is that Gertruda is MISSING; the edge is false
+        # and the node it drags in is vouched for by nothing.
+        assert {n.status for n in nodes} == {"proposed"}
+        assert report.proposed_nodes == 2
+        assert report.accepted_nodes == 0
+
+    def test_a_keyed_place_is_accepted_even_with_no_edges_at_all(self):
+        """`E5g. Undercroft` is a heading in the book, not a model's opinion."""
+        nodes, _, _ = plan_write(
+            [node("Undercroft", section_heading="E5g. Undercroft", section_index=7)],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+
+        assert [n.status for n in nodes] == ["accepted"]
+
+    def test_acceptance_travels_in_both_directions_along_an_accepted_edge(self):
+        """A derived edge is evidence about both endpoints, not only its source.
+        The unkeyed endpoint here is accepted because the document's own nesting
+        put it there."""
+        nodes, _, _ = plan_write(
+            [
+                node("Church", section_heading="E5. Church", section_index=1),
+                node("Undercroft"),
+            ],
+            [edge("Church", "Undercroft", "CONTAINS", **DERIVED)],
+            gazetteer("Undercroft"),
+            SLUG,
+        )
+
+        assert {n.name: n.status for n in nodes} == {
+            "Church": "accepted",
+            "Undercroft": "accepted",
+        }
+
+    def test_a_node_status_lands_on_the_written_properties(self):
+        nodes, _, _ = plan_write(
+            [node("Gertruda", "NPC")], [], gazetteer("Gertruda"), SLUG
+        )
+
+        assert nodes[0].properties["status"] == "proposed"
+
+
+class TestMutualExclusion:
+    """Contradictions are recorded, never resolved by guessing.
+
+    There is no oracle: recall cannot rank extractors, and a wiki oracle failed
+    because 8 of the 13 core NPCs have no page. Human review at gate G3 is the
+    only precision gate that exists.
+    """
+
+    def ireena_and_tatyana(self, *rel_types: str) -> tuple:
+        return plan_write(
+            [node("Ireena Kolyana", "NPC"), node("Tatyana", "NPC")],
+            [
+                edge("Ireena Kolyana", "Tatyana", rel, evidence=f"{rel} evidence")
+                for rel in rel_types
+            ],
+            gazetteer("Ireena Kolyana", "Tatyana"),
+            SLUG,
+        )
+
+    def test_two_proposed_edges_in_conflict_are_both_written(self):
+        """Neither dropped, neither demoted, and the conflict recorded on both."""
+        _, edges, report = self.ireena_and_tatyana("IDENTITY_OF", "RELATED_TO")
+
+        assert len(edges) == 2
+        assert [e.status for e in edges] == ["proposed", "proposed"]
+        assert [e.conflict for e in edges] == ["RELATED_TO", "IDENTITY_OF"]
+        assert report.exclusive_conflicts == 1
+        assert report.conflicted_edges == 0
+        assert report.written_edges == 2
+
+    def test_the_conflict_is_named_in_the_report(self):
+        _, _, report = self.ireena_and_tatyana("IDENTITY_OF", "RELATED_TO")
+
+        assert len(report.conflicts) == 1
+        assert "IDENTITY_OF|RELATED_TO" in report.conflicts[0]
+        assert "ireena-kolyana" in report.conflicts[0]
+
+    def test_the_conflict_lands_on_the_edge_in_the_graph(self):
+        """A reviewer filters on this property; recomputing it from a dump is
+        not a review queue."""
+        _, edges, _ = self.ireena_and_tatyana("IDENTITY_OF", "RELATED_TO")
+
+        assert edges[0].properties["conflict"] == "RELATED_TO"
+
+    def test_an_ordinary_edge_carries_no_conflict_property_at_all(self):
+        """An empty string on every edge would bury the handful that matter."""
+        _, edges, _ = self.ireena_and_tatyana("KNOWS")
+
+        assert "conflict" not in edges[0].properties
+
+    def test_an_accepted_edge_beats_a_proposed_one(self):
+        """The single exception to not choosing: the accepted layer is derived
+        from the document's structure and cannot hallucinate."""
+        _, edges, report = plan_write(
+            [node("Church"), node("Undercroft")],
+            [
+                edge("Church", "Undercroft", "CONTAINS", **DERIVED),
+                edge("Church", "Undercroft", "LOCATED_IN", evidence="the church lies below it"),
+            ],
+            gazetteer("Church", "Undercroft"),
+            SLUG,
+        )
+
+        assert [e.status for e in edges] == ["accepted", "conflicted"]
+        assert report.conflicted_edges == 1
+        assert len(edges) == 2  # demoted, never deleted
+
+    def test_the_inverse_pair_the_deriver_emits_is_not_a_conflict(self):
+        """`Church CONTAINS Undercroft` with `Undercroft LOCATED_IN Church` is
+        the ordinary inverse pair, and the derived layer emits it in bulk."""
+        _, edges, report = plan_write(
+            [node("Church"), node("Undercroft")],
+            [
+                edge("Church", "Undercroft", "CONTAINS", **DERIVED),
+                edge("Undercroft", "Church", "LOCATED_IN", **DERIVED),
+            ],
+            gazetteer("Church", "Undercroft"),
+            SLUG,
+        )
+
+        assert report.exclusive_conflicts == 0
+        assert [e.status for e in edges] == ["accepted", "accepted"]
+        assert all(e.conflict == "" for e in edges)
+
+    def test_a_conflict_between_two_proposed_edges_confers_no_acceptance(self):
+        """A contradiction is not evidence. Two proposed edges disagreeing about
+        the same ordered pair leaves both of them, and both endpoints, unvetted
+        -- if anything it is a reason to trust them less."""
+        nodes, _, _ = plan_write(
+            [node("Ismark", "NPC"), node("Ireena", "NPC"), node("Tatyana", "NPC")],
+            [
+                edge("Ismark", "Ireena", "IDENTITY_OF", evidence="one and the same"),
+                edge("Ismark", "Ireena", "RELATED_TO", evidence="brother and sister"),
+            ],
+            gazetteer("Ismark", "Ireena", "Tatyana"),
+            SLUG,
+        )
+
+        assert {n.status for n in nodes} == {"proposed"}
+
+    def test_a_conflicted_edges_endpoints_are_accepted_by_the_edge_that_beat_it(self):
+        """Not a contradiction of the rule -- a consequence of it.
+
+        A `conflicted` edge is only ever created by an ACCEPTED edge between the
+        SAME ordered endpoints, so those endpoints are always accepted through
+        the winner. Whether `_mark_node_status` reads `== ACCEPTED` or
+        `!= PROPOSED` is therefore unobservable, and the strict form is written
+        because it states the intent rather than because a test can catch it.
+        """
+        nodes, edges, _ = plan_write(
+            [node("Church"), node("Undercroft")],
+            [
+                edge("Church", "Undercroft", "CONTAINS", **DERIVED),
+                edge("Church", "Undercroft", "LOCATED_IN", evidence="the church lies below it"),
+            ],
+            gazetteer("Church", "Undercroft"),
+            SLUG,
+        )
+
+        assert [e.status for e in edges] == ["accepted", "conflicted"]
+        assert {n.status for n in nodes} == {"accepted"}
+
+
+class TestAcceptedOnly:
+    def plan(self) -> tuple:
+        return plan_write(
+            [
+                node("Church", section_heading="E5. Church", section_index=1),
+                node("Undercroft"),
+                node("Gertruda", "NPC"),
+            ],
+            [
+                edge("Church", "Undercroft", "CONTAINS", **DERIVED),
+                edge("Church", "Gertruda", "CONTAINS", evidence="Gertruda is in the church."),
+            ],
+            gazetteer("Church", "Undercroft", "Gertruda"),
+            SLUG,
+        )
+
+    def test_proposed_edges_are_omitted(self):
+        nodes, edges, _ = self.plan()
+
+        kept_nodes, kept_edges = restrict_to_accepted(nodes, edges)
+
+        assert [e.rel_type for e in kept_edges] == [RelationshipType.CONTAINS]
+        assert all(e.status == "accepted" for e in kept_edges)
+        assert len(edges) == 2  # the plan itself is untouched
+
+    def test_a_node_left_with_nothing_attached_is_omitted(self):
+        nodes, edges, _ = self.plan()
+
+        kept_nodes, _ = restrict_to_accepted(nodes, edges)
+
+        assert sorted(n.name for n in kept_nodes) == ["Church", "Undercroft"]
+
+    def test_a_keyed_node_with_no_accepted_edge_is_omitted_too(self):
+        """Accepted in its own right, but writing an isolated node would give
+        the loop's node-counting predicate a chapter that looks written."""
+        nodes, edges, _ = plan_write(
+            [node("Undercroft", section_heading="E5g. Undercroft", section_index=7)],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+
+        assert [n.status for n in nodes] == ["accepted"]
+        assert restrict_to_accepted(nodes, edges) == ([], [])
+
+    def test_a_conflicted_edge_is_omitted_with_the_rest_of_the_proposed(self):
+        nodes, edges, _ = plan_write(
+            [node("Church"), node("Undercroft")],
+            [
+                edge("Church", "Undercroft", "CONTAINS", **DERIVED),
+                edge("Church", "Undercroft", "LOCATED_IN", evidence="below it"),
+            ],
+            gazetteer("Church", "Undercroft"),
+            SLUG,
+        )
+
+        _, kept_edges = restrict_to_accepted(nodes, edges)
+
+        assert [e.rel_type for e in kept_edges] == [RelationshipType.CONTAINS]
