@@ -78,18 +78,22 @@ class ConstraintReport:
         return sum(1 for violation in self.violations if violation.reversal_would_pass)
 
 
-def _fold(name: str) -> str:
+def fold_name(name: str) -> str:
     """Case-insensitive on the stripped string, as `anchor_quests` folds names.
 
     Deliberately NOT `grade.normalize_name`: extraction must not depend on the
     module that scores it, and the grade fold is loose on purpose (it matches
     "Ismark" to "Ismark the Lesser"), which would let one entity's type answer
     for another's.
+
+    Public because `classify.py` resolves endpoint types the same way. Two
+    modules folding names differently would type the same endpoint differently,
+    so they share one function rather than agreeing by coincidence.
     """
     return name.strip().casefold()
 
 
-def _types_by_name(nodes: list[CandidateNode]) -> dict[str, frozenset[EntityType]]:
+def types_by_name(nodes: list[CandidateNode]) -> dict[str, frozenset[EntityType]]:
     """Folded name -> every entity type some candidate node gave it.
 
     A SET, not one type: a coined QUEST sharing a LOCATION's name is a measured
@@ -104,7 +108,7 @@ def _types_by_name(nodes: list[CandidateNode]) -> dict[str, frozenset[EntityType
             entity_type = EntityType(node.entity_type.strip())
         except ValueError:
             continue
-        types.setdefault(_fold(node.name), set()).add(entity_type)
+        types.setdefault(fold_name(node.name), set()).add(entity_type)
     return {name: frozenset(found) for name, found in types.items()}
 
 
@@ -127,7 +131,7 @@ def report_edges(nodes: list[CandidateNode], edges: list[CandidateEdge]) -> Cons
     Endpoint types come from the candidate NODES, matched by folded name. Ids do
     not exist yet at this stage -- names are all there is.
     """
-    by_name = _types_by_name(nodes)
+    by_name = types_by_name(nodes)
     violations: list[Violation] = []
     checked = 0
     unchecked = 0
@@ -137,8 +141,8 @@ def report_edges(nodes: list[CandidateNode], edges: list[CandidateEdge]) -> Cons
             constraint = RELATIONSHIP_DOMAIN_RANGE.get(RelationshipType(edge.rel_type.strip()))
         except ValueError:
             constraint = None
-        source_types = by_name.get(_fold(edge.source_name), frozenset())
-        target_types = by_name.get(_fold(edge.target_name), frozenset())
+        source_types = by_name.get(fold_name(edge.source_name), frozenset())
+        target_types = by_name.get(fold_name(edge.target_name), frozenset())
 
         # Nothing to say: an unconstrained type, or neither endpoint typed.
         if constraint is None or not (source_types or target_types):
