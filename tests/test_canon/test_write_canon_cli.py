@@ -100,8 +100,8 @@ class TestRunArtifact:
             candidate_edges=[{"source_name": "Undercroft"}, {"source_name": "bed"}],
             report=report,
             nodes=[
-                WriteNode(id="a", name="Church", entity_type="LOCATION", chapter_slug=SLUG),
-                WriteNode(id="b", name="Undercroft", entity_type="LOCATION", chapter_slug=SLUG),
+                WriteNode(id="a", name="Church", entity_types=("LOCATION",), chapter_slug=SLUG),
+                WriteNode(id="b", name="Undercroft", entity_types=("LOCATION",), chapter_slug=SLUG),
             ],
             edges=[
                 WriteEdge(
@@ -184,7 +184,7 @@ class TestRunArtifact:
         write = self.build(
             nodes=[
                 WriteNode(
-                    id="a", name="Church", entity_type="LOCATION", chapter_slug=SLUG,
+                    id="a", name="Church", entity_types=("LOCATION",), chapter_slug=SLUG,
                     status="accepted",
                 )
             ],

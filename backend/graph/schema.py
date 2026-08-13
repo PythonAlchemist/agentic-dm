@@ -78,6 +78,7 @@ class RelationshipType(str, Enum):
 
     # Reference
     INSTANCE_OF = "INSTANCE_OF"
+    MENTIONED_IN = "MENTIONED_IN"  # Canon entity -> :Chapter it appears in
 
     # Player/Campaign
     PLAYS_AS = "PLAYS_AS"  # Player -> PC
@@ -131,6 +132,9 @@ LAYER_MAP: dict[RelationshipType, Layer | None] = {
     RelationshipType.OBJECTIVE_AT: Layer.NARRATIVE,
     # Structural: plane-linking, character sheet, runtime, campaign history
     RelationshipType.INSTANCE_OF: None,
+    # Provenance, not a surface: it says WHERE a canon entity is written about,
+    # which is deterministic and unfalsifiable, and says nothing about the world.
+    RelationshipType.MENTIONED_IN: None,
     RelationshipType.BELONGS_TO: None,
     RelationshipType.PLAYS_AS: None,
     RelationshipType.ATTENDED: None,
@@ -473,6 +477,10 @@ class Relationship(BaseModel):
 GRAPH_SCHEMA = {
     "constraints": [
         "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
+        # A chapter is identified by its slug and nothing else, and every canon
+        # entity MERGEs its MENTIONED_IN edge against it -- a second node for one
+        # slug would split a chapter's appearances in two.
+        "CREATE CONSTRAINT chapter_slug IF NOT EXISTS FOR (c:Chapter) REQUIRE c.slug IS UNIQUE",
     ],
     "indexes": [
         "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",

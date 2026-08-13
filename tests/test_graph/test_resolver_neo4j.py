@@ -16,8 +16,8 @@ def seed(session):
         """
         CREATE (c:Entity {id:$campaign, name:'Table A', entity_type:'CAMPAIGN',
                           plane:'campaign'})
-        CREATE (canon:Entity {id:'pytest:npc:ireena', name:'Ireena Kolyana',
-                              entity_type:'NPC', plane:'canon', source_book:'cos',
+        CREATE (canon:Entity:NPC {id:'pytest:npc:ireena', name:'Ireena Kolyana',
+                              plane:'canon', source_book:'cos',
                               description:"burgomaster's sister", status:'alive'})
         CREATE (camp:Entity {id:'pytest:npc:ireena@a', entity_type:'NPC',
                              plane:'campaign', status:'dead',

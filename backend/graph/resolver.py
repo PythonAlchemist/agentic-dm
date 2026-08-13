@@ -61,9 +61,15 @@ def shadow_edges(canon_edges: list[dict], campaign_edges: list[dict]) -> list[di
 
 Perspective = Literal["truth", "table"]
 
+# The canon plane's type is a LABEL, not a property: a node the extraction
+# samples disputed carries two (`Barovia` is `:LOCATION:SETTING`) and no scalar
+# could hold that. Matched with `IN labels(...)` rather than as `(canon:NPC)`
+# because a label cannot be parameterized and this query is a constant. The
+# CAMPAIGN branches below still read the property -- campaign nodes are written
+# by `graph.operations`, which stamps one type and is not what this change is.
 _ENTITY_CANON_BRANCH = """
 MATCH (canon:Entity {plane:'canon'})
-WHERE ($entity_type IS NULL OR canon.entity_type = $entity_type)
+WHERE ($entity_type IS NULL OR $entity_type IN labels(canon))
   AND ($source_book IS NULL OR canon.source_book = $source_book)
 OPTIONAL MATCH (camp:Entity {plane:'campaign'})-[:INSTANCE_OF]->(canon)
   WHERE (camp)-[:BELONGS_TO]->(:Entity {id:$campaign_id})

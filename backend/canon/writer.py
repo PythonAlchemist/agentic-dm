@@ -30,6 +30,7 @@ from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.sections import KEYED_HEADING
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
+    CANON_ENTITY_TYPES,
     GRAPH_SCHEMA,
     LAYER_MAP,
     RELATIONSHIP_DOMAIN_RANGE,
@@ -60,9 +61,19 @@ PROPOSED = "proposed"
 #: becomes indistinguishable from a checked one.
 CONFLICTED = "conflicted"
 
-#: Every id is prefixed with the book. Nothing merges across chapters -- see
-#: `mint_id` -- and nothing merges across books either.
+#: Every id is prefixed with the book. Entities merge across the chapters of one
+#: book -- see `mint_id` -- but never across books.
 BOOK = "cos"
+
+#: Provenance edge: entity -> the :Chapter it is written about in. Named through
+#: the enum rather than as a literal so the graph's vocabulary stays in one file.
+MENTIONED_IN = RelationshipType.MENTIONED_IN.value
+
+#: The labels a canon node may carry beside `:Entity`, derived from the ontology
+#: rather than restated. A label CANNOT be parameterized in Cypher, so it is
+#: interpolated into the query text; this frozenset is the only thing standing
+#: between a corrupt artifact's `entity_type` and injected Cypher.
+CANON_LABELS: frozenset[str] = frozenset(t.value for t in CANON_ENTITY_TYPES)
 
 logger = logging.getLogger(__name__)
 
@@ -112,35 +123,46 @@ class CampaignDataAttached(Exception):
         self.relationships = relationships
 
 
-def mint_id(chapter_slug: str, entity_type: str, name: str, key: str = "") -> str:
-    """`cos:<chapter-slug>:<entity-type>:<key>-<name-slug>`, key omitted when absent.
+def mint_id(chapter_slug: str, name: str, key: str = "") -> str:
+    """`cos:<name-slug>`, or `cos:<chapter-slug>:<key>-<name-slug>` when keyed.
 
-    Chapter-scoped because NOTHING merges across chapters in this pipeline.
-    Cross-chapter resolution is a separate pass with its own measurement.
+    UNKEYED ENTITIES ARE GLOBAL TO THE BOOK. Madam Eva is one woman whether the
+    introduction or chapter 3 names her, and a chapter-scoped id gave her one
+    node per chapter -- nine duplicated names across three chapters, and a major
+    NPC heading for twenty nodes by chapter 25, each holding a slice of her
+    edges. Merging on the exact name accepts that two different people sharing
+    one name would collapse; in a single sourcebook that trade is worth one
+    Strahd.
 
     A KEYED PLACE RESOLVES TO `(book, chapter, key)`, NEVER TO ITS NAME. Chapter
     4 holds `Closet` x2 and `Empty Cell` x3 as genuinely distinct rooms, and
     both `North Dungeon CONTAINS Empty Cell` and `South Dungeon CONTAINS Empty
     Cell` are real within that one chapter -- so a name-only id would merge
-    three rooms into one and silently delete two of those edges. Chapter
-    scoping alone does not address this; the key does. `K61a. Empty Cell` and
-    `K62a. Empty Cell` mint `…:location:k61a-empty-cell` and
-    `…:location:k62a-empty-cell`.
+    three rooms into one and silently delete two of those edges. `K61a. Empty
+    Cell` and `K62a. Empty Cell` mint `cos:castle-ravenloft:k61a-empty-cell` and
+    `cos:castle-ravenloft:k62a-empty-cell`. An unkeyed place has no key to
+    resolve to and falls back to its name like everything else, which is the
+    riskiest case here and the one to watch.
 
     The name is kept alongside the key rather than replaced by it: `k61a` alone
     is opaque in a report, a query, or a stack trace, and the key already
-    carries the uniqueness. Entities the book does not key keep the plain
-    name-based form -- there is no key to resolve them to.
+    carries the uniqueness.
 
-    `entity_type` is part of the id because a coined QUEST sharing a LOCATION's
-    name is a measured occurrence in this corpus -- `anchor_quests` keys on
-    `(name, type)` for the same reason.
+    THE TYPE IS NOT IN THE ID. It used to be, and that is precisely what made
+    `Barovia` two nodes when one sample called it a LOCATION and another a
+    SETTING, and `Doru` two nodes over NPC versus MONSTER -- seven names split
+    by a disagreement about a label rather than about the world. The type is
+    now a Neo4j label, several are allowed at once, and a disputed type
+    dissolves into one node wearing both rather than into two nodes wearing one
+    each. Nothing has to pick a winner.
 
     Reuses `assembler.slugify` rather than growing a second slugifier that
     drifts from it.
     """
     tail = "-".join(part for part in (key.strip().lower(), slugify(name)) if part)
-    return f"{BOOK}:{chapter_slug}:{entity_type.strip().lower()}:{tail}"
+    if key.strip():
+        return f"{BOOK}:{chapter_slug}:{tail}"
+    return f"{BOOK}:{tail}"
 
 
 @dataclass(frozen=True)
@@ -149,7 +171,13 @@ class WriteNode:
 
     id: str
     name: str
-    entity_type: str
+    #: Every type any candidate for this id gave it, sorted and deduplicated.
+    #: A TUPLE rather than a scalar because two extraction samples routinely
+    #: disagree -- `Barovia` is a LOCATION to one and a SETTING to another --
+    #: and there is nothing to choose between them. Both become labels.
+    entity_types: tuple[str, ...]
+    #: The chapter this write is for. Provenance for the MENTIONED_IN edge, NOT
+    #: a property of the entity: a globally unique node has no one chapter.
     chapter_slug: str
     section_heading: str = ""
     section_index: int = -1
@@ -162,15 +190,34 @@ class WriteNode:
     status: str = PROPOSED
 
     @property
+    def labels(self) -> tuple[str, ...]:
+        """The Neo4j labels beside `:Entity`, one per type, sorted.
+
+        Filtered through `CANON_LABELS` because a label is interpolated into
+        Cypher rather than parameterized. A type the ontology does not admit as
+        canon -- a campaign-plane `PC`, or garbage out of a corrupt artifact --
+        confers no label at all, leaving a plain `:Entity` that every "everything"
+        query still finds and no type query wrongly claims.
+        """
+        return tuple(sorted(t for t in self.entity_types if t in CANON_LABELS))
+
+    @property
     def properties(self) -> dict:
-        """What lands on the node. `id` is the MERGE key, so it is not here."""
+        """What lands on the node. `id` is the MERGE key, so it is not here.
+
+        NO `entity_type`. The labels are the type, and a scalar property beside
+        them would be the same fact in two places -- with the disputed case
+        forcing it to be a lie, since `Barovia` is `:LOCATION:SETTING` and no
+        single string says that. A consumer that needs a scalar derives it from
+        `labels(n)` at read time.
+
+        NO `chapter_slug`, `section_heading` or `section_index` either: an
+        entity the whole book shares appears in many chapters and many sections,
+        and each appearance is a MENTIONED_IN edge carrying its own.
+        """
         props: dict = {
             "name": self.name,
-            "entity_type": self.entity_type,
             "plane": CANON_PLANE,
-            "chapter_slug": self.chapter_slug,
-            "section_heading": self.section_heading,
-            "section_index": self.section_index,
             "votes": self.votes,
             "status": self.status,
         }
@@ -180,6 +227,21 @@ class WriteNode:
         if self.description:
             props["description"] = self.description
         return props
+
+    @property
+    def appearance(self) -> dict:
+        """What lands on this node's MENTIONED_IN edge to one chapter.
+
+        No `chapter_slug` and no `plane`: the edge already points AT the chapter
+        and comes FROM a node stamped canon, so both would be the same fact in a
+        second place -- and `r.chapter_slug` would then stop meaning "an
+        ontology edge this chapter asserted", which is what the review queue and
+        the replace path read it as.
+        """
+        return {
+            "section_heading": self.section_heading,
+            "section_index": self.section_index,
+        }
 
 
 @dataclass(frozen=True)
@@ -490,7 +552,7 @@ def _as_write_node(node: CandidateNode, node_id: str, chapter_slug: str) -> Writ
     return WriteNode(
         id=node_id,
         name=node.name,
-        entity_type=node.entity_type,
+        entity_types=(node.entity_type,),
         chapter_slug=chapter_slug,
         section_heading=node.section_heading,
         section_index=node.section_index,
@@ -507,29 +569,35 @@ def _resolve_endpoint(
     """Which node an edge's endpoint name means. `(id, was_resolved)`.
 
     One id, no question -- that is every ordinary edge, and it is not
-    "resolved".
+    "resolved". A DISPUTED TYPE NO LONGER REACHES HERE: `Tatyana` typed NPC by
+    one sample and LORE by four is one node wearing both labels, so the name
+    answers to a single id. What still can is a name the chapter keys twice
+    (`Empty Cell` at K61a and K62a), or one the chapter both keys and mentions
+    unkeyed.
 
-    Two or more ids means one name is answered by nodes of different types,
-    because `entity_type` is part of the id: `Tatyana` typed NPC by one sample
-    and LORE by four is two nodes. When EXACTLY ONE of them has a type the
-    relationship's domain (or range) admits, that is the only reading of the
-    edge the ontology permits, so it is the reading taken. `IDENTITY_OF`'s range
-    is `{NPC, MONSTER}`, so `Ireena IDENTITY_OF Tatyana` can only mean the NPC.
+    When EXACTLY ONE candidate has a type the relationship's domain (or range)
+    admits, that is the only reading of the edge the ontology permits, so it is
+    the reading taken. `IDENTITY_OF`'s range is `{NPC, MONSTER}`, so `Ireena
+    IDENTITY_OF Tatyana` can only mean the animate one.
 
     Zero or two or more satisfy, or the relationship has no domain/range entry
     at all: nothing decides it, and picking anyway would manufacture an
     assertion the extractor never made. The caller drops the edge.
 
-    An endpoint whose `entity_type` is not in the ontology never counts as
-    satisfying. `check_edges` treats an unknown type as unCHECKED, which is
-    right when asking "is this edge legal"; it cannot make an unknown type the
-    unique answer to "which of these two nodes is meant".
+    A candidate satisfies when ANY of its types is admitted -- a node is
+    genuinely both, and refusing the edge because one of its two labels is
+    inadmissible would drop a fact the other label supports. A type outside the
+    ontology never counts: `check_edges` treats an unknown type as unCHECKED,
+    which is right when asking "is this edge legal"; it cannot make an unknown
+    type the unique answer to "which of these two nodes is meant".
     """
     if len(ids) == 1:
         return next(iter(ids)), False
     if allowed is None:
         return None, False
-    satisfying = [i for i in ids if _entity_type(by_id[i].entity_type) in allowed]
+    satisfying = [
+        i for i in ids if any(_entity_type(t) in allowed for t in by_id[i].entity_types)
+    ]
     if len(satisfying) == 1:
         return satisfying[0], True
     return None, False
@@ -711,6 +779,10 @@ def plan_write(
     ids_by_name: dict[str, set[str]] = {}
     ids_by_section: dict[int, set[str]] = {}
     provenance_rank: dict[str, int] = {}
+    #: id -> every type any candidate for it gave, unioned at the end into the
+    #: node's labels. Two samples disagreeing is a disagreement about a label,
+    #: not about the world, and both readings are kept.
+    types_seen: dict[str, list[str]] = {}
     # Ids the BOOK keys, which is the half of node acceptance that owes nothing
     # to any edge -- a keyed room with no relationships is still the book's own.
     keyed_ids: set[str] = set()
@@ -730,7 +802,7 @@ def plan_write(
             # A name that slugifies to nothing cannot be given an id at all.
             report.unnameable += 1
             continue
-        node_id = mint_id(chapter_slug, node.entity_type, node.name, node_key)
+        node_id = mint_id(chapter_slug, node.name, node_key)
         if node_key:
             keyed_ids.add(node_id)
         # Every kept candidate is indexed under its own folded name and its own
@@ -756,6 +828,12 @@ def plan_write(
         rank = 0
         if keyed.keys_own_name(node.name, node.section_index):
             rank = 2 if keyed.spells_it_as_the_book_does(node.name, node.section_index) else 1
+        # The TYPE unions across every candidate for this id, whichever one wins
+        # the provenance tiebreak. The tiebreak is about which section to cite;
+        # it is not evidence about what the thing is, and letting it pick a
+        # single type would put back the winner-picking that folding the type
+        # out of the id removed.
+        types_seen.setdefault(node_id, []).append(node.entity_type)
         if node_id in by_id:
             report.duplicate_nodes += 1
             if rank > provenance_rank[node_id]:
@@ -764,6 +842,11 @@ def plan_write(
             continue
         by_id[node_id] = _as_write_node(node, node_id, chapter_slug)
         provenance_rank[node_id] = rank
+
+    by_id = {
+        node_id: replace(written, entity_types=tuple(sorted(set(types_seen[node_id]))))
+        for node_id, written in by_id.items()
+    }
 
     report.ambiguous_names = sorted(name for name, ids in ids_by_name.items() if len(ids) > 1)
 
@@ -862,34 +945,62 @@ def ensure_schema(session) -> None:
             logger.warning("schema statement failed: %s -- %s", statement, exc)
 
 
+#: Every canon node this chapter names, found through its appearances rather
+#: than through a property on the node. A globally unique entity belongs to as
+#: many chapters as mention it, and MENTIONED_IN is the only record of which.
+_MENTIONED_BY_CHAPTER = f"""
+MATCH (n:Entity {{plane:$plane}})-[:{MENTIONED_IN}]->(:Chapter {{slug:$slug}})
+"""
+
+
 def count_canon_nodes(session, chapter_slug: str) -> int:
-    """How many canon nodes this chapter already has. The loop's own predicate."""
+    """How many canon nodes this chapter names. The loop's own predicate."""
     record = session.run(
-        "MATCH (n:Entity {chapter_slug:$slug, plane:$plane}) RETURN count(n) AS c",
+        _MENTIONED_BY_CHAPTER + "RETURN count(n) AS c",
         {"slug": chapter_slug, "plane": CANON_PLANE},
     ).single()
     return record["c"] if record else 0
 
 
 def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
-    """Delete this chapter's canon relationships and nodes. Nothing else.
+    """Delete this chapter's canon relationships, and the nodes only it names.
 
     Scoped by `plane` AND `chapter_slug` on both statements, so another
     chapter's canon and every campaign's play are untouchable from here. A node
     still carrying a relationship this scope does not cover is refused rather
     than DETACH DELETEd -- see `CampaignDataAttached`.
+
+    A NODE ANOTHER CHAPTER ALSO NAMES SURVIVES, keeping only that chapter's
+    appearance. Madam Eva is one node for the whole book, and re-writing chapter
+    3 must cost the introduction nothing -- deleting her would silently truncate
+    a chapter nobody asked to touch. So the delete set is the nodes whose ONLY
+    appearance is this chapter's, and the check for attached campaign data is
+    narrowed to exactly those: a node that is going to survive cannot take
+    anything down with it.
     """
+    doomed = _MENTIONED_BY_CHAPTER + f"""
+    WITH n, count {{ (n)-[:{MENTIONED_IN}]->(:Chapter) }} AS chapters
+    WHERE chapters = 1
+    """
+    scope = {"slug": chapter_slug, "plane": CANON_PLANE}
     attached = tx.run(
-        """
-        MATCH (n:Entity {chapter_slug:$slug, plane:$plane})-[r]-()
-        WHERE NOT (r.plane = $plane AND r.chapter_slug = $slug)
+        doomed
+        + f"""
+        MATCH (n)-[r]-()
+        WHERE type(r) <> '{MENTIONED_IN}'
+          AND NOT (r.plane = $plane AND r.chapter_slug = $slug)
         RETURN count(r) AS c
         """,
-        {"slug": chapter_slug, "plane": CANON_PLANE},
+        scope,
     ).single()["c"]
     if attached:
         raise CampaignDataAttached(chapter_slug, attached)
 
+    # The node set is read BEFORE any delete: deleting this chapter's
+    # appearances removes the very edges that identify the nodes it owns.
+    ids = tx.run(doomed + "RETURN collect(n.id) AS ids", scope).single()["ids"]
+
+    # Counted, because it is compared against what the plan wrote.
     edges = tx.run(
         """
         MATCH ()-[r]->()
@@ -897,24 +1008,61 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         DELETE r
         RETURN count(r) AS c
         """,
-        {"slug": chapter_slug, "plane": CANON_PLANE},
+        scope,
     ).single()["c"]
+    # NOT counted: an appearance mirrors a node one-for-one, and adding it to a
+    # figure a reader compares against `written_edges` would say a replace
+    # deleted twice what it wrote.
+    tx.run(
+        f"""
+        MATCH (:Entity {{plane:$plane}})-[m:{MENTIONED_IN}]->(:Chapter {{slug:$slug}})
+        DELETE m
+        """,
+        scope,
+    )
     nodes = tx.run(
         """
-        MATCH (n:Entity {chapter_slug:$slug, plane:$plane})
+        MATCH (n:Entity {plane:$plane}) WHERE n.id IN $ids
         DELETE n
         RETURN count(n) AS c
         """,
-        {"slug": chapter_slug, "plane": CANON_PLANE},
+        {"ids": ids, "plane": CANON_PLANE},
     ).single()["c"]
     return nodes, edges
 
 
 def _write_node(tx, node: WriteNode) -> None:
-    """MERGE on the id, so a re-run after `--replace` cannot double a node."""
+    """MERGE on the id, so a second chapter naming this entity adds no node.
+
+    The labels are interpolated because Cypher cannot parameterize one. Every
+    label comes from `WriteNode.labels`, which admits only `CANON_LABELS`, so
+    the interpolated text can only ever be one of the ontology's own type names.
+    `SET e:A:B` UNIONS labels onto whatever the node already carries -- which is
+    what makes a chapter that types `Barovia` a SETTING add to, rather than
+    replace, the chapter that typed it a LOCATION.
+    """
+    labels = "".join(f":{label}" for label in node.labels)
     tx.run(
-        "MERGE (e:Entity {id:$id}) SET e += $props",
+        f"MERGE (e:Entity {{id:$id}}) {f'SET e{labels} ' if labels else ''}SET e += $props",
         {"id": node.id, "props": node.properties},
+    )
+
+
+def _write_appearance(tx, node: WriteNode, chapter_slug: str) -> None:
+    """Record that this chapter writes about this entity, and where.
+
+    Deterministic and unfalsifiable -- "Strahd is written about in chapter 3" is
+    simply true, unlike anything the extractor proposes -- and it answers the
+    question a DM actually asks, "where do I read about Ireena", in one hop.
+    """
+    tx.run(
+        f"""
+        MATCH (e:Entity {{id:$id}})
+        MERGE (c:Chapter {{slug:$slug}})
+        MERGE (e)-[m:{MENTIONED_IN}]->(c)
+        SET m += $props
+        """,
+        {"id": node.id, "slug": chapter_slug, "props": node.appearance},
     )
 
 
@@ -955,7 +1103,7 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
     write empties a chapter and leaves it looking done.
     """
     existing = tx.run(
-        "MATCH (n:Entity {chapter_slug:$slug, plane:$plane}) RETURN count(n) AS c",
+        _MENTIONED_BY_CHAPTER + "RETURN count(n) AS c",
         {"slug": chapter_slug, "plane": CANON_PLANE},
     ).single()["c"]
 
@@ -967,6 +1115,11 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
 
     for node in nodes:
         _write_node(tx, node)
+    # After the nodes and inside the same transaction: the appearance is what
+    # the loop's predicate and the replace path both read, so a chapter whose
+    # nodes committed without them would look unwritten and be unreplaceable.
+    for node in nodes:
+        _write_appearance(tx, node, chapter_slug)
     for edge in edges:
         _write_edge(tx, edge)
 

@@ -44,24 +44,103 @@ def edge(source: str, target: str, rel_type: str = "LOCATED_IN", **kwargs) -> Ca
 
 
 class TestIdMinting:
-    def test_id_is_chapter_scoped(self):
-        assert mint_id(SLUG, "LOCATION", "Blood of the Vine Tavern") == (
-            "cos:the-village-of-barovia:location:blood-of-the-vine-tavern"
+    def test_an_unkeyed_id_carries_no_chapter(self):
+        """One Madam Eva for the whole book, whichever chapter names her."""
+        assert mint_id(SLUG, "Blood of the Vine Tavern") == "cos:blood-of-the-vine-tavern"
+
+    def test_two_chapters_naming_one_entity_mint_one_id(self):
+        assert mint_id("introduction", "Madam Eva") == mint_id(SLUG, "Madam Eva")
+
+    def test_a_keyed_place_stays_chapter_and_key_scoped(self):
+        """`K61a. Empty Cell` and `K62a. Empty Cell` are genuinely different rooms."""
+        assert mint_id("castle-ravenloft", "Empty Cell", "K61a") == (
+            "cos:castle-ravenloft:k61a-empty-cell"
         )
 
-    def test_same_room_in_two_chapters_gets_two_ids(self):
-        """Chapter 4's Chapel is not chapter 3's. Nothing merges across chapters."""
-        assert mint_id("the-village-of-barovia", "LOCATION", "Chapel") != mint_id(
-            "castle-ravenloft", "LOCATION", "Chapel"
-        )
-
-    def test_entity_type_is_part_of_the_id(self):
-        """A coined QUEST sharing a LOCATION's name is a measured occurrence."""
-        assert mint_id(SLUG, "QUEST", "Barovia") != mint_id(SLUG, "LOCATION", "Barovia")
+    def test_the_type_is_not_part_of_the_id(self):
+        """A disputed type must dissolve into labels on ONE node, not two nodes."""
+        assert mint_id(SLUG, "Barovia") == mint_id(SLUG, "Barovia")
 
     def test_planned_nodes_carry_the_minted_id(self):
         nodes, _, _ = plan_write([node("Ismark")], [], gazetteer("Ismark"), SLUG)
-        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:location:ismark"]
+        assert [n.id for n in nodes] == ["cos:ismark"]
+
+
+class TestDisputedType:
+    """Two samples disagreeing about a type made two nodes, and every edge went
+    to whichever one the extractor happened to name. One node with both labels
+    dissolves the duplicate without picking a winner."""
+
+    def test_a_disputed_type_is_one_node_carrying_both_types(self):
+        nodes, _, report = plan_write(
+            [node("Tatyana", "NPC"), node("Tatyana", "LORE")],
+            [],
+            gazetteer("Tatyana"),
+            SLUG,
+        )
+        assert [n.id for n in nodes] == ["cos:tatyana"]
+        assert nodes[0].entity_types == ("LORE", "NPC")
+        assert report.duplicate_nodes == 1
+
+    def test_both_types_become_labels(self):
+        nodes, _, _ = plan_write(
+            [node("Barovia", "LOCATION"), node("Barovia", "SETTING")],
+            [],
+            gazetteer("Barovia"),
+            SLUG,
+        )
+        assert nodes[0].labels == ("LOCATION", "SETTING")
+
+    def test_a_type_outside_the_canon_set_is_not_a_label(self):
+        """Labels are interpolated into Cypher, so only CANON_ENTITY_TYPES may
+        become one -- and a PC is a campaign-plane type, not a book's canon."""
+        nodes, _, _ = plan_write([node("Ismark", "PC")], [], gazetteer("Ismark"), SLUG)
+        assert nodes[0].labels == ()
+        assert nodes[0].entity_types == ("PC",)
+
+    def test_every_edge_reaches_the_one_node(self):
+        nodes, edges, report = plan_write(
+            [node("Ireena", "NPC"), node("Tatyana", "NPC"), node("Tatyana", "LORE")],
+            [edge("Ireena", "Tatyana", "IDENTITY_OF")],
+            gazetteer("Ireena", "Tatyana"),
+            SLUG,
+        )
+        assert report.ambiguous_edges == 0
+        assert [e.target_id for e in edges] == ["cos:tatyana"]
+        assert sorted(n.id for n in nodes) == ["cos:ireena", "cos:tatyana"]
+
+
+class TestWhatLandsOnTheNode:
+    def test_the_type_is_not_a_property(self):
+        """Labels are the single source of truth for type; a scalar property
+        beside them cannot even represent the disputed case."""
+        nodes, _, _ = plan_write([node("Ismark", "NPC")], [], gazetteer("Ismark"), SLUG)
+        assert "entity_type" not in nodes[0].properties
+
+    def test_the_chapter_is_not_a_property_either(self):
+        """A globally unique node has no one chapter -- it has MENTIONED_IN edges."""
+        nodes, _, _ = plan_write(
+            [node("Ismark", "NPC", section_heading="E1. Mansion", section_index=2)],
+            [],
+            gazetteer("Ismark"),
+            SLUG,
+        )
+        props = nodes[0].properties
+        assert "chapter_slug" not in props
+        assert "section_heading" not in props
+        assert "section_index" not in props
+
+    def test_the_appearance_carries_the_section(self):
+        nodes, _, _ = plan_write(
+            [node("Ismark", "NPC", section_heading="E1. Mansion", section_index=2)],
+            [],
+            gazetteer("Ismark"),
+            SLUG,
+        )
+        assert nodes[0].appearance == {
+            "section_heading": "E1. Mansion",
+            "section_index": 2,
+        }
 
 
 class TestKeyedIds:
@@ -79,7 +158,7 @@ class TestKeyedIds:
             gazetteer(),
             SLUG,
         )
-        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:location:e5g-undercroft"]
+        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:e5g-undercroft"]
 
     def test_an_entity_the_book_does_not_key_keeps_the_plain_form(self):
         nodes, _, _ = plan_write(
@@ -88,7 +167,7 @@ class TestKeyedIds:
             gazetteer("Ismark Kolyanovich"),
             SLUG,
         )
-        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:npc:ismark-kolyanovich"]
+        assert [n.id for n in nodes] == ["cos:ismark-kolyanovich"]
 
     def test_two_same_named_rooms_in_one_chapter_are_two_nodes(self):
         """`K61a. Empty Cell` and `K62a. Empty Cell` are different rooms."""
@@ -103,8 +182,8 @@ class TestKeyedIds:
         )
         assert report.duplicate_nodes == 0
         assert sorted(n.id for n in nodes) == [
-            "cos:the-village-of-barovia:location:k61a-empty-cell",
-            "cos:the-village-of-barovia:location:k62a-empty-cell",
+            "cos:the-village-of-barovia:k61a-empty-cell",
+            "cos:the-village-of-barovia:k62a-empty-cell",
         ]
 
     def test_a_mention_from_elsewhere_joins_the_room_the_book_keys(self):
@@ -120,7 +199,7 @@ class TestKeyedIds:
             SLUG,
         )
         assert report.duplicate_nodes == 1
-        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:location:e5g-undercroft"]
+        assert [n.id for n in nodes] == ["cos:the-village-of-barovia:e5g-undercroft"]
 
     def test_a_name_two_sections_key_mentioned_from_neither_is_dropped(self):
         """`Empty Cell` in prose could be K61a's or K62a's. Picking invents a room."""
@@ -254,7 +333,7 @@ class TestKeyedProvenance:
         )
         assert report.duplicate_nodes == 1
         assert [n.id for n in nodes] == [
-            "cos:the-village-of-barovia:location:e1-bildrath-s-mercantile"
+            "cos:the-village-of-barovia:e1-bildrath-s-mercantile"
         ]
         # ...and canon carries the book's typography, not the extractor's.
         assert nodes[0].name == "Bildrath’s Mercantile"
@@ -283,7 +362,7 @@ class TestSelfLoops:
         )
         assert report.self_loops == 1
         assert [(e.source_id, e.target_id) for e in edges] == [
-            (mint_id(SLUG, "LOCATION", "Trapdoor"), mint_id(SLUG, "LOCATION", "Undercroft"))
+            (mint_id(SLUG, "Trapdoor"), mint_id(SLUG, "Undercroft"))
         ]
 
     def test_self_loop_detection_ignores_case_and_spacing(self):
@@ -468,37 +547,48 @@ class TestDanglingEdges:
         assert edges == []
 
 
+def cell(entity_type: str, key: str) -> CandidateNode:
+    """One of the chapter's two same-named keyed rooms."""
+    section = {"K61a": 1, "K62a": 3}[key]
+    return node(
+        "Empty Cell", entity_type, section_heading=f"{key}. Empty Cell", section_index=section
+    )
+
+
 class TestAmbiguousEndpoints:
     """A name answered by two surviving nodes of different types.
 
-    Both nodes are written -- the type is part of the id, and node consensus
-    cannot tell "unsupported entity" from "disputed type" -- so an edge naming
-    `Tatyana` has two nodes it could mean. The domain/range table settles it
-    when it admits exactly one of them, and nothing settles it otherwise.
+    A DISPUTED TYPE NO LONGER PRODUCES THIS. `Tatyana` typed NPC by one sample
+    and LORE by four is now one node wearing both labels, because the type left
+    the id. What remains is the case the key exists for: the chapter keys `Empty
+    Cell` at both K61a and K62a, they are genuinely two rooms, and an edge
+    naming `Empty Cell` from a third section has two nodes it could mean. The
+    domain/range table settles it when it admits exactly one of them, and
+    nothing settles it otherwise.
     """
 
     def test_the_only_reading_the_ontology_permits_is_taken(self):
-        """`IDENTITY_OF`'s range is {NPC, MONSTER}, so Tatyana-the-LORE cannot
+        """`KNOWS` admits only animates, so the cell typed LOCATION cannot
         stand there. This is the edge the whole reveal-filter design rests on."""
         nodes, edges, report = plan_write(
-            [node("Tatyana", "NPC"), node("Tatyana", "LORE"), node("Ireena", "NPC")],
-            [edge("Ireena", "Tatyana", "IDENTITY_OF")],
-            gazetteer("Tatyana", "Ireena"),
+            [cell("LOCATION", "K61a"), cell("MONSTER", "K62a"), node("Ireena", "NPC")],
+            [edge("Ireena", "Empty Cell", "KNOWS", section_index=9)],
+            gazetteer("Ireena"),
             SLUG,
         )
         assert len(nodes) == 3
         assert report.ambiguous_edges == 0
         assert report.endpoint_resolved == 1
-        assert [e.target_id for e in edges] == [mint_id(SLUG, "NPC", "Tatyana")]
+        assert [e.target_id for e in edges] == [mint_id(SLUG, "Empty Cell", "K62a")]
 
     def test_a_resolved_edge_is_stamped(self):
         """An edge whose endpoint was CHOSEN to satisfy the constraint table
         will always satisfy it afterwards, so the check is vacuous on exactly
         these. Acceptable -- but it must be visible, not silent."""
         _, edges, _ = plan_write(
-            [node("Tatyana", "NPC"), node("Tatyana", "LORE"), node("Ireena", "NPC")],
-            [edge("Ireena", "Tatyana", "IDENTITY_OF")],
-            gazetteer("Tatyana", "Ireena"),
+            [cell("LOCATION", "K61a"), cell("MONSTER", "K62a"), node("Ireena", "NPC")],
+            [edge("Ireena", "Empty Cell", "KNOWS", section_index=9)],
+            gazetteer("Ireena"),
             SLUG,
         )
         assert edges[0].endpoint_resolved == "constraint"
@@ -517,34 +607,30 @@ class TestAmbiguousEndpoints:
         assert "endpoint_resolved" not in edges[0].properties
 
     def test_the_source_side_resolves_too(self):
-        """`RELATED_TO`'s domain is NPC only, so Doru-the-MONSTER cannot be
-        the one doing the relating."""
+        """`GUARDS`'s domain is agents only, so the cell typed LOCATION cannot
+        be the one standing watch."""
         _, edges, report = plan_write(
-            [node("Doru", "NPC"), node("Doru", "MONSTER"), node("Donavich", "NPC")],
-            [edge("Doru", "Donavich", "RELATED_TO")],
-            gazetteer("Doru", "Donavich"),
+            [cell("LOCATION", "K61a"), cell("MONSTER", "K62a"), node("Ireena", "NPC")],
+            [edge("Empty Cell", "Ireena", "GUARDS", section_index=9)],
+            gazetteer("Ireena"),
             SLUG,
         )
         assert report.endpoint_resolved == 1
-        assert [e.source_id for e in edges] == [mint_id(SLUG, "NPC", "Doru")]
+        assert [e.source_id for e in edges] == [mint_id(SLUG, "Empty Cell", "K62a")]
 
     def test_two_candidates_that_both_satisfy_settle_nothing(self):
-        """`CONTAINS` admits NPC and MONSTER alike, so the table cannot say
-        which Doru is in the bedroom."""
+        """`KNOWS` admits both cells alike, so the table cannot say which one
+        Ireena is acquainted with."""
         _, edges, report = plan_write(
-            [
-                node("Doru", "NPC"),
-                node("Doru", "MONSTER"),
-                node("Doru's Bedroom", "LOCATION"),
-            ],
-            [edge("Doru's Bedroom", "Doru", "CONTAINS")],
-            gazetteer("Doru", "Doru's Bedroom"),
+            [cell("MONSTER", "K61a"), cell("MONSTER", "K62a"), node("Ireena", "NPC")],
+            [edge("Ireena", "Empty Cell", "KNOWS", section_index=9)],
+            gazetteer("Ireena"),
             SLUG,
         )
         assert report.endpoint_resolved == 0
         assert report.ambiguous_edges == 1
         assert edges == []
-        assert "Doru's Bedroom -CONTAINS-> Doru" in report.dropped_ambiguous
+        assert "Ireena -KNOWS-> Empty Cell" in report.dropped_ambiguous
 
     def test_no_candidate_satisfying_settles_nothing(self):
         """Tested on the helper, because `plan_write` cannot reach it.
@@ -556,8 +642,8 @@ class TestAmbiguousEndpoints:
         and a reader should not have to prove the unreachability to trust it.
         """
         by_id = {
-            "a": WriteNode(id="a", name="Barovia", entity_type="LOCATION", chapter_slug=SLUG),
-            "b": WriteNode(id="b", name="Barovia", entity_type="SETTING", chapter_slug=SLUG),
+            "a": WriteNode(id="a", name="Barovia", entity_types=("LOCATION",), chapter_slug=SLUG),
+            "b": WriteNode(id="b", name="Barovia", entity_types=("SETTING",), chapter_slug=SLUG),
         }
         assert _resolve_endpoint({"a", "b"}, by_id, frozenset({EntityType.FACTION})) == (
             None,
@@ -569,9 +655,9 @@ class TestAmbiguousEndpoints:
         is nothing to resolve WITH -- and a resolution rule that guessed in its
         absence would be back to manufacturing assertions."""
         _, edges, report = plan_write(
-            [node("Barovia", "LOCATION"), node("Barovia", "SETTING"), node("Ismark", "NPC")],
-            [edge("Ismark", "Barovia", "OCCURRED_AT")],
-            gazetteer("Barovia", "Ismark"),
+            [cell("LOCATION", "K61a"), cell("MONSTER", "K62a"), node("Ismark", "NPC")],
+            [edge("Ismark", "Empty Cell", "OCCURRED_AT", section_index=9)],
+            gazetteer("Ismark"),
             SLUG,
         )
         assert report.endpoint_resolved == 0
@@ -582,14 +668,14 @@ class TestAmbiguousEndpoints:
         """`check_edges` treats an unknown type as unchecked, which is right for
         "is this legal" and wrong for "which of these two is meant"."""
         _, edges, report = plan_write(
-            [node("Tatyana", "NPC"), node("Tatyana", "BESTIARY"), node("Ireena", "NPC")],
-            [edge("Ireena", "Tatyana", "IDENTITY_OF")],
-            gazetteer("Tatyana", "Ireena"),
+            [cell("MONSTER", "K61a"), cell("BESTIARY", "K62a"), node("Ireena", "NPC")],
+            [edge("Ireena", "Empty Cell", "KNOWS", section_index=9)],
+            gazetteer("Ireena"),
             SLUG,
         )
-        # NPC is the one satisfying candidate; the unknown type is not a rival.
+        # K61a is the one satisfying candidate; the unknown type is not a rival.
         assert report.endpoint_resolved == 1
-        assert [e.target_id for e in edges] == [mint_id(SLUG, "NPC", "Tatyana")]
+        assert [e.target_id for e in edges] == [mint_id(SLUG, "Empty Cell", "K61a")]
 
     def test_two_identical_resolved_candidates_are_counted_once(self):
         """The resolved list is what downstream reads to know where the
@@ -597,12 +683,12 @@ class TestAmbiguousEndpoints:
         one written edge must not leave a phantom entry naming an edge that
         exists once."""
         _, edges, report = plan_write(
-            [node("Tatyana", "NPC"), node("Tatyana", "LORE"), node("Ireena", "NPC")],
+            [cell("LOCATION", "K61a"), cell("MONSTER", "K62a"), node("Ireena", "NPC")],
             [
-                edge("Ireena", "Tatyana", "IDENTITY_OF", section_index=1),
-                edge("Ireena", "Tatyana", "IDENTITY_OF", section_index=4),
+                edge("Ireena", "Empty Cell", "KNOWS", section_index=9),
+                edge("Ireena", "Empty Cell", "KNOWS", section_index=11),
             ],
-            gazetteer("Tatyana", "Ireena"),
+            gazetteer("Ireena"),
             SLUG,
         )
         assert report.duplicate_edges == 1
@@ -613,18 +699,17 @@ class TestAmbiguousEndpoints:
     def test_resolutions_are_counted_apart_from_drops(self):
         nodes, edges, report = plan_write(
             [
-                node("Tatyana", "NPC"),
-                node("Tatyana", "LORE"),
+                cell("LOCATION", "K61a"),
+                cell("MONSTER", "K62a"),
                 node("Ireena", "NPC"),
-                node("Doru", "NPC"),
-                node("Doru", "MONSTER"),
-                node("Doru's Bedroom", "LOCATION"),
+                node("Closet", "LOCATION", section_heading="K60a. Closet", section_index=0),
+                node("Closet", "LOCATION", section_heading="K60b. Closet", section_index=2),
             ],
             [
-                edge("Ireena", "Tatyana", "IDENTITY_OF"),
-                edge("Doru's Bedroom", "Doru", "CONTAINS"),
+                edge("Ireena", "Empty Cell", "KNOWS", section_index=9),
+                edge("Ireena", "Closet", "TRAVELED_TO", section_index=9),
             ],
-            gazetteer("Tatyana", "Ireena", "Doru", "Doru's Bedroom"),
+            gazetteer("Ireena"),
             SLUG,
         )
         assert report.endpoint_resolved == 1
@@ -682,17 +767,16 @@ class TestWrittenProperties:
         )
         assert nodes[0].properties == {
             "name": "Ismark Kolyanovich",
-            "entity_type": "NPC",
             "plane": CANON_PLANE,
-            "chapter_slug": SLUG,
-            "section_heading": "(preamble)",
-            "section_index": 0,
             "votes": 5,
             "description": "The burgomaster's son.",
             # An unkeyed NPC with no accepted edge attached: nothing
             # deterministic vouches for it.
             "status": "proposed",
         }
+        # The type is a LABEL and the chapter is an EDGE; neither is a property.
+        assert nodes[0].labels == ("NPC",)
+        assert nodes[0].appearance == {"section_heading": "(preamble)", "section_index": 0}
 
     def test_a_node_without_a_description_omits_the_property(self):
         nodes, _, _ = plan_write([node("Church")], [], gazetteer("Church"), SLUG)
@@ -765,11 +849,17 @@ class TestChapterSlugIsAuthoritative:
         the loop discovers chapters by the corpus filename. When they disagree
         the caller's slug wins, because that is the one the graph is keyed on."""
         candidate = CandidateNode(
-            name="Church", entity_type="LOCATION", chapter_slug="chapter-3-the-village-of-barovia"
+            name="Church",
+            entity_type="LOCATION",
+            chapter_slug="chapter-3-the-village-of-barovia",
+            section_heading="E5. Church",
+            section_index=1,
         )
         nodes, _, _ = plan_write([candidate], [], gazetteer("Church"), SLUG)
-        assert nodes[0].id.startswith(f"cos:{SLUG}:")
-        assert nodes[0].properties["chapter_slug"] == SLUG
+        # A keyed place is scoped to a chapter, and it is the caller's slug in
+        # the id -- and the caller's chapter that the appearance will point at.
+        assert nodes[0].id == f"cos:{SLUG}:e5-church"
+        assert nodes[0].chapter_slug == SLUG
 
 
 class TestEnsureSchema:

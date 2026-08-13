@@ -129,11 +129,23 @@ def load_seed(path: str | Path, session) -> dict:
         raise ValueError("invalid seed:\n  " + "\n  ".join(problems))
 
     for node in data["nodes"]:
-        props = {k: v for k, v in node.items() if k != "id" and k not in _GRADING_KEYS}
+        props = {
+            k: v
+            for k, v in node.items()
+            if k != "id" and k != "entity_type" and k not in _GRADING_KEYS
+        }
         props.setdefault("plane", "canon")
         props.setdefault("source_book", "cos")
+        # The type is a LABEL, as it is on every node `canon.writer` writes --
+        # `MATCH (n:NPC)`, not `MATCH (n:Entity {entity_type:'NPC'})`. Coerced
+        # through the enum first because a label cannot be parameterized in
+        # Cypher and is interpolated into the statement; `validate_seed` has
+        # already refused anything the enum does not know, and this is the
+        # second lock on the same door.
+        raw_type = node.get("entity_type")
+        label = f":{EntityType(raw_type).value}" if raw_type else ""
         session.run(
-            "MERGE (e:Entity {id:$id}) SET e += $props",
+            f"MERGE (e:Entity {{id:$id}}) {f'SET e{label} ' if label else ''}SET e += $props",
             {"id": node["id"], "props": props},
         )
 

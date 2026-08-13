@@ -157,8 +157,12 @@ def run_artifact(
             "source_artifact": str(source),
             "written_at": datetime.now(UTC).isoformat(),
             "filters": report.as_dict(),
+            # Counted over EVERY type each node carries, so a node the samples
+            # disputed appears under both -- these are label counts, and the
+            # column no longer sums to the node count. `written_nodes` is the
+            # figure that does.
             "written_nodes_by_type": dict(
-                sorted(Counter(n.entity_type for n in nodes).items())
+                sorted(Counter(t for n in nodes for t in n.entity_types).items())
             ),
             "written_edges_by_type": dict(
                 sorted(Counter(e.rel_type.value for e in edges).items())
