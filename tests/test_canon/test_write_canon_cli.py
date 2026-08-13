@@ -10,12 +10,14 @@ from pathlib import Path
 import pytest
 
 from backend.canon.models import CandidateNode
+from backend.canon.structure import place_from_chapter_title
 from backend.canon.writer import FilterReport, WriteEdge, WriteNode
 from backend.graph.schema import RelationshipType
 from backend.scripts.write_canon import (
     DEFAULT_GAZETTEER,
     DEFAULT_RUNS_DIR,
     build_parser,
+    chapter_place_of_run,
     format_report,
     parse_artifact,
     run_artifact,
@@ -266,3 +268,47 @@ class TestFormatReport:
         assert "mutually exclusive pairs:" in format_report(
             FilterReport(candidate_nodes=1, candidate_edges=0)
         )
+
+
+class TestChapterPlaceFromTheRunBlock:
+    """Where the writer learns the chapter's own place.
+
+    `derive_structure` names the parent of every top-level keyed area after the
+    chapter title, and the extraction artifact records that title -- so the
+    writer re-derives the place with the SAME function the extractor used
+    rather than storing a second copy that can drift from it.
+
+    Re-derived rather than added to the `run` block, because that block is the
+    extraction's own record of what was paid for and this stage may not rewrite
+    it -- and because the three already-extracted chapters would carry no such
+    field, so a stored copy would need this fallback anyway.
+    """
+
+    def test_the_chapter_prefix_is_stripped(self):
+        assert chapter_place_of_run({"chapter": "Chapter 3: The Village of Barovia"}) == (
+            "The Village of Barovia"
+        )
+
+    def test_a_full_stop_prefix_is_stripped_too(self):
+        assert chapter_place_of_run({"chapter": "Chapter 4. Castle Ravenloft"}) == (
+            "Castle Ravenloft"
+        )
+
+    def test_a_titled_chapter_with_no_number_is_kept_whole(self):
+        assert chapter_place_of_run({"chapter": "Introduction"}) == "Introduction"
+
+    def test_a_missing_chapter_title_is_no_place(self):
+        """Not a guess and not an error: the anti-fabrication guard in
+        `plan_write` drops it again if the chapter keys nothing anyway."""
+        assert chapter_place_of_run({}) is None
+
+    def test_a_prefix_with_nothing_after_it_is_no_place(self):
+        assert chapter_place_of_run({"chapter": "Chapter 12:"}) is None
+
+    def test_it_agrees_with_the_extractors_own_derivation(self):
+        """One function, called by both. Two copies of this rule would put the
+        writer's parent name out of step with the deriver's edge, and every
+        chapter-level CONTAINS would dangle again with nothing to show for it."""
+        title = "Chapter 3: The Village of Barovia"
+
+        assert chapter_place_of_run({"chapter": title}) == place_from_chapter_title(title)

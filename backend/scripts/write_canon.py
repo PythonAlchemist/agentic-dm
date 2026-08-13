@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode
+from backend.canon.seed_loader import LOCATION_SUBTYPE_SEED, load_location_subtypes
+from backend.canon.structure import place_from_chapter_title
 from backend.canon.writer import (
     CampaignDataAttached,
     ChapterAlreadyWritten,
@@ -37,6 +39,7 @@ from backend.canon.writer import (
     write_chapter,
 )
 from backend.core.database import neo4j_session
+from backend.graph.schema import EntityType
 
 DEFAULT_GAZETTEER = Path("data/gazetteer/curse-of-strahd.json")
 #: Where the verifier looks for the run artifact. `data/` is gitignored, and
@@ -67,6 +70,27 @@ def parse_artifact(document: dict) -> tuple[list[CandidateNode], list[CandidateE
     return nodes, edges, document.get("run", {})
 
 
+def chapter_place_of_run(extraction_run: dict) -> str | None:
+    """The place the chapter is about, re-derived from the title it recorded.
+
+    Every chapter-level CONTAINS edge in the artifact names this string as its
+    source, so the writer has to arrive at exactly the same one or the edges
+    dangle -- which is what they did, for every chapter, until this existed.
+    `place_from_chapter_title` is therefore the extractor's own function rather
+    than a second implementation of the same rule.
+
+    Re-derived rather than read from a `chapter_place` field, because the `run`
+    block is the EXTRACTION's record of what was paid for and this stage may not
+    rewrite it -- and because the chapters already extracted carry no such
+    field, so a stored copy would need this fallback anyway.
+
+    Not guarded here on whether the chapter keys anything: `plan_write` applies
+    that guard, in the same place as every other anti-fabrication rule.
+    """
+    title = extraction_run.get("chapter") or ""
+    return place_from_chapter_title(title)
+
+
 def format_report(report: FilterReport) -> str:
     """Every drop count, printed whether or not it is zero.
 
@@ -75,6 +99,10 @@ def format_report(report: FilterReport) -> str:
     """
     lines = [
         f"  candidates: {report.candidate_nodes} nodes, {report.candidate_edges} edges",
+        "  nodes MINTED here (not candidates, not drops):",
+        f"    the chapter's own place:                         {report.derived_nodes}",
+        "      (the parent every top-level keyed area hangs from -- an extraction",
+        "       candidate never names it, so it is written or the hierarchy is severed)",
         "  node drops:",
         f"    gazetteer (not a known name, not a keyed place): {report.gazetteer_dropped}",
         f"    unnameable (name slugifies to nothing):          {report.unnameable}",
@@ -167,6 +195,20 @@ def run_artifact(
             "written_edges_by_type": dict(
                 sorted(Counter(e.rel_type.value for e in edges).items())
             ),
+            # The hierarchy census, read off `subtype_label` rather than
+            # `location_subtype` so it counts what actually reached the graph.
+            # Places with no rung are counted under `""`, deliberately visible:
+            # "how many places did this chapter leave unclassified" is the
+            # question the no-default rule exists to keep askable.
+            "written_locations_by_subtype": dict(
+                sorted(
+                    Counter(
+                        n.subtype_label
+                        for n in nodes
+                        if EntityType.LOCATION.value in n.labels
+                    ).items()
+                )
+            ),
             "deleted_nodes": replaced.get("deleted_nodes", 0),
             "deleted_edges": replaced.get("deleted_edges", 0),
             "ambiguous_names": report.ambiguous_names,
@@ -206,6 +248,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Delete this chapter's canon nodes and edges first, in the same transaction",
     )
     parser.add_argument("--gazetteer", type=Path, default=DEFAULT_GAZETTEER)
+    parser.add_argument(
+        "--location-subtypes",
+        type=Path,
+        default=LOCATION_SUBTYPE_SEED,
+        help="Hand-authored REGION/SETTLEMENT/WILD seed. SITE and AREA are derived.",
+    )
     parser.add_argument(
         "--runs-dir",
         type=Path,
@@ -256,7 +304,20 @@ def main() -> None:
     gazetteer = load_gazetteer(args.gazetteer)
     print(f"  gazetteer: {len(gazetteer)} entries from {args.gazetteer}")
 
-    write_nodes, write_edges, report = plan_write(nodes, edges, gazetteer, args.chapter)
+    subtypes = load_location_subtypes(args.location_subtypes)
+    print(f"  location subtypes: {len(subtypes)} authored from {args.location_subtypes}")
+
+    chapter_place = chapter_place_of_run(extraction_run)
+    print(f"  chapter place: {chapter_place!r} (parent of this chapter's top-level areas)")
+
+    write_nodes, write_edges, report = plan_write(
+        nodes,
+        edges,
+        gazetteer,
+        args.chapter,
+        chapter_place=chapter_place,
+        subtypes=subtypes,
+    )
     print(format_report(report))
 
     if args.accepted_only:

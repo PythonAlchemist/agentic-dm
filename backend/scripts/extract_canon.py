@@ -39,7 +39,7 @@ from backend.canon.sections import (
     units_from_sections,
 )
 from backend.canon.seed_loader import DEFAULT_SOURCE, EXTRACTABLE_FROM, SEED_DIR, extractable_subset
-from backend.canon.structure import derive_structure, place_of_section
+from backend.canon.structure import derive_structure, place_from_chapter_title, place_of_section
 from backend.core.config import settings
 from backend.graph.schema import Layer
 
@@ -47,8 +47,6 @@ DEFAULT_PDF = Path("data/cos.pdf")
 
 CORPORA = ("ddb", "transcription")
 DEFAULT_CORPUS = "ddb"
-
-_CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
 
 # The document's own title line. D&D Beyond opens every chapter with exactly one.
 _H1 = re.compile(r"^#\s+(?!#)(.+?)\s*$", re.MULTILINE)
@@ -103,8 +101,7 @@ def chapter_place(chapter: Chapter, sections: list[Section]) -> str | None:
     """
     if not any(place_of_section(s) for s in sections):
         return None
-    stripped = _CHAPTER_PREFIX.sub("", chapter.title).strip()
-    return stripped or None
+    return place_from_chapter_title(chapter.title)
 
 
 def _load_ddb_chapters(root: Path, book_slug: str) -> list[Chapter]:

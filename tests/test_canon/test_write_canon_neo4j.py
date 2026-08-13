@@ -469,6 +469,78 @@ class TestTypeIsALabel:
         assert count_canon_nodes(graph, CHAPTER_A) == 1
 
 
+class TestLocationSubtypeIsALabel:
+    """A rung of the spatial hierarchy, beside `:LOCATION` and never instead.
+
+    `:LOCATION` is what makes "every place" a one-word query, and it stays on
+    every one of them. The subtype narrows it: `MATCH (n:AREA)` is every room.
+    """
+
+    def area(self, name: str = "Chapel", subtype: str = "AREA") -> WriteNode:
+        return replace(node(name), location_subtype=subtype)
+
+    def test_the_subtype_lands_beside_location(self, graph):
+        chapel = self.area()
+        write_chapter(graph, CHAPTER_A, [chapel], [])
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": chapel.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["AREA", "Entity", "LOCATION"]
+
+    def test_an_unclassified_place_gets_no_rung(self, graph):
+        """No default: a place with no derivable and no authored subtype must be
+        visibly unclassified rather than quietly filed somewhere."""
+        castle = node("Castle Ravenloft")
+        write_chapter(graph, CHAPTER_A, [castle], [])
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": castle.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["Entity", "LOCATION"]
+
+    def test_a_place_wears_exactly_one_rung(self, graph):
+        """A room promoted to a building must not end up both. `SET` unions, so
+        the write has to clear the rungs it is replacing."""
+        chapel = self.area()
+        write_chapter(graph, CHAPTER_A, [chapel], [])
+        write_chapter(
+            graph, CHAPTER_A, [self.area(subtype="SITE")], [], replace=True
+        )
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": chapel.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["Entity", "LOCATION", "SITE"]
+
+    def test_a_chapter_that_says_nothing_about_the_rung_leaves_it_alone(self, graph):
+        """Chapter 4 mentioning `Church` unkeyed must not strip the SITE that
+        chapter 3's own key established. Only a write that HAS a rung clears."""
+        keyed = self.area("Church", "SITE")
+        write_chapter(graph, CHAPTER_A, [keyed], [])
+        write_chapter(graph, CHAPTER_B, [node("Church", CHAPTER_B)], [])
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": keyed.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["Entity", "LOCATION", "SITE"]
+
+    def test_every_place_is_still_one_word_away(self, graph):
+        write_chapter(
+            graph,
+            CHAPTER_A,
+            [self.area(), self.area("Church", "SITE"), node("Castle Ravenloft")],
+            [],
+        )
+
+        found = graph.run(
+            "MATCH (n:LOCATION {plane:$plane}) WHERE n.id STARTS WITH $prefix "
+            "RETURN count(n) AS c",
+            {"plane": CANON_PLANE, "prefix": TEST_ID_PREFIX},
+        ).single()["c"]
+        assert found == 3
+
+
 class TestGlobalEntities:
     def test_one_npc_named_by_two_chapters_is_one_node(self, graph):
         a = node("Madam Eva", CHAPTER_A, "NPC")
