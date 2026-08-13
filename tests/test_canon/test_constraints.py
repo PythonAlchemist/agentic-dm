@@ -26,7 +26,9 @@ from backend.canon.constraints import (
     ConstraintReport,
     Violation,
     check_edges,
+    check_exclusive,
     enforce,
+    exclusive_conflicts,
     format_report,
     report_edges,
 )
@@ -36,6 +38,7 @@ from backend.canon.seed_loader import SEED_DIR, extractable_subset
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
     CANON_ENTITY_TYPES,
+    MUTUALLY_EXCLUSIVE,
     RELATIONSHIP_DOMAIN_RANGE,
     EntityType,
     Layer,
@@ -660,3 +663,185 @@ class TestFormatReport:
 
         assert "constraint violations: 0 of 10 typed edges (domain 0, range 0, both 0)" in text
         assert "unchecked (endpoint type unknown): 4" in text
+
+    def test_a_reason_outside_the_domain_range_family_does_not_crash(self):
+        """`format_report` counts reasons by name. An exclusion violation carries
+        a reason this function has never seen, and a KeyError here would take
+        down the whole extraction CLI rather than printing a count."""
+        text = format_report(
+            ConstraintReport(violations=[violation("exclusive", False)], checked=1, unchecked=0)
+        )
+
+        assert "constraint violations: 1 of 1 typed edges" in text
+
+
+class TestMutuallyExclusiveTable:
+    """The table itself, before any edge is checked against it.
+
+    Two relationships are mutually exclusive when both holding between the same
+    ORDERED pair is a contradiction rather than merely redundant. A pair that is
+    only unusual is not exclusive: KNOWS and ENEMY_OF are both true of plenty of
+    people, and a table that grew by intuition would start reporting
+    contradictions nobody asserted.
+    """
+
+    def test_every_exclusive_set_is_a_pair_of_real_relationship_types(self):
+        for pair in MUTUALLY_EXCLUSIVE:
+            assert len(pair) == 2, pair
+            for rel in pair:
+                assert isinstance(rel, RelationshipType), rel
+
+    def test_identity_of_and_related_to_are_exclusive(self):
+        """One being under two names cannot also be its own kin. This is the
+        observed contradiction in the live chapter-3 graph, and it matters
+        because IDENTITY_OF is the edge the reveal-filter design rests on."""
+        assert (
+            frozenset({RelationshipType.IDENTITY_OF, RelationshipType.RELATED_TO})
+            in MUTUALLY_EXCLUSIVE
+        )
+
+    def test_contains_and_located_in_are_exclusive(self):
+        assert (
+            frozenset({RelationshipType.CONTAINS, RelationshipType.LOCATED_IN})
+            in MUTUALLY_EXCLUSIVE
+        )
+
+    def test_merely_unusual_pairs_are_not_in_the_table(self):
+        """The stated non-example: both are true of plenty of people."""
+        assert (
+            frozenset({RelationshipType.KNOWS, RelationshipType.ENEMY_OF})
+            not in MUTUALLY_EXCLUSIVE
+        )
+
+
+class TestExclusiveConflicts:
+    def test_an_exclusive_pair_between_the_same_ordered_endpoints_is_reported(self):
+        """The live defect: the graph holds both, and nothing notices because
+        every edge is checked in isolation."""
+        found = check_exclusive(
+            [
+                edge("Ireena Kolyana", "IDENTITY_OF", "Tatyana"),
+                edge("Ireena Kolyana", "RELATED_TO", "Tatyana"),
+            ]
+        )
+
+        assert [v.edge_index for v in found] == [0, 1]
+        assert {v.reason for v in found} == {"exclusive"}
+        assert {v.rel_type for v in found} == {"IDENTITY_OF", "RELATED_TO"}
+        assert {(v.source_name, v.target_name) for v in found} == {("Ireena Kolyana", "Tatyana")}
+
+    def test_the_same_pair_in_opposite_directions_is_not_a_conflict(self):
+        """`A IDENTITY_OF B` with `B RELATED_TO A` is a different assertion.
+        Exclusion is defined on the ORDERED pair; reading it unordered would
+        report a contradiction nobody made."""
+        assert (
+            check_exclusive(
+                [
+                    edge("Ireena Kolyana", "IDENTITY_OF", "Tatyana"),
+                    edge("Tatyana", "RELATED_TO", "Ireena Kolyana"),
+                ]
+            )
+            == []
+        )
+
+    def test_contains_and_located_in_in_opposite_directions_stay_legal(self):
+        """The normal inverse pair. `Church CONTAINS Undercroft` beside
+        `Undercroft LOCATED_IN Church` says one true thing twice, and the derived
+        structural layer emits exactly this."""
+        assert (
+            check_exclusive(
+                [
+                    edge("Church", "CONTAINS", "Undercroft", evidence=STRUCTURAL_EVIDENCE),
+                    edge("Undercroft", "LOCATED_IN", "Church", evidence=STRUCTURAL_EVIDENCE),
+                ]
+            )
+            == []
+        )
+
+    def test_contains_and_located_in_in_the_same_direction_conflict(self):
+        """A cannot both hold B and sit inside B."""
+        found = check_exclusive(
+            [edge("Church", "CONTAINS", "Undercroft"), edge("Church", "LOCATED_IN", "Undercroft")]
+        )
+
+        assert [v.edge_index for v in found] == [0, 1]
+
+    def test_endpoint_names_are_folded_the_way_every_other_check_folds_them(self):
+        found = check_exclusive(
+            [
+                edge("ireena kolyana", "IDENTITY_OF", "Tatyana"),
+                edge("Ireena Kolyana", "RELATED_TO", " tatyana "),
+            ]
+        )
+
+        assert len(found) == 2
+
+    def test_a_non_exclusive_pair_between_the_same_endpoints_is_silent(self):
+        assert (
+            check_exclusive(
+                [edge("Ismark", "KNOWS", "Ireena"), edge("Ismark", "ENEMY_OF", "Ireena")]
+            )
+            == []
+        )
+
+    def test_an_unknown_relationship_type_cannot_conflict(self):
+        """`check_edges` treats an unknown type as unchecked rather than
+        violating; so does this, for the same reason."""
+        assert (
+            check_exclusive(
+                [
+                    edge("Ireena", "DEFENESTRATES", "Tatyana"),
+                    edge("Ireena", "RELATED_TO", "Tatyana"),
+                ]
+            )
+            == []
+        )
+
+    def test_a_type_repeated_between_the_same_endpoints_is_not_a_conflict(self):
+        """Two copies of one edge are a duplicate, which the writer already
+        counts. Nothing here may turn a duplicate into a contradiction."""
+        assert (
+            check_exclusive(
+                [
+                    edge("Church", "CONTAINS", "Undercroft"),
+                    edge("Church", "CONTAINS", "Undercroft"),
+                ]
+            )
+            == []
+        )
+
+    def test_three_edges_between_the_same_endpoints_report_only_the_exclusive_two(self):
+        found = check_exclusive(
+            [
+                edge("Ireena", "IDENTITY_OF", "Tatyana"),
+                edge("Ireena", "KNOWS", "Tatyana"),
+                edge("Ireena", "RELATED_TO", "Tatyana"),
+            ]
+        )
+
+        assert [v.edge_index for v in found] == [0, 2]
+
+    def test_conflicts_are_reported_never_repaired(self):
+        """The judgment call, pinned. Nothing here says which of the two is
+        right, and a silent guess is how a wrong edge becomes indistinguishable
+        from a checked one."""
+        edges = [edge("Ireena", "IDENTITY_OF", "Tatyana"), edge("Ireena", "RELATED_TO", "Tatyana")]
+        before = list(edges)
+
+        check_exclusive(edges)
+
+        assert edges == before
+
+    def test_index_pairs_are_available_for_callers_working_in_ids(self):
+        """The writer runs this over MINTED IDS, not names: a name is not unique
+        in canon. One algorithm, two key spaces -- a second copy would drift."""
+        pairs = exclusive_conflicts(
+            [
+                ("cos:c:npc:ireena", "cos:c:npc:tatyana", RelationshipType.IDENTITY_OF),
+                ("cos:c:npc:ireena", "cos:c:lore:tatyana", RelationshipType.RELATED_TO),
+                ("cos:c:npc:ireena", "cos:c:npc:tatyana", RelationshipType.RELATED_TO),
+            ]
+        )
+
+        # The LORE Tatyana is a different node, so only 0 and 2 name one pair.
+        assert pairs == [(0, 2)]

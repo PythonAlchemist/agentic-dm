@@ -19,15 +19,16 @@ refuses rather than reaching for DETACH DELETE.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from neo4j.exceptions import Neo4jError
 
 from backend.canon.assembler import slugify
-from backend.canon.constraints import check_edges
+from backend.canon.constraints import check_edges, exclusive_conflicts
 from backend.canon.gazetteer import Gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.sections import KEYED_HEADING
+from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
     GRAPH_SCHEMA,
     LAYER_MAP,
@@ -40,6 +41,24 @@ from backend.graph.schema import (
 #: campaign. The resolver filters on this property; an unstamped node is
 #: invisible to it.
 CANON_PLANE = "canon"
+
+#: Derived from the document's own structure: deterministic, incapable of
+#: hallucinating, and the one layer a hand read found clean. A DM or a generator
+#: may read these as settled.
+ACCEPTED = "accepted"
+
+#: Everything the LLM proposed. Present in the graph and queryable, but never
+#: settled canon: a hand read of all 30 LLM edges in chapter 3 found about a
+#: third wrong, including `Ismark OPPOSES Ireena` (he is her brother).
+PROPOSED = "proposed"
+
+#: A proposed edge that contradicts an ACCEPTED one between the same ordered
+#: endpoints. The accepted layer is deterministic, so it stands and this one is
+#: demoted -- the ONLY case in which anything here picks a winner. Two PROPOSED
+#: edges that contradict each other are both kept as `proposed`, because nothing
+#: automatic can say which is right and a silent guess is how a wrong edge
+#: becomes indistinguishable from a checked one.
+CONFLICTED = "conflicted"
 
 #: Every id is prefixed with the book. Nothing merges across chapters -- see
 #: `mint_id` -- and nothing merges across books either.
@@ -136,6 +155,11 @@ class WriteNode:
     section_index: int = -1
     votes: int = 0
     description: str = ""
+    #: `ACCEPTED` when the book itself keys this place, or when some accepted
+    #: edge attaches to it; `PROPOSED` otherwise. Defaults to PROPOSED because
+    #: acceptance has to be EARNED from evidence -- a node built by hand, or by
+    #: a caller that has not thought about it, must not arrive pre-trusted.
+    status: str = PROPOSED
 
     @property
     def properties(self) -> dict:
@@ -148,6 +172,7 @@ class WriteNode:
             "section_heading": self.section_heading,
             "section_index": self.section_index,
             "votes": self.votes,
+            "status": self.status,
         }
         # Absent rather than empty: `description` is optional on a candidate,
         # and writing "" would make a node that never had one indistinguishable
@@ -173,6 +198,28 @@ class WriteEdge:
     #: name by `RELATIONSHIP_DOMAIN_RANGE` -- see `_resolve_endpoint`. Empty
     #: when both endpoints were unambiguous.
     endpoint_resolved: str = ""
+    #: The relationship types this edge contradicts between these very
+    #: endpoints, comma-joined. Empty for the overwhelming majority.
+    conflict: str = ""
+    #: Set only when this PROPOSED edge lost to an ACCEPTED one it contradicts.
+    #: Never set on an accepted edge, and never on either half of a
+    #: proposed-versus-proposed conflict -- see `CONFLICTED`.
+    conflicted: bool = False
+
+    @property
+    def status(self) -> str:
+        """`accepted` | `proposed` | `conflicted`.
+
+        DERIVED from `evidence`, not stored beside it, for the same reason
+        `layer` is derived from LAYER_MAP: a second field saying the same thing
+        can drift from the first, and `evidence == STRUCTURAL_EVIDENCE` is
+        already the only signal downstream has for telling the deterministic
+        layer from LLM output. Anything that can construct a WriteEdge therefore
+        gets the right status without being told about statuses at all.
+        """
+        if self.conflicted:
+            return CONFLICTED
+        return ACCEPTED if self.evidence.strip() == STRUCTURAL_EVIDENCE else PROPOSED
 
     @property
     def properties(self) -> dict:
@@ -195,6 +242,11 @@ class WriteEdge:
         must be visible on the edge rather than quietly weakening the check.
         A filter that only offers legal options has a violation rate of zero by
         construction, and nothing downstream may mistake that for evidence.
+
+        `status` travels for the reason this whole layer exists: without it a
+        DM or a generator reading the graph gets `Ismark OPPOSES Ireena` with
+        exactly the same authority as `Church CONTAINS Undercroft`, and no query
+        can tell them apart.
         """
         props: dict = {
             "plane": CANON_PLANE,
@@ -203,6 +255,7 @@ class WriteEdge:
             "section_heading": self.section_heading,
             "section_index": self.section_index,
             "votes": self.votes,
+            "status": self.status,
         }
         layer = LAYER_MAP[self.rel_type]
         if layer is not None:
@@ -211,6 +264,11 @@ class WriteEdge:
         # like one that was resolved into some other category.
         if self.endpoint_resolved:
             props["endpoint_resolved"] = self.endpoint_resolved
+        # Likewise absent unless real: this is the property a reviewer at gate
+        # G3 filters on, and an empty string on every ordinary edge would bury
+        # the handful that actually contradict something.
+        if self.conflict:
+            props["conflict"] = self.conflict
         return props
 
 
@@ -240,6 +298,21 @@ class FilterReport:
     # out of a disputed name. Counted apart from every drop above AND from the
     # plain writes, because the constraint check is vacuous on exactly these.
     endpoint_resolved: int = 0
+    # NOT a drop either: both halves of every mutual-exclusion conflict are
+    # WRITTEN. `exclusive_conflicts` counts PAIRS; `conflicted_edges` counts the
+    # proposed edges demoted because an accepted edge contradicted them. The two
+    # are different denominators and must never be summed.
+    exclusive_conflicts: int = 0
+    conflicted_edges: int = 0
+    # The accepted/proposed split, which is what this whole stage exists to
+    # record. Counted here so it lands in the run artifact rather than only in a
+    # terminal that scrolls away. `proposed_*` INCLUDES the conflicted edges: a
+    # conflicted edge is a proposed one that lost, not a third trust level, and
+    # accepted + proposed must add up to written or the split hides something.
+    accepted_nodes: int = 0
+    proposed_nodes: int = 0
+    accepted_edges: int = 0
+    proposed_edges: int = 0
     written_nodes: int = 0
     written_edges: int = 0
     # Samples, so a reader can see WHAT was dropped and not only how much.
@@ -251,6 +324,10 @@ class FilterReport:
     dropped_ambiguous: list[str] = field(default_factory=list)
     resolved_endpoints: list[str] = field(default_factory=list)
     ambiguous_names: list[str] = field(default_factory=list)
+    #: One line per conflicting PAIR, both halves named. Complete, not capped:
+    #: this is the list a human reads at gate G3, and it is the only record of a
+    #: contradiction the graph now holds on purpose.
+    conflicts: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         """The counts alone, for the run artifact."""
@@ -267,6 +344,12 @@ class FilterReport:
             "ambiguous_edges": self.ambiguous_edges,
             "duplicate_edges": self.duplicate_edges,
             "endpoint_resolved": self.endpoint_resolved,
+            "exclusive_conflicts": self.exclusive_conflicts,
+            "conflicted_edges": self.conflicted_edges,
+            "accepted_nodes": self.accepted_nodes,
+            "proposed_nodes": self.proposed_nodes,
+            "accepted_edges": self.accepted_edges,
+            "proposed_edges": self.proposed_edges,
             "written_nodes": self.written_nodes,
             "written_edges": self.written_edges,
         }
@@ -453,6 +536,108 @@ def _resolve_endpoint(
 
 
 
+def _mark_conflicts(edges: list[WriteEdge], report: FilterReport) -> list[WriteEdge]:
+    """Record every mutual-exclusion conflict on both edges. Drop neither.
+
+    Run over MINTED IDS rather than names: a name is not unique in canon -- a
+    disputed `entity_type` leaves `Tatyana` as an NPC node and a LORE node -- and
+    a name-keyed check would report an edge as contradicting an edge about a
+    different node.
+
+    Exactly one asymmetry, and it is the only place anything here picks a
+    winner: an ACCEPTED edge beats a PROPOSED one, because the accepted layer is
+    derived from the document's structure and cannot hallucinate. The loser is
+    marked `conflicted` and still written -- demoted, never deleted, so a
+    reviewer can see what was proposed and why it lost.
+
+    Two PROPOSED edges are BOTH kept as proposed. There is no oracle here:
+    recall cannot rank extractors, and a wiki oracle failed because 8 of the 13
+    core NPCs have no page. Choosing between them would put a guess into the
+    graph wearing the same clothes as a checked fact.
+
+    Two ACCEPTED edges in conflict would be a defect in the deriver rather than
+    a judgment call, so neither is demoted and the pair is reported like any
+    other -- silently preferring one would hide the defect.
+    """
+    conflicts = exclusive_conflicts([(e.source_id, e.target_id, e.rel_type) for e in edges])
+    if not conflicts:
+        return edges
+
+    demoted: set[int] = set()
+    contradicts: dict[int, list[str]] = {}
+    for left, right in conflicts:
+        report.conflicts.append(
+            f"{edges[left].source_id} -{edges[left].rel_type.value}|"
+            f"{edges[right].rel_type.value}-> {edges[left].target_id}"
+            f"  ({edges[left].status} vs {edges[right].status})"
+        )
+        contradicts.setdefault(left, []).append(edges[right].rel_type.value)
+        contradicts.setdefault(right, []).append(edges[left].rel_type.value)
+        left_accepted = edges[left].status == ACCEPTED
+        right_accepted = edges[right].status == ACCEPTED
+        if left_accepted and not right_accepted:
+            demoted.add(right)
+        elif right_accepted and not left_accepted:
+            demoted.add(left)
+    report.exclusive_conflicts = len(conflicts)
+    report.conflicted_edges = len(demoted)
+
+    return [
+        replace(
+            edge,
+            conflict=",".join(sorted(set(contradicts[index]))),
+            conflicted=index in demoted,
+        )
+        if index in contradicts
+        else edge
+        for index, edge in enumerate(edges)
+    ]
+
+
+def _mark_node_status(
+    nodes: list[WriteNode], edges: list[WriteEdge], keyed_ids: set[str]
+) -> list[WriteNode]:
+    """A node is ACCEPTED when the book keys it, or an accepted edge attaches.
+
+    Both halves are needed. A keyed place is the book's own assertion that the
+    place exists -- `E5g. Undercroft` is a heading, not a model's opinion -- and
+    it must stand even for a room with no edges at all. An unkeyed node earns
+    acceptance from the derived structural layer touching it, in either
+    direction: an edge derived from the document's nesting is evidence about
+    both of its endpoints, not only its source.
+
+    A `conflicted` edge confers nothing: it is a proposed edge that already
+    lost.
+    """
+    accepted_ids = set(keyed_ids)
+    for edge in edges:
+        if edge.status == ACCEPTED:
+            accepted_ids.update({edge.source_id, edge.target_id})
+    return [
+        replace(node, status=ACCEPTED if node.id in accepted_ids else PROPOSED)
+        for node in nodes
+    ]
+
+
+def restrict_to_accepted(
+    nodes: list[WriteNode], edges: list[WriteEdge]
+) -> tuple[list[WriteNode], list[WriteEdge]]:
+    """The `--accepted-only` view: derived edges, and the nodes they need.
+
+    A node with nothing attached is dropped even when it is accepted in its own
+    right, because the alternative is writing an isolated node the loop's own
+    predicate would then count as canon.
+
+    Pure, and separate from `plan_write`, so the question this task exists to
+    answer -- what is LEFT when the unvetted layer is stripped -- can be asked of
+    a plan without touching a database, and so that the default path is
+    unchanged by the flag's existence.
+    """
+    kept_edges = [edge for edge in edges if edge.status == ACCEPTED]
+    needed = {edge.source_id for edge in kept_edges} | {edge.target_id for edge in kept_edges}
+    return [node for node in nodes if node.id in needed], kept_edges
+
+
 def plan_write(
     nodes: list[CandidateNode],
     edges: list[CandidateEdge],
@@ -479,6 +664,12 @@ def plan_write(
        answered by two nodes of different types -- unless the domain/range
        table admits exactly one of them, in which case the edge is kept and
        STAMPED `endpoint_resolved="constraint"` (see `_resolve_endpoint`)
+
+    Then a fifth step that filters NOTHING: every surviving node and edge is
+    stamped `accepted` or `proposed`, and every mutual-exclusion conflict is
+    recorded on both of its edges. A third of the LLM edges in the live
+    chapter-3 graph are wrong while all 37 derived edges are sound, and until
+    now no query could tell the two apart.
 
     Raises ValueError on an unknown relationship type: a rel type cannot be
     parameterized in Cypher, so it is interpolated into the query text, and
@@ -520,6 +711,9 @@ def plan_write(
     ids_by_name: dict[str, set[str]] = {}
     ids_by_section: dict[int, set[str]] = {}
     provenance_rank: dict[str, int] = {}
+    # Ids the BOOK keys, which is the half of node acceptance that owes nothing
+    # to any edge -- a keyed room with no relationships is still the book's own.
+    keyed_ids: set[str] = set()
     for node in kept_nodes:
         node_key, undecidable = keyed.key_for(node.name, node.section_index)
         if undecidable:
@@ -537,6 +731,8 @@ def plan_write(
             report.unnameable += 1
             continue
         node_id = mint_id(chapter_slug, node.entity_type, node.name, node_key)
+        if node_key:
+            keyed_ids.add(node_id)
         # Every kept candidate is indexed under its own folded name and its own
         # section, duplicate or not: a second spelling of a name already written
         # -- straight for curly apostrophe, say -- must still lead an edge to
@@ -628,7 +824,16 @@ def plan_write(
             )
         )
 
-    write_nodes = list(by_id.values())
+    # 5 -- contradictions, and the trust split. Neither drops anything: this is
+    # the point at which the graph starts recording HOW MUCH it can be trusted
+    # rather than only what it holds.
+    write_edges = _mark_conflicts(write_edges, report)
+    write_nodes = _mark_node_status(list(by_id.values()), write_edges, keyed_ids)
+
+    report.accepted_edges = sum(1 for e in write_edges if e.status == ACCEPTED)
+    report.proposed_edges = len(write_edges) - report.accepted_edges
+    report.accepted_nodes = sum(1 for n in write_nodes if n.status == ACCEPTED)
+    report.proposed_nodes = len(write_nodes) - report.accepted_nodes
     report.written_nodes = len(write_nodes)
     report.written_edges = len(write_edges)
     return write_nodes, write_edges, report

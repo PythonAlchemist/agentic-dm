@@ -33,6 +33,7 @@ from backend.canon.writer import (
     WriteNode,
     ensure_schema,
     plan_write,
+    restrict_to_accepted,
     write_chapter,
 )
 from backend.core.database import neo4j_session
@@ -89,8 +90,21 @@ def format_report(report: FilterReport) -> str:
         f"    constraint-unique endpoint chosen:               {report.endpoint_resolved}",
         "      (the constraint check is vacuous on these -- they were CHOSEN to satisfy it,",
         "       and each carries endpoint_resolved='constraint' in the graph to say so)",
+        "  contradictions KEPT (not a drop -- both halves are written):",
+        f"    mutually exclusive pairs:                        {report.exclusive_conflicts}",
+        f"    proposed edges demoted by an accepted one:       {report.conflicted_edges}",
+        "      (which of two PROPOSED edges is right is not decided here: there is no oracle,",
+        "       and a silent guess is how a wrong edge becomes indistinguishable from canon)",
+        "  trust split:",
+        f"    nodes:  {report.accepted_nodes} accepted, {report.proposed_nodes} proposed",
+        f"    edges:  {report.accepted_edges} accepted, {report.proposed_edges} proposed"
+        f" (of which {report.conflicted_edges} conflicted)",
         f"  to write: {report.written_nodes} nodes, {report.written_edges} edges",
     ]
+    # Complete, not capped: a contradiction the graph now holds ON PURPOSE is
+    # exactly what a human is here to read.
+    for conflict in report.conflicts:
+        lines.append(f"    - conflict: {conflict}")
     for label, dropped in (
         ("gazetteer", report.dropped_gazetteer),
         ("undecidable keyed", report.dropped_undecidable_keyed),
@@ -123,6 +137,7 @@ def run_artifact(
     nodes: list[WriteNode],
     edges: list[WriteEdge],
     replaced: dict,
+    accepted_only: bool = False,
 ) -> dict:
     """The document the verifier reads to tell a complete run from a truncated one.
 
@@ -153,6 +168,16 @@ def run_artifact(
             "ambiguous_names": report.ambiguous_names,
             # The edges on which the verifier's constraint check proves nothing.
             "resolved_endpoints": report.resolved_endpoints,
+            # What actually landed, split by trust. Read off the WRITTEN objects
+            # rather than the plan's counts, because `--accepted-only` narrows
+            # the write after planning and an artifact stating the plan's split
+            # would describe a graph that was never written.
+            "accepted_only": accepted_only,
+            "written_nodes_by_status": dict(sorted(Counter(n.status for n in nodes).items())),
+            "written_edges_by_status": dict(sorted(Counter(e.status for e in edges).items())),
+            # The contradictions the graph now holds on purpose. A human at gate
+            # G3 reads these; nothing automatic resolves them.
+            "conflicts": report.conflicts,
         },
         "nodes": candidate_nodes,
         "edges": candidate_edges,
@@ -188,6 +213,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Plan and print every drop count; touch neither Neo4j nor the run artifact",
     )
+    # OFF by default, and it has to stay that way. The loop's goal predicate
+    # counts nodes, so an accepted-only write would tell it a chapter is done
+    # while most of the chapter is gone -- and throwing the proposed set away
+    # before a human has read it destroys the review queue this exists to build.
+    parser.add_argument(
+        "--accepted-only",
+        action="store_true",
+        help="Write only derived (accepted) edges and the nodes they need. Off by default.",
+    )
     return parser
 
 
@@ -220,6 +254,16 @@ def main() -> None:
 
     write_nodes, write_edges, report = plan_write(nodes, edges, gazetteer, args.chapter)
     print(format_report(report))
+
+    if args.accepted_only:
+        planned_nodes, planned_edges = len(write_nodes), len(write_edges)
+        write_nodes, write_edges = restrict_to_accepted(write_nodes, write_edges)
+        print(
+            "  --accepted-only: dropped "
+            f"{planned_edges - len(write_edges)} proposed edges and "
+            f"{planned_nodes - len(write_nodes)} nodes left with nothing attached; "
+            f"{len(write_nodes)} nodes and {len(write_edges)} edges remain"
+        )
 
     if not write_nodes:
         print("  refusing to write: no node survived the filters", file=sys.stderr)
@@ -263,6 +307,7 @@ def main() -> None:
                 nodes=write_nodes,
                 edges=write_edges,
                 replaced=summary,
+                accepted_only=args.accepted_only,
             ),
             indent=2,
         )

@@ -33,6 +33,19 @@ class TestParser:
         """Refusing to overwrite is gate G6. It must not be reachable by accident."""
         assert build_parser().parse_args(["ch3.json", "--chapter", SLUG]).replace is False
 
+    def test_accepted_only_is_off_by_default(self):
+        """The loop's goal predicate counts nodes, so an accepted-only write
+        would report a chapter done with most of it gone -- and throwing the
+        proposed set away before a human reads it destroys the review queue."""
+        args = build_parser().parse_args(["ch3.json", "--chapter", SLUG])
+
+        assert args.accepted_only is False
+
+    def test_the_accepted_only_flag_turns_it_on(self):
+        args = build_parser().parse_args(["ch3.json", "--chapter", SLUG, "--accepted-only"])
+
+        assert args.accepted_only is True
+
     def test_defaults_point_at_the_paths_the_verifier_uses(self):
         args = build_parser().parse_args(["ch3.json", "--chapter", SLUG])
         assert args.runs_dir == DEFAULT_RUNS_DIR
@@ -157,6 +170,47 @@ class TestRunArtifact:
         assert write["written_nodes_by_type"] == {"LOCATION": 2}
         assert write["written_edges_by_type"] == {"LOCATED_IN": 1}
 
+    def test_the_written_split_is_read_off_what_was_written(self):
+        """Not off the plan's counts: `--accepted-only` narrows the write after
+        planning, and an artifact stating the plan's split would describe a
+        graph that was never written."""
+        accepted = WriteEdge(
+            source_id="b",
+            target_id="a",
+            rel_type=RelationshipType.LOCATED_IN,
+            chapter_slug=SLUG,
+            evidence="derived from document structure",
+        )
+        write = self.build(
+            nodes=[
+                WriteNode(
+                    id="a", name="Church", entity_type="LOCATION", chapter_slug=SLUG,
+                    status="accepted",
+                )
+            ],
+            edges=[accepted],
+            accepted_only=True,
+        )["write"]
+
+        assert write["written_edges_by_status"] == {"accepted": 1}
+        assert write["written_nodes_by_status"] == {"accepted": 1}
+        assert write["accepted_only"] is True
+
+    def test_the_conflicts_travel_with_the_run(self):
+        """The graph now holds contradictions on purpose. The only record of
+        which ones is this list and the `conflict` property beside them."""
+        report = FilterReport(candidate_nodes=2, candidate_edges=2)
+        report.exclusive_conflicts = 1
+        report.conflicts = ["cos:x:npc:ireena -IDENTITY_OF|RELATED_TO-> cos:x:npc:tatyana"]
+
+        write = self.build(report=report)["write"]
+
+        assert write["conflicts"] == report.conflicts
+        assert write["filters"]["exclusive_conflicts"] == 1
+
+    def test_the_accepted_only_default_is_recorded_as_false(self):
+        assert self.build()["write"]["accepted_only"] is False
+
     def test_the_artifact_is_json_serialisable(self):
         json.dumps(self.build())
 
@@ -185,3 +239,30 @@ class TestFormatReport:
         printed = format_report(report)
         assert "keyed place): 40" in printed
         assert "and 32 more" in printed
+
+    def test_the_trust_split_is_printed(self):
+        report = FilterReport(candidate_nodes=3, candidate_edges=2)
+        report.accepted_nodes, report.proposed_nodes = 2, 1
+        report.accepted_edges, report.proposed_edges = 1, 1
+
+        printed = format_report(report)
+
+        assert "nodes:  2 accepted, 1 proposed" in printed
+        assert "edges:  1 accepted, 1 proposed" in printed
+
+    def test_every_conflict_is_named_and_none_are_capped(self):
+        """A contradiction the graph now holds ON PURPOSE is exactly what a
+        human is here to read; capping the list would hide one."""
+        report = FilterReport(candidate_nodes=0, candidate_edges=20)
+        report.exclusive_conflicts = 20
+        report.conflicts = [f"cos:x:npc:a{i} -IDENTITY_OF|RELATED_TO-> b" for i in range(20)]
+
+        printed = format_report(report)
+
+        assert "mutually exclusive pairs:                        20" in printed
+        assert printed.count("- conflict:") == 20
+
+    def test_a_zero_conflict_count_is_still_printed(self):
+        assert "mutually exclusive pairs:" in format_report(
+            FilterReport(candidate_nodes=1, candidate_edges=0)
+        )
