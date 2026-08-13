@@ -275,7 +275,7 @@ def check_exclusive(edges: list[CandidateEdge]) -> list[Violation]:
             rel = RelationshipType(edge.rel_type.strip())
         except ValueError:
             continue
-        triples.append((_fold(edge.source_name), _fold(edge.target_name), rel))
+        triples.append((fold_name(edge.source_name), fold_name(edge.target_name), rel))
         parsed.append(index)
 
     flagged: set[int] = set()
