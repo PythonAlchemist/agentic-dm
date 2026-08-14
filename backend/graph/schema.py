@@ -228,6 +228,7 @@ ARTIFACT_LABEL = "Artifact"
 #   (:Book)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section)
 #   (:Section)-[:DESCRIBES]->(:Entity:LOCATION)
 #   (:Entity)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(:Section)
+#   (:Entity)<-[:ALIAS_OF]-(:Alias)<-[:USES_ALIAS]-(:Mention)
 #
 # BARE STRINGS, not `RelationshipType` members, for the reason `ARTIFACT_LABEL`
 # is one. That enum is the vocabulary of relationships BETWEEN ENTITIES: it is
@@ -245,9 +246,20 @@ BOOK_LABEL = "Book"
 CHAPTER_LABEL = "Chapter"
 SECTION_LABEL = "Section"
 MENTION_LABEL = "Mention"
+#: One node per distinct SURFACE FORM, global rather than per entity: two things
+#: that answer to `Barovia` share the node, and the graph says so. An entity's
+#: own canonical name is one of these, always -- that is what makes resolving a
+#: name ONE traversal instead of "check `e.name`, then check the aliases".
+ALIAS_LABEL = "Alias"
 
 HAS_CHAPTER = "HAS_CHAPTER"
 HAS_SECTION = "HAS_SECTION"
+#: A recorded spelling of an entity's name. Carries no `chapter_slug`: what a
+#: thing is called is not a claim any one chapter owns.
+ALIAS_OF = "ALIAS_OF"
+#: Which spelling the book used at THIS mention -- itself story information,
+#: since the party meets the devil Strahd well before Strahd von Zarovich.
+USES_ALIAS = "USES_ALIAS"
 #: A keyed section IS the place it names. Range is :LOCATION and nothing else --
 #: `E5d. Trapdoor` is keyed and is an item, and a section is not a room because
 #: of the shape of its heading.
@@ -578,6 +590,10 @@ GRAPH_SCHEMA = {
         # `<entity>@<section>`. The pair IS the identity, so a re-scan MERGEs
         # onto the same mention rather than doubling it.
         "CREATE CONSTRAINT mention_id IF NOT EXISTS FOR (m:Mention) REQUIRE m.id IS UNIQUE",
+        # The SURFACE FORM is the identity, so `Bildrath's Mercantile` and
+        # `Bildrath’s Mercantile` are two nodes -- which is the point: they
+        # normalize alike and a mention records which of them the book set.
+        "CREATE CONSTRAINT alias_name IF NOT EXISTS FOR (a:Alias) REQUIRE a.name IS UNIQUE",
     ],
     "indexes": [
         "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
@@ -594,5 +610,8 @@ GRAPH_SCHEMA = {
         # unindexed one would make re-writing a chapter a scan of the book.
         "CREATE INDEX mention_chapter IF NOT EXISTS FOR (m:Mention) ON (m.chapter_slug)",
         "CREATE INDEX section_chapter IF NOT EXISTS FOR (s:Section) ON (s.chapter_slug)",
+        # Every name lookup resolves on `normalized` and nothing else, so this
+        # is the index the read path lives on.
+        "CREATE INDEX alias_normalized IF NOT EXISTS FOR (a:Alias) ON (a.normalized)",
     ],
 }

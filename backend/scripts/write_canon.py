@@ -23,11 +23,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from backend.canon.aliases import plan_aliases
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode, Chapter, Section
 from backend.canon.sections import split_chapter
 from backend.canon.seed_loader import (
     LOCATION_SUBTYPE_SEED,
+    load_aliases,
     load_artifacts,
     load_location_subtypes,
 )
@@ -184,7 +186,8 @@ def format_mentions(summary: dict) -> str:
         f"  spine: {summary['sections']} sections, "
         f"{summary['describes']} of them describing a place",
         f"  mentions: {summary['mentions']} across "
-        f"{len(counts)} of {summary['scanned_entities']} known entities",
+        f"{len(counts)} of {summary['scanned_entities']} known entities, "
+        f"under {summary.get('alias_uses', 0)} recorded spellings",
         f"  top {TOP_MENTIONS} by mention count (JUNK IS NOT FILTERED -- read this list):",
     ]
     lines.extend(f"    {count:4d}  {name}" for name, count in counts[:TOP_MENTIONS])
@@ -322,6 +325,10 @@ def run_artifact(
             "mentions": replaced.get("mentions", 0),
             "scanned_entities": replaced.get("scanned_entities", 0),
             "mention_counts": replaced.get("mention_counts", []),
+            # What the entities of this chapter are called, and how often the
+            # book reached for a name other than the canonical one.
+            "aliases": replaced.get("aliases", 0),
+            "alias_uses": replaced.get("alias_uses", 0),
             "ambiguous_names": report.ambiguous_names,
             # The edges on which the verifier's constraint check proves nothing.
             "resolved_endpoints": report.resolved_endpoints,
@@ -441,6 +448,12 @@ def main() -> None:
     artifacts = load_artifacts(args.location_subtypes)
     print(f"  artifacts: {len(artifacts)} authored from {args.location_subtypes}")
 
+    authored_aliases = load_aliases(args.location_subtypes)
+    print(
+        f"  aliases: {len(authored_aliases)} authored spellings from "
+        f"{args.location_subtypes} (the scan looks for every one of them)"
+    )
+
     chapter_place = chapter_place_of_run(extraction_run)
     print(f"  chapter place: {chapter_place!r} (parent of this chapter's top-level areas)")
 
@@ -485,6 +498,19 @@ def main() -> None:
         f"{len(spine.describes)} describing a place"
     )
 
+    # Planned from the WRITTEN nodes rather than the candidates, so an entity the
+    # gazetteer dropped cannot take an authored spelling into the graph with it.
+    canonical = {n.id: n.name for n in write_nodes}
+    aliases = plan_aliases(canonical.items(), authored_aliases)
+    extra = [a for a in aliases if a.name != canonical[a.entity_id]]
+    print(
+        f"  aliases: {len(aliases)} surface forms over {len(write_nodes)} nodes "
+        f"({len(extra)} authored, the rest each node's own name). "
+        "Every extra spelling is a hand-written claim -- read them:"
+    )
+    for alias in extra:
+        print(f"    - {alias.name!r} -> {canonical[alias.entity_id]!r} ({alias.entity_id})")
+
     if args.dry_run:
         print("  --dry-run: nothing written (the mention scan runs inside the write)")
         return
@@ -498,6 +524,7 @@ def main() -> None:
                 write_nodes,
                 write_edges,
                 spine,
+                aliases,
                 replace=args.replace,
             )
         except ChapterAlreadyWritten as exc:

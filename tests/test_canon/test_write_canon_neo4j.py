@@ -15,6 +15,7 @@ from dataclasses import replace
 
 import pytest
 
+from backend.canon.aliases import WriteAlias
 from backend.canon.assembler import slugify
 from backend.canon.models import Section
 from backend.canon.spine import ChapterSpine, plan_spine, section_id
@@ -71,6 +72,12 @@ def _clean(session) -> None:
                 {"slugs": SLUGS})
     session.run("MATCH (c:Chapter) WHERE c.slug IN $slugs DETACH DELETE c", {"slugs": SLUGS})
     session.run("MATCH (b:Book {slug:$slug}) DETACH DELETE b", {"slug": TEST_BOOK})
+    # An `:Alias` node is GLOBAL -- it is keyed on the surface form and nothing
+    # else -- so it cannot be cleaned by an id prefix or a chapter. Orphans are
+    # the honest scope: the entities above have just been DETACH DELETEd, so
+    # every alias that named one now names nothing, and an alias naming nothing
+    # is garbage whoever created it.
+    session.run("MATCH (a:Alias) WHERE NOT (a)-[:ALIAS_OF]->() DETACH DELETE a")
 
 
 SLUGS = [CHAPTER_A, CHAPTER_B]
@@ -175,14 +182,21 @@ def write(
     *,
     replace: bool = False,
     chapter_spine: ChapterSpine | None = None,
+    aliases: list[WriteAlias] | None = None,
 ) -> dict:
-    """`write_chapter` with a spine that names every node it is given."""
+    """`write_chapter` with a spine that names every node it is given.
+
+    `aliases` defaults to nothing AUTHORED, which is the ordinary case: every
+    node still ends up with its own name as an `:Alias`, from the backfill
+    inside the transaction.
+    """
     return write_chapter(
         session,
         chapter_slug,
         nodes,
         edges,
         chapter_spine or spine(*nodes, chapter_slug=chapter_slug),
+        aliases or [],
         replace=replace,
     )
 
@@ -1137,3 +1151,385 @@ class TestDescriptionIsGone:
             "MATCH (n:Entity {id:$id}) RETURN properties(n) AS p", {"id": ident("Church")}
         ).single()["p"]
         assert "description" not in props
+
+
+class TestAliases:
+    """`(:Entity)<-[:ALIAS_OF]-(:Alias)<-[:USES_ALIAS]-(:Mention)`, live.
+
+    The pure rules are pinned in `test_aliases.py` and `test_spine.py`. What
+    only a database can show is that the alias reaches the graph BEFORE the scan
+    reads it, that a replace unpicks it, and that resolving a name is one
+    traversal.
+    """
+
+    def _aliases_of(self, graph, entity_id: str) -> set[str]:
+        return {
+            row["name"]
+            for row in graph.run(
+                "MATCH (a:Alias)-[:ALIAS_OF]->(:Entity {id:$id}) RETURN a.name AS name",
+                {"id": entity_id},
+            )
+        }
+
+    def _resolve(self, graph, name: str) -> set[str]:
+        """The ONE lookup path, exercised through the function callers use.
+
+        `resolve_name` reads `:Alias` and never `e.name`. If that traversal
+        cannot find an entity under its own canonical name, the invariant this
+        design rests on is broken and no caller can paper over it.
+        """
+        from backend.canon.aliases import resolve_name
+
+        return set(resolve_name(graph, name))
+
+    def test_every_written_node_answers_to_its_own_name(self, graph):
+        """The invariant lookup rests on. Not conditional on anyone authoring
+        anything: no alias was passed to this write."""
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        assert self._aliases_of(graph, church.id) == {church.name}
+        assert self._resolve(graph, church.name) == {church.id}
+
+    def test_the_alias_carries_the_whole_normalisation_and_no_more(self, graph):
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        row = graph.run(
+            "MATCH (a:Alias {name:$name}) RETURN a.normalized AS n", {"name": church.name}
+        ).single()
+        assert row["n"] == church.name.lower()
+
+    def test_a_canon_entity_written_by_something_else_is_still_given_its_name(self, graph):
+        """`load_seed` writes canon entities and knows nothing about aliases.
+        Without the backfill such a node is unreachable by name and invisible to
+        the scan -- a silent zero, which is what all of this exists to remove."""
+        stray = f"{TEST_ID_PREFIX}stray"
+        graph.run(
+            "CREATE (e:Entity {id:$id, name:$name, plane:$plane})",
+            {"id": stray, "name": named("Stray"), "plane": CANON_PLANE},
+        )
+        write(graph, CHAPTER_A, [node("Church")], [])
+        assert self._resolve(graph, named("Stray")) == {stray}
+
+    def test_the_backfills_cypher_normalisation_agrees_with_the_python_one(self, graph):
+        """`_BACKFILL_ALIASES` restates `normalize` in Cypher, because a Cypher
+        MERGE cannot call Python. That is two implementations of one rule, and
+        the only thing stopping them drifting is this test: the name below is
+        padded, mixed-case AND curly, so all three operations have to agree.
+        """
+        from backend.canon.aliases import normalize
+
+        awkward = "  ZzBildrath’s ZzMERCANTILE  "
+        stray = f"{TEST_ID_PREFIX}awkward"
+        graph.run(
+            "CREATE (e:Entity {id:$id, name:$name, plane:$plane})",
+            {"id": stray, "name": awkward, "plane": CANON_PLANE},
+        )
+        write(graph, CHAPTER_A, [node("Church")], [])
+        stored = graph.run(
+            "MATCH (a:Alias {name:$name}) RETURN a.normalized AS n", {"name": awkward}
+        ).single()["n"]
+        assert stored == normalize(awkward)
+        assert self._resolve(graph, "zzbildrath's zzmercantile") == {stray}
+
+    def test_an_authored_alias_reaches_the_entity(self, graph):
+        ismark = node("Ismark Kolyanovich", entity_type="NPC")
+        write(
+            graph,
+            CHAPTER_A,
+            [ismark],
+            [],
+            aliases=[WriteAlias(ismark.id, named("Ismark"))],
+        )
+        assert self._aliases_of(graph, ismark.id) == {ismark.name, named("Ismark")}
+
+    def test_both_spellings_resolve_to_the_same_entity(self, graph):
+        """Success criterion 2, in the form the graph can answer it: the long
+        name and the short one are one entity, with nothing fuzzy in the path."""
+        ismark = node("Ismark Kolyanovich", entity_type="NPC")
+        write(
+            graph,
+            CHAPTER_A,
+            [ismark],
+            [],
+            aliases=[WriteAlias(ismark.id, named("Ismark"))],
+        )
+        short = self._resolve(graph, named("Ismark"))
+        assert short == self._resolve(graph, named("Ismark Kolyanovich")) == {ismark.id}
+
+    def test_a_curly_apostrophe_resolves_to_the_straight_one(self, graph):
+        """One character apart, and the only reason the two are one name."""
+        shop = WriteNode(
+            id=f"{TEST_ID_PREFIX}shop",
+            name="ZzBildrath’s ZzMercantile",
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_A,
+        )
+        write(
+            graph,
+            CHAPTER_A,
+            [shop],
+            [],
+            aliases=[WriteAlias(shop.id, "ZzBildrath's ZzMercantile")],
+        )
+        assert self._resolve(graph, "ZzBildrath's ZzMercantile") == {shop.id}
+        assert self._resolve(graph, "ZzBildrath’s ZzMercantile") == {shop.id}
+
+    def test_the_scan_finds_a_section_that_uses_only_the_alias(self, graph):
+        """The eight, in miniature. The section never writes the full name."""
+        strahd = node("Strahd von Zarovich", entity_type="NPC")
+        chapter_spine = spine(
+            sections=[prose(0, "Section 0", f"{named('Strahd')} is watching.")],
+        )
+        summary = write(
+            graph,
+            CHAPTER_A,
+            [strahd],
+            [],
+            chapter_spine=chapter_spine,
+            aliases=[WriteAlias(strahd.id, named("Strahd"))],
+        )
+        assert summary["mentions"] == 1
+        assert count_mentions(graph, CHAPTER_A) == 1
+
+    def test_the_mention_records_which_spelling_the_section_used(self, graph):
+        strahd = node("Strahd von Zarovich", entity_type="NPC")
+        chapter_spine = spine(
+            sections=[prose(0, "Section 0", f"{named('Strahd')} is watching.")],
+        )
+        write(
+            graph,
+            CHAPTER_A,
+            [strahd],
+            [],
+            chapter_spine=chapter_spine,
+            aliases=[WriteAlias(strahd.id, named("Strahd"))],
+        )
+        row = graph.run(
+            """
+            MATCH (m:Mention {chapter_slug:$slug})-[u:USES_ALIAS]->(a:Alias)
+            RETURN a.name AS name, u.occurrences AS n
+            """,
+            {"slug": CHAPTER_A},
+        ).single()
+        assert (row["name"], row["n"]) == (named("Strahd"), 1)
+
+    def test_the_alias_lands_before_the_scan_reads_it(self, graph):
+        """Written after, the scan would look for last week's set of names and
+        the chapter would need a second write to correct -- which is the two-pass
+        write one transaction per chapter exists to forbid.
+
+        Measured rather than asserted about ordering: the mention below can only
+        exist if the alias was already in the graph when `_known_entities` ran.
+        """
+        strahd = node("Strahd von Zarovich", entity_type="NPC")
+        chapter_spine = spine(
+            sections=[prose(0, "Section 0", f"{named('Strahd')} is watching.")],
+        )
+        write(
+            graph,
+            CHAPTER_A,
+            [strahd],
+            [],
+            chapter_spine=chapter_spine,
+            aliases=[WriteAlias(strahd.id, named("Strahd"))],
+        )
+        found = graph.run(
+            """
+            MATCH (:Mention {chapter_slug:$slug})-[:REFERS_TO]->(e:Entity {id:$id})
+            RETURN count(*) AS c
+            """,
+            {"slug": CHAPTER_A, "id": strahd.id},
+        ).single()["c"]
+        assert found == 1
+
+    def test_one_alias_node_serves_every_entity_that_answers_to_it(self, graph):
+        """A shared surface form is ONE node with two `ALIAS_OF` edges, which is
+        the graph saying the name is ambiguous rather than picking one."""
+        region = WriteNode(
+            id=f"{TEST_ID_PREFIX}region",
+            name=named("Barovia Region"),
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_A,
+        )
+        village = WriteNode(
+            id=f"{TEST_ID_PREFIX}village",
+            name=named("Barovia Village"),
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_A,
+        )
+        shared = named("Barovia")
+        write(
+            graph,
+            CHAPTER_A,
+            [region, village],
+            [],
+            aliases=[WriteAlias(region.id, shared), WriteAlias(village.id, shared)],
+        )
+        nodes = graph.run(
+            "MATCH (a:Alias {name:$name}) RETURN count(a) AS c", {"name": shared}
+        ).single()["c"]
+        assert nodes == 1
+        assert self._resolve(graph, shared) == {region.id, village.id}
+
+    def test_a_replace_takes_this_chapters_aliases_with_it(self, graph):
+        strahd = node("Strahd von Zarovich", entity_type="NPC")
+        write(
+            graph, CHAPTER_A, [strahd], [], aliases=[WriteAlias(strahd.id, named("Strahd"))]
+        )
+        write(graph, CHAPTER_A, [node("Church")], [], replace=True)
+        assert self._resolve(graph, named("Strahd")) == set()
+        left = graph.run(
+            "MATCH (a:Alias {name:$name}) RETURN count(a) AS c", {"name": named("Strahd")}
+        ).single()["c"]
+        assert left == 0
+
+    def test_a_replace_leaves_an_alias_another_entity_still_answers_to(self, graph):
+        """An `:Alias` is global. Deleting `Barovia` the name because the
+        village was rewritten would silently truncate the region."""
+        region = WriteNode(
+            id=f"{TEST_ID_PREFIX}region",
+            name=named("Barovia Region"),
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_B,
+        )
+        village = WriteNode(
+            id=f"{TEST_ID_PREFIX}village",
+            name=named("Barovia Village"),
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_A,
+        )
+        shared = named("Barovia")
+        write(graph, CHAPTER_B, [region], [], aliases=[WriteAlias(region.id, shared)])
+        write(graph, CHAPTER_A, [village], [], aliases=[WriteAlias(village.id, shared)])
+
+        write(graph, CHAPTER_A, [node("Church")], [], replace=True)
+        assert self._resolve(graph, shared) == {region.id}
+
+    def test_a_replace_cannot_reach_an_alias_it_never_touched(self, graph):
+        """The orphan sweep is scoped to the names this delete just unpicked.
+
+        An orphan the delete did not create is left alone. Sweeping every
+        orphaned `:Alias` in the database instead would work today and would put
+        a chapter's rewrite one bad edit away from emptying the book's whole
+        name index -- which happened to the live graph during a mutation run of
+        exactly that edit.
+        """
+        bystander = f"{NAME_MARKER}Bystander"
+        graph.run(
+            "CREATE (a:Alias {name:$name, normalized:$n})",
+            {"name": bystander, "n": bystander.lower()},
+        )
+        try:
+            write(graph, CHAPTER_A, [node("Church")], [])
+            write(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
+            survived = graph.run(
+                "MATCH (a:Alias {name:$name}) RETURN count(a) AS c", {"name": bystander}
+            ).single()["c"]
+            assert survived == 1
+        finally:
+            graph.run("MATCH (a:Alias {name:$name}) DETACH DELETE a", {"name": bystander})
+
+    def test_a_replaced_node_leaves_no_alias_behind_it(self, graph):
+        """`DELETE n` is deliberately not `DETACH DELETE`, so a surviving
+        `ALIAS_OF` would raise. It must be unpicked, not detached."""
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        write(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
+        assert self._resolve(graph, church.name) == set()
+
+    def test_a_failed_write_leaves_no_alias_behind(self, graph):
+        """Aliases are inside the one transaction like everything else."""
+        church = node("Church")
+        missing = node("Crypt")
+        with pytest.raises(ValueError, match="edge endpoint missing"):
+            write(
+                graph,
+                CHAPTER_A,
+                [church],
+                [link(church, missing)],
+                aliases=[WriteAlias(church.id, named("Kirk"))],
+            )
+        assert self._resolve(graph, named("Kirk")) == set()
+        assert self._resolve(graph, church.name) == set()
+
+    def test_an_alias_of_an_entity_that_is_not_there_raises(self, graph):
+        """A `MATCH ... MERGE` that matches nothing writes nothing and says
+        nothing, which is how an entity silently loses its own name."""
+        from backend.canon.writer import _write_alias
+
+        write(graph, CHAPTER_A, [node("Church")], [])
+        with pytest.raises(ValueError, match="alias endpoint missing"):
+            graph.execute_write(
+                _write_alias, WriteAlias(f"{TEST_ID_PREFIX}nobody", named("Nobody"))
+            )
+
+    def test_resolving_a_name_never_reads_the_entitys_own_name_property(self, graph):
+        """The single-path rule, made checkable. An entity whose `:Alias` has
+        been removed is unresolvable EVEN THOUGH `e.name` still says what it is
+        called -- which is what proves the read path has one source.
+        """
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        graph.run(
+            "MATCH (a:Alias)-[r:ALIAS_OF]->(:Entity {id:$id}) DELETE r", {"id": church.id}
+        )
+        still_named = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN n.name AS name", {"id": church.id}
+        ).single()["name"]
+        assert still_named == church.name
+        assert self._resolve(graph, church.name) == set()
+
+    def test_resolving_returns_every_entity_that_answers_and_never_picks_one(self, graph):
+        """`Barovia` is a region and a village. Choosing between them here would
+        be a fuzzy match wearing different clothes."""
+        region = WriteNode(
+            id=f"{TEST_ID_PREFIX}region",
+            name=named("Barovia Region"),
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_A,
+        )
+        village = WriteNode(
+            id=f"{TEST_ID_PREFIX}village",
+            name=named("Barovia Village"),
+            entity_types=("LOCATION",),
+            chapter_slug=CHAPTER_A,
+        )
+        shared = named("Barovia")
+        write(
+            graph,
+            CHAPTER_A,
+            [region, village],
+            [],
+            aliases=[WriteAlias(region.id, shared), WriteAlias(village.id, shared)],
+        )
+        assert self._resolve(graph, shared) == {region.id, village.id}
+
+    def test_resolving_is_exact_and_never_a_prefix_or_a_substring(self, graph):
+        """The bar the whole module is built to hold. `Strahd` reaches
+        `Strahd von Zarovich` ONLY when someone has written it down."""
+        strahd = node("Strahd von Zarovich", entity_type="NPC")
+        write(graph, CHAPTER_A, [strahd], [])
+        assert self._resolve(graph, named("Strahd")) == set()
+        assert self._resolve(graph, named("Strahd von Zarovich")) == {strahd.id}
+
+    def test_resolving_is_case_and_whitespace_insensitive_and_no_more(self, graph):
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        assert self._resolve(graph, f"  {church.name.upper()}  ") == {church.id}
+
+    def test_an_entity_with_no_recorded_name_is_refused_rather_than_skipped(self, graph):
+        """The scan reads names through `ALIAS_OF` and nowhere else -- one path.
+        An entity that reaches it with none can never be found, so it is a loud
+        failure rather than an entity that quietly stops appearing."""
+        from backend.canon.writer import _known_entities
+
+        graph.run(
+            "CREATE (e:Entity {id:$id, name:$name, plane:$plane})",
+            {
+                "id": f"{TEST_ID_PREFIX}nameless",
+                "name": named("Nameless"),
+                "plane": CANON_PLANE,
+            },
+        )
+        with pytest.raises(ValueError, match="carry no :Alias"):
+            graph.execute_write(_known_entities)

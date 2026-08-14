@@ -13,7 +13,9 @@ import pytest
 from backend.canon.models import Section
 from backend.canon.spine import (
     EVIDENCE_MAX,
+    AliasUse,
     ChapterSpine,
+    EntityNames,
     WriteMention,
     evidence_span,
     fold_apostrophe,
@@ -167,19 +169,22 @@ class TestTheMatchingRule:
 class TestTheScan:
     def test_an_entity_named_in_a_section_gets_a_mention(self):
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays in the chapel.")])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert [(m.entity_id, m.section_id) for m in mentions] == [
             ("cos:donavich", f"cos:{CHAPTER}#14")
         ]
 
     def test_an_entity_absent_from_a_section_gets_none(self):
         spine = spine_of([sec("E5f. Chapel", 14, "An empty chapel.")])
-        assert scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER) == []
+        assert (
+            scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
+            == []
+        )
 
     def test_two_sentences_about_one_entity_in_one_section_are_ONE_mention(self):
         """One node per (entity, section) pair, not per occurrence."""
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich weeps. Donavich prays.")])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert len(mentions) == 1
         assert mentions[0].occurrences == 2
 
@@ -190,7 +195,7 @@ class TestTheScan:
                 sec("E5g. Undercroft", 15, "Donavich's son is chained here."),
             ]
         )
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert len(mentions) == 2
         assert {m.section_id for m in mentions} == {
             f"cos:{CHAPTER}#14",
@@ -201,13 +206,13 @@ class TestTheScan:
         """Re-running the scan must MERGE onto the same node rather than
         doubling it, so identity is the pair and nothing else."""
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays.")])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert mentions[0].id == mention_id("cos:donavich", f"cos:{CHAPTER}#14")
         assert mentions[0].id == f"cos:donavich@cos:{CHAPTER}#14"
 
     def test_every_mention_carries_a_non_empty_evidence_span(self):
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays before the altar.")])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert mentions[0].evidence.strip()
 
     def test_the_evidence_is_a_literal_substring_of_its_section(self):
@@ -216,13 +221,13 @@ class TestTheScan:
         merely intended -- which is also why nothing here inserts an ellipsis."""
         body = "The priest is broken.\n\nDonavich prays before the altar, weeping.\n"
         spine = spine_of([sec("E5f. Chapel", 14, body)])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert mentions[0].evidence in body
 
     def test_the_evidence_quotes_the_paragraph_the_match_is_in(self):
         body = "A far paragraph about nobody.\n\nDonavich prays before the altar.\n"
         spine = spine_of([sec("E5f. Chapel", 14, body)])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert mentions[0].evidence == "Donavich prays before the altar."
 
     def test_the_evidence_still_contains_the_name_when_the_paragraph_is_huge(self):
@@ -230,7 +235,7 @@ class TestTheScan:
         the very name it is evidence for would be worse than none."""
         body = "filler word " * 400 + "Donavich prays. " + "more filler " * 400
         spine = spine_of([sec("E5f. Chapel", 14, body)])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert "Donavich" in mentions[0].evidence
         assert mentions[0].evidence in body
         assert len(mentions[0].evidence) <= EVIDENCE_MAX
@@ -241,7 +246,9 @@ class TestTheScan:
         body = "You step into Bildrath’s Mercantile."
         spine = spine_of([sec("E1. Bildrath’s Mercantile", 4, body)])
         mentions = scan_mentions(
-            spine.sections, [("cos:bildraths-mercantile", "Bildrath's Mercantile")], CHAPTER
+            spine.sections,
+            [EntityNames("cos:bildraths-mercantile", "Bildrath's Mercantile")],
+            CHAPTER,
         )
         assert len(mentions) == 1
 
@@ -252,20 +259,27 @@ class TestTheScan:
         body = "You step into Bildrath’s Mercantile."
         spine = spine_of([sec("E1. Bildrath’s Mercantile", 4, body)])
         mentions = scan_mentions(
-            spine.sections, [("cos:bildraths-mercantile", "Bildrath's Mercantile")], CHAPTER
+            spine.sections,
+            [EntityNames("cos:bildraths-mercantile", "Bildrath's Mercantile")],
+            CHAPTER,
         )
         assert "’" in mentions[0].evidence
 
     def test_the_offset_points_at_the_first_occurrence(self):
-        body = "Nobody here. Donavich prays."
+        """FIRST, with a second one present to prove it. A section that names
+        someone three times is read from where the section first says so."""
+        body = "Nobody here. Donavich prays. Later, Donavich weeps."
         spine = spine_of([sec("E5f. Chapel", 14, body)])
-        mentions = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)
-        assert body[mentions[0].offset:].startswith("Donavich")
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
+        assert mentions[0].occurrences == 2
+        assert mentions[0].offset == body.index("Donavich")
 
     def test_the_mention_is_stamped_canon_and_its_chapter(self):
         """The replace path scopes on both, the way an edge's do."""
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays.")])
-        mention = scan_mentions(spine.sections, [("cos:donavich", "Donavich")], CHAPTER)[0]
+        mention = scan_mentions(
+            spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER
+        )[0]
         assert mention.properties["plane"] == CANON_PLANE
         assert mention.properties["chapter_slug"] == CHAPTER
 
@@ -273,7 +287,7 @@ class TestTheScan:
         """Two entity orders, one output order: a diff of two runs must be a
         diff of the book, not of a dict's iteration."""
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich and Doru.")])
-        entities = [("cos:donavich", "Donavich"), ("cos:doru", "Doru")]
+        entities = [EntityNames("cos:donavich", "Donavich"), EntityNames("cos:doru", "Doru")]
         assert scan_mentions(spine.sections, entities, CHAPTER) == scan_mentions(
             spine.sections, list(reversed(entities)), CHAPTER
         )
@@ -284,11 +298,236 @@ class TestTheScan:
         spine = spine_of(
             [sec("A", i, "There is a Trapdoor here.") for i in range(40)]
         )
-        assert len(scan_mentions(spine.sections, [("cos:trapdoor", "Trapdoor")], CHAPTER)) == 40
+        found = scan_mentions(
+            spine.sections, [EntityNames("cos:trapdoor", "Trapdoor")], CHAPTER
+        )
+        assert len(found) == 40
 
     def test_an_entity_with_an_unusable_name_is_skipped_rather_than_matching_everything(self):
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays.")])
-        assert scan_mentions(spine.sections, [("cos:blank", "   ")], CHAPTER) == []
+        assert scan_mentions(spine.sections, [EntityNames("cos:blank", "   ")], CHAPTER) == []
+
+
+class TestScanningUnderAnAlias:
+    """The scan looks for an entity under every RECORDED name, and records
+    which one the section used. Nothing here infers a name from another."""
+
+    def test_an_alias_finds_a_section_the_canonical_name_does_not(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Strahd is watching.")])
+        assert scan_mentions(
+            spine.sections, [EntityNames("cos:strahd", "Strahd von Zarovich")], CHAPTER
+        ) == []
+        found = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )
+        assert len(found) == 1
+
+    def test_the_mention_still_refers_to_the_entity_not_the_alias(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Strahd is watching.")])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert mention.entity_id == "cos:strahd"
+        assert mention.id == mention_id("cos:strahd", f"cos:{CHAPTER}#14")
+
+    def test_the_surface_form_the_book_used_is_recorded(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Strahd is watching.")])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert mention.uses == (AliasUse("Strahd", 1),)
+
+    def test_two_spellings_in_one_section_are_two_uses_of_one_mention(self):
+        """A mention is still one node per (entity, section). Which names were
+        used is a SET, which is why it is edges rather than a scalar."""
+        body = "The devil Strahd. They say Strahd von Zarovich still rules."
+        spine = spine_of([sec("E5f. Chapel", 14, body)])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert {u.name for u in mention.uses} == {"Strahd", "Strahd von Zarovich"}
+        assert mention.occurrences == 2
+
+    def test_a_run_of_text_two_forms_both_match_is_counted_once(self):
+        """`Strahd` matches inside `Strahd von Zarovich`. The section named him
+        once, and `occurrences` counts appearances rather than aliases."""
+        spine = spine_of([sec("E5f. Chapel", 14, "Only Strahd von Zarovich here.")])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert mention.occurrences == 1
+        assert mention.uses == (AliasUse("Strahd von Zarovich", 1),)
+
+    def test_the_longer_form_wins_the_overlap_whichever_order_it_arrives_in(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Only Strahd von Zarovich here.")])
+        for forms in (("Strahd", "Strahd von Zarovich"), ("Strahd von Zarovich", "Strahd")):
+            mention = scan_mentions(
+                spine.sections,
+                [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=forms)],
+                CHAPTER,
+            )[0]
+            assert mention.uses == (AliasUse("Strahd von Zarovich", 1),)
+
+    def test_uses_are_ordered_most_used_first(self):
+        body = "Strahd. Strahd again. And Strahd von Zarovich once."
+        spine = spine_of([sec("E5f. Chapel", 14, body)])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert mention.uses == (
+            AliasUse("Strahd", 2),
+            AliasUse("Strahd von Zarovich", 1),
+        )
+
+    def test_the_curly_spelling_is_recorded_when_the_book_sets_curly(self):
+        """Both forms match -- the scan folds -- and only one of them is what
+        the section says. Attributing the ASCII one would put a spelling in the
+        graph that the book never set."""
+        spine = spine_of([sec("E1", 4, "You step into Bildrath’s Mercantile.")])
+        mention = scan_mentions(
+            spine.sections,
+            [
+                EntityNames(
+                    "cos:e1",
+                    "Bildrath's Mercantile",
+                    aliases=("Bildrath’s Mercantile",),
+                )
+            ],
+            CHAPTER,
+        )[0]
+        assert mention.uses == (AliasUse("Bildrath’s Mercantile", 1),)
+
+    def test_the_straight_spelling_is_recorded_when_the_book_sets_straight(self):
+        spine = spine_of([sec("E1", 4, "You step into Bildrath's Mercantile.")])
+        mention = scan_mentions(
+            spine.sections,
+            [
+                EntityNames(
+                    "cos:e1",
+                    "Bildrath’s Mercantile",
+                    aliases=("Bildrath's Mercantile",),
+                )
+            ],
+            CHAPTER,
+        )[0]
+        assert mention.uses == (AliasUse("Bildrath's Mercantile", 1),)
+
+    def test_typography_is_a_closer_match_than_casing(self):
+        """When the exact spelling is not recorded, the form differing only by
+        apostrophe beats the form differing by case.
+
+        U+2019 and `'` are one character substituted for another and nothing
+        else -- that is stated as the whole of the folding. Case is a difference
+        in what the book actually set. So `Zz’s Q` is a nearer record of
+        `Zz's Q` than `Zz’S Q` is, and a rank that could not tell them apart
+        would fall back to alphabetical order, which here prefers the wrong one.
+        """
+        spine = spine_of([sec("E1", 4, "Deep inside Zz's Q it is dark.")])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:q", "Zz’S Q", aliases=("Zz’s Q",))],
+            CHAPTER,
+        )[0]
+        assert mention.uses == (AliasUse("Zz’s Q", 1),)
+
+    def test_a_single_word_alias_keeps_the_case_sensitive_rule(self):
+        """`Light` the LORE entity must not claim every lit torch, and an alias
+        is not a way around that."""
+        spine = spine_of([sec("E5f. Chapel", 14, "a shaft of light")])
+        assert scan_mentions(
+            spine.sections,
+            [EntityNames("cos:radiance", "Radiance", aliases=("Light",))],
+            CHAPTER,
+        ) == []
+
+    def test_a_multi_word_alias_keeps_the_case_insensitive_rule(self):
+        spine = spine_of([sec("E2", 5, "the blood on the vine tavern")])
+        found = scan_mentions(
+            spine.sections,
+            [
+                EntityNames(
+                    "cos:e2",
+                    "Blood of the Vine Tavern",
+                    aliases=("Blood on the Vine Tavern",),
+                )
+            ],
+            CHAPTER,
+        )
+        assert len(found) == 1
+
+    def test_an_alias_is_whole_word_like_every_other_name(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Strahdian rites.")])
+        assert scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        ) == []
+
+    def test_an_alias_belongs_to_one_entity_and_does_not_leak(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Strahd is watching.")])
+        found = scan_mentions(
+            spine.sections,
+            [
+                EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",)),
+                EntityNames("cos:doru", "Doru"),
+            ],
+            CHAPTER,
+        )
+        assert [m.entity_id for m in found] == ["cos:strahd"]
+
+    def test_the_evidence_quotes_the_section_the_alias_matched(self):
+        spine = spine_of([sec("E5f. Chapel", 14, "Nobody here. Strahd is watching.")])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert "Strahd" in mention.evidence
+
+    def test_the_offset_points_at_the_alias_not_the_canonical_name(self):
+        body = "Nobody here. Strahd is watching."
+        spine = spine_of([sec("E5f. Chapel", 14, body)])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert body[mention.offset:].startswith("Strahd")
+
+    def test_the_evidence_quotes_the_first_appearance_whichever_form_it_used(self):
+        """The alias comes first and the full name second, and the LONGER span
+        is resolved first internally -- so a mention that reported the last span
+        it happened to keep would quote the wrong half of the section."""
+        body = "Strahd walked here. Later, Strahd von Zarovich returned."
+        spine = spine_of([sec("E5f. Chapel", 14, body)])
+        mention = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
+            CHAPTER,
+        )[0]
+        assert mention.occurrences == 2
+        assert mention.offset == 0
+
+    def test_forms_always_hold_the_canonical_name(self):
+        """A caller cannot construct an entity the scan will not look for under
+        its own name -- that would be a silent zero by configuration."""
+        assert EntityNames("cos:e", "Doru", aliases=("Doru the Spawn",)).forms == (
+            "Doru",
+            "Doru the Spawn",
+        )
+        assert EntityNames("cos:e", "Doru", aliases=("Doru",)).forms == ("Doru",)
 
 
 class TestMentionCounts:
@@ -298,9 +537,9 @@ class TestMentionCounts:
         spine = spine_of(
             [sec("A", 0, "Donavich and Doru."), sec("B", 1, "Donavich alone.")]
         )
-        entities = [("cos:donavich", "Donavich"), ("cos:doru", "Doru")]
+        entities = [EntityNames("cos:donavich", "Donavich"), EntityNames("cos:doru", "Doru")]
         mentions = scan_mentions(spine.sections, entities, CHAPTER)
-        assert mention_counts(mentions, dict(entities)) == [
+        assert mention_counts(mentions, {e.id: e.name for e in entities}) == [
             ("Donavich", 2),
             ("Doru", 1),
         ]
@@ -324,16 +563,14 @@ class TestHelpers:
 class TestTheRealChapterThree:
     """The measurement the design is built on, run against the real corpus."""
 
-    def test_strahd_von_zarovich_is_named_in_exactly_one_section_under_his_full_name(self):
-        """THE HEADLINE NUMBER, and it is not 8.
+    def test_strahd_is_named_in_eight_of_the_twenty_two_sections(self):
+        """THE HEADLINE NUMBER. Eight, and it arrives through `:Alias`.
 
-        The book writes "Strahd" in 8 of chapter 3's 22 sections and "Strahd
-        von Zarovich" in exactly one. The canonical name is the full one, the
-        gazetteer rejects the bare `Strahd` candidate, and matching is
-        whole-word against the canonical name alone until aliases exist. So 1
-        is what a correct scan returns here, and the remaining 7 are what the
-        alias work is for. Pinned so that reaching 8 has to arrive through
-        `:Alias` rather than through someone loosening this matcher.
+        The book writes "Strahd" in 8 of chapter 3's 22 sections and "Strahd von
+        Zarovich" in exactly one. Recording `Strahd` as an alias is the entire
+        distance between the two figures -- the matcher below is the same
+        whole-word, case-sensitive-for-one-word matcher it was, and nothing
+        infers that the two strings name one man.
         """
         sections = _real_chapter_three()
         strahd = re.compile(r"(?<!\w)Strahd(?!\w)")
@@ -341,9 +578,46 @@ class TestTheRealChapterThree:
 
         spine = spine_of(sections)
         mentions = scan_mentions(
-            spine.sections, [("cos:strahd-von-zarovich", "Strahd von Zarovich")], CHAPTER
+            spine.sections,
+            [
+                EntityNames(
+                    "cos:strahd-von-zarovich",
+                    "Strahd von Zarovich",
+                    aliases=("Strahd", "Strahd von Zarovich"),
+                )
+            ],
+            CHAPTER,
+        )
+        assert len(mentions) == 8
+
+    def test_without_the_alias_the_same_scan_finds_one(self):
+        """The before, kept beside the after. If this ever also returns 8 the
+        matcher has been loosened and the alias node is doing nothing."""
+        spine = spine_of(_real_chapter_three())
+        mentions = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:strahd-von-zarovich", "Strahd von Zarovich")],
+            CHAPTER,
         )
         assert len(mentions) == 1
+
+    def test_the_preamble_names_him_in_full_and_is_counted_once(self):
+        """Section 0 contains "Strahd von Zarovich", so both recorded forms
+        match the same run of text. The section names him once."""
+        spine = spine_of(_real_chapter_three())
+        mentions = scan_mentions(
+            spine.sections,
+            [
+                EntityNames(
+                    "cos:strahd-von-zarovich",
+                    "Strahd von Zarovich",
+                    aliases=("Strahd", "Strahd von Zarovich"),
+                )
+            ],
+            CHAPTER,
+        )
+        preamble = next(m for m in mentions if m.section_id.endswith("#0"))
+        assert "Strahd von Zarovich" in {u.name for u in preamble.uses}
 
     def test_the_chapter_splits_into_the_twenty_two_sections_the_design_measured(self):
         assert len(_real_chapter_three()) == 22

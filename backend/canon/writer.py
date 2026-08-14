@@ -32,6 +32,8 @@ from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.sections import KEYED_HEADING
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
+    ALIAS_LABEL,
+    ALIAS_OF,
     ARTIFACT_LABEL,
     CANON_ENTITY_TYPES,
     DESCRIBES,
@@ -42,14 +44,16 @@ from backend.graph.schema import (
     LAYER_MAP,
     REFERS_TO,
     RELATIONSHIP_DOMAIN_RANGE,
+    USES_ALIAS,
     EntityType,
     LocationSubtype,
     RelationshipType,
 )
 
 if TYPE_CHECKING:  # `spine` imports `mint_id` and `BOOK` from here, so the
-    # runtime dependency runs one way only -- spine -> writer.
-    from backend.canon.spine import ChapterSpine, WriteMention
+    # runtime dependency runs one way only -- spine -> writer, aliases -> spine.
+    from backend.canon.aliases import WriteAlias
+    from backend.canon.spine import ChapterSpine, EntityNames, WriteMention
 
 #: Nodes and edges written here are the book's own canon, shared by every
 #: campaign. The resolver filters on this property; an unstamped node is
@@ -1262,6 +1266,21 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
     has attached itself to a section by then, `DELETE s` raises and the whole
     chapter rolls back -- which is the loud failure, not a silent DETACH that
     takes an unknown edge with it.
+
+    ALIASES ARE UNPICKED THE SAME WAY. Their edges are deleted with the nodes
+    they hang off, and the `:Alias` node itself is global -- it goes only when
+    the last entity answering to it has gone, because the alternative is
+    deleting `Barovia` the name because the village was rewritten.
+
+    `ALIAS_OF` is listed beside `REFERS_TO` and `DESCRIBES` in the campaign-data
+    check as a STATEMENT OF INTENT, and a mutation pass showed it changes
+    nothing today: `ALIAS_OF` carries no `chapter_slug`, so `NOT (r.plane =
+    $plane AND r.chapter_slug = $slug)` is `NOT (true AND null)` -- null, which
+    a WHERE excludes anyway. It is kept because those three types are exactly
+    the ones this function deletes, and a reader should be able to see that set
+    in one place rather than deduce one third of it from Cypher's null
+    semantics. No test can distinguish its removal; that is recorded rather than
+    papered over with a test that would not fail.
     """
     scope = {"slug": chapter_slug, "plane": CANON_PLANE}
     doomed = _CHAPTER_ENTITIES + f"""
@@ -1272,7 +1291,7 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         doomed
         + f"""
         MATCH (n)-[r]-()
-        WHERE NOT type(r) IN ['{REFERS_TO}', '{DESCRIBES}']
+        WHERE NOT type(r) IN ['{REFERS_TO}', '{DESCRIBES}', '{ALIAS_OF}']
           AND NOT (r.plane = $plane AND r.chapter_slug = $slug)
         RETURN count(r) AS c
         """,
@@ -1311,6 +1330,26 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         """,
         scope,
     )
+    # BEFORE the nodes: `DELETE n` is deliberately not `DETACH DELETE`, so a
+    # surviving `ALIAS_OF` would raise -- correctly, but for the wrong reason,
+    # since these edges are this write's to remove.
+    #
+    # The names are COLLECTED FIRST because they are the only aliases this
+    # delete may afterwards remove. Sweeping `MATCH (a:Alias) WHERE NOT
+    # (a)-[:ALIAS_OF]->()` over the whole database instead would be correct on
+    # the day it was written and one bad edit away from a chapter's rewrite
+    # emptying the book's entire name index -- which is not hypothetical: a
+    # mutation run of exactly that edit did it to the live graph while this was
+    # being built. A delete should not be able to reach what it never touched.
+    orphan_candidates = tx.run(
+        f"""
+        MATCH (n:Entity {{plane:$plane}})<-[r:{ALIAS_OF}]-(a:{ALIAS_LABEL})
+        WHERE n.id IN $ids
+        DELETE r
+        RETURN collect(DISTINCT a.name) AS names
+        """,
+        {"ids": ids, "plane": CANON_PLANE},
+    ).single()["names"]
     nodes = tx.run(
         """
         MATCH (n:Entity {plane:$plane}) WHERE n.id IN $ids
@@ -1319,6 +1358,17 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         """,
         {"ids": ids, "plane": CANON_PLANE},
     ).single()["c"]
+    # An alias nothing answers to any more. Emptiness rather than chapter is the
+    # right test WITHIN that set, because an `:Alias` is global: `Barovia`
+    # survives a rewrite of the village because the region still answers to it.
+    tx.run(
+        f"""
+        MATCH (a:{ALIAS_LABEL})
+        WHERE a.name IN $names AND NOT (a)-[:{ALIAS_OF}]->()
+        DETACH DELETE a
+        """,
+        {"names": orphan_candidates},
+    )
     return nodes, edges
 
 
@@ -1453,16 +1503,85 @@ def _write_spine(tx, spine: "ChapterSpine") -> None:
             raise ValueError(f"DESCRIBES endpoint missing: {section_id} -> {location_id}")
 
 
+def _write_alias(tx, alias: "WriteAlias") -> None:
+    """One surface form, and the `ALIAS_OF` edge to the entity it names.
+
+    The `:Alias` node is MERGEd on `name` alone and is therefore GLOBAL: two
+    entities answering to `Barovia` share one node with two `ALIAS_OF` edges,
+    which is the graph saying out loud that the name is ambiguous rather than
+    quietly picking one of them. `normalized` is SET rather than merged on,
+    because it is a pure function of `name` and cannot disagree with it.
+
+    The entity is MATCHed and a miss RAISES, the same rule `_write_edge` and
+    `_write_mention` follow: a `MATCH ... MERGE` that matches nothing writes
+    nothing and says nothing, and an entity that silently lost its own name is
+    an entity no lookup can reach.
+
+    `ALIAS_OF` carries `plane` but NO `chapter_slug`. What a thing is called is
+    not a claim one chapter owns -- the entity node is global for exactly the
+    same reason -- so stamping a chapter here would make whichever chapter named
+    it first the owner of every later spelling.
+    """
+    written = tx.run(
+        f"""
+        MATCH (e:Entity {{id:$entity_id}})
+        MERGE (a:{ALIAS_LABEL} {{name:$name}})
+        SET a += $props
+        MERGE (a)-[r:{ALIAS_OF}]->(e)
+        SET r.plane = $plane
+        RETURN count(a) AS c
+        """,
+        {
+            "entity_id": alias.entity_id,
+            "name": alias.name,
+            "props": alias.properties,
+            "plane": CANON_PLANE,
+        },
+    ).single()["c"]
+    if not written:
+        raise ValueError(f"alias endpoint missing: {alias.name!r} of {alias.entity_id}")
+
+
+#: Give every canon entity in the plane its own name as an `:Alias`.
+#:
+#: DELIBERATELY NOT SCOPED TO THIS CHAPTER, and the exception is narrow and
+#: principled: an entity's name is already on the entity, so this asserts
+#: nothing a chapter could disagree with, and it is what makes "resolve a name
+#: through `:Alias`" a TOTAL rule rather than one with a migration hole in it.
+#: Without it, an entity written before aliases existed -- or by `load_seed`,
+#: which writes canon nodes and knows nothing about this -- would be invisible
+#: both to a lookup and to the scan, which is the silent zero all of this
+#: exists to remove.
+#:
+#: Runs AFTER `_delete_chapter`, so it does not re-mint a name for a node this
+#: write is about to remove.
+_BACKFILL_ALIASES = f"""
+MATCH (e:Entity {{plane:$plane}})
+WHERE e.name IS NOT NULL AND trim(e.name) <> ''
+MERGE (a:{ALIAS_LABEL} {{name:e.name}})
+SET a.normalized = toLower(trim(replace(e.name, '’', "'")))
+MERGE (a)-[r:{ALIAS_OF}]->(e)
+SET r.plane = $plane
+RETURN count(a) AS c
+"""
+
+
 def _write_mention(tx, mention: "WriteMention") -> None:
     """One (entity, section) pair, with the words that say so.
 
     MERGEd on the composite id, so re-scanning a chapter updates its mentions
     rather than doubling them.
 
-    Both endpoints are MATCHed and a miss RAISES, for the same reason
+    Every endpoint is MATCHed and a miss RAISES, for the same reason
     `_write_edge` does: a `MATCH ... MERGE` that matches nothing writes nothing
     and reports no error, which is exactly how a chapter acquires fewer mentions
-    than it scanned with nothing appearing to fail.
+    than it scanned with nothing appearing to fail. That covers the `:Alias`
+    endpoints too -- the scan found the entity UNDER one of these spellings, so
+    an alias node missing at write time means the graph disagrees with the scan
+    about what the entity is called.
+
+    `USES_ALIAS` is written LAST and only after the mention exists, so a mention
+    can never be left pointing at a spelling while missing its own entity.
     """
     written = tx.run(
         f"""
@@ -1484,6 +1603,26 @@ def _write_mention(tx, mention: "WriteMention") -> None:
         raise ValueError(
             f"mention endpoint missing: {mention.entity_id} in {mention.section_id}"
         )
+
+    for use in mention.uses:
+        linked = tx.run(
+            f"""
+            MATCH (m:Mention {{id:$id}}), (a:{ALIAS_LABEL} {{name:$name}})
+            MERGE (m)-[u:{USES_ALIAS}]->(a)
+            SET u.occurrences = $occurrences, u.plane = $plane
+            RETURN count(u) AS c
+            """,
+            {
+                "id": mention.id,
+                "name": use.name,
+                "occurrences": use.occurrences,
+                "plane": CANON_PLANE,
+            },
+        ).single()["c"]
+        if not linked:
+            raise ValueError(
+                f"alias {use.name!r} used by {mention.id} is not in the graph"
+            )
 
 
 def _write_edge(tx, edge: WriteEdge) -> None:
@@ -1513,15 +1652,26 @@ def _write_edge(tx, edge: WriteEdge) -> None:
         )
 
 
-def _known_entities(tx) -> list[tuple[str, str]]:
-    """`(id, name)` for every canon entity the graph holds, this chapter's included.
+def _known_entities(tx) -> list["EntityNames"]:
+    """Every canon entity the graph holds and every name it answers to.
 
-    Read INSIDE the write transaction, after this chapter's nodes have landed, so
-    the scan sees both the entities this chapter minted and every entity an
-    earlier chapter did. An entity is global to the book: chapter 3 naming Castle
-    Ravenloft is a fact about chapter 3 whichever chapter minted the castle, and
-    scanning only the chapter's own plan would rebuild, one level up, the very
-    defect this replaces.
+    Read INSIDE the write transaction, after this chapter's nodes and aliases
+    have landed, so the scan sees both the entities this chapter minted and every
+    entity an earlier chapter did. An entity is global to the book: chapter 3
+    naming Castle Ravenloft is a fact about chapter 3 whichever chapter minted
+    the castle, and scanning only the chapter's own plan would rebuild, one level
+    up, the very defect this replaces.
+
+    The names come through `ALIAS_OF` and nowhere else -- ONE path, which is the
+    whole reason an entity's canonical name is itself an `:Alias`. Reading
+    `e.name` here as well and unioning would be the second path the design
+    refuses: two sources for "what is this called", free to disagree about a
+    renamed node. `_BACKFILL_ALIASES` has run by this point, so the union is
+    total by construction rather than by hope.
+
+    An entity that arrives here with NO alias is refused. It would contribute no
+    mentions and be unreachable by name -- a silent zero, and the failure mode
+    this module exists to remove.
 
     The converse does not hold and is a stated limitation: writing chapter 4 does
     not re-scan chapter 3's sections, so an entity chapter 4 introduces gets no
@@ -1530,16 +1680,32 @@ def _known_entities(tx) -> list[tuple[str, str]]:
     is a re-migration rather than a cross-chapter write that would break the
     one-transaction-per-chapter rule.
     """
-    return [
-        (record["id"], record["name"])
-        for record in tx.run(
-            "MATCH (e:Entity {plane:$plane}) RETURN e.id AS id, e.name AS name",
-            {"plane": CANON_PLANE},
+    from backend.canon.spine import EntityNames
+
+    known: list[EntityNames] = []
+    nameless: list[str] = []
+    for record in tx.run(
+        f"""
+        MATCH (e:Entity {{plane:$plane}})
+        OPTIONAL MATCH (a:{ALIAS_LABEL})-[:{ALIAS_OF}]->(e)
+        RETURN e.id AS id, e.name AS name, collect(DISTINCT a.name) AS aliases
+        """,
+        {"plane": CANON_PLANE},
+    ):
+        aliases = tuple(sorted(n for n in record["aliases"] if n))
+        if not aliases:
+            nameless.append(record["id"])
+            continue
+        known.append(EntityNames(id=record["id"], name=record["name"], aliases=aliases))
+    if nameless:
+        raise ValueError(
+            f"{len(nameless)} canon entities carry no :Alias and can never be "
+            f"found by name: {', '.join(sorted(nameless)[:5])}"
         )
-    ]
+    return known
 
 
-def _write_tx(tx, chapter_slug: str, nodes, edges, spine, replace: bool) -> dict:
+def _write_tx(tx, chapter_slug: str, nodes, edges, spine, aliases, replace: bool) -> dict:
     """The whole chapter, in one transaction. Commit or roll back.
 
     The existing-chapter check lives INSIDE the transaction on purpose: read it
@@ -1555,6 +1721,12 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, replace: bool) -> dict
     without its mentions would look half-unwritten. The scan itself is pure --
     `spine.scan_mentions`, deterministic, no model, no cost -- and every rule it
     applies is pinned without a database.
+
+    THE ALIASES LAND BEFORE THE SCAN, for the identical reason. The scan looks
+    for an entity under every name `ALIAS_OF` records, so aliases written after
+    it would produce a chapter whose mentions were found under last week's set
+    of names -- and would take a second write to correct, which is the two-pass
+    write this module refuses.
     """
     # Imported here rather than at module scope: `spine` imports `mint_id` and
     # `BOOK` from this module, so a top-level import would close the cycle.
@@ -1573,6 +1745,9 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, replace: bool) -> dict
 
     for node in nodes:
         _write_node(tx, node)
+    for alias in aliases:
+        _write_alias(tx, alias)
+    tx.run(_BACKFILL_ALIASES, {"plane": CANON_PLANE})
     _write_spine(tx, spine)
     for edge in edges:
         _write_edge(tx, edge)
@@ -1585,10 +1760,12 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, replace: bool) -> dict
     return {
         "nodes": len(nodes),
         "edges": len(edges),
+        "aliases": len(aliases),
         "sections": len(spine.sections),
         "describes": len(spine.describes),
         "mentions": len(mentions),
         "scanned_entities": len(entities),
+        "alias_uses": sum(len(m.uses) for m in mentions),
         # The census the design asks for, computed where the mentions are so a
         # caller cannot report a different set from the one that was written.
         "mention_counts": _mention_census(mentions, entities),
@@ -1597,7 +1774,7 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, replace: bool) -> dict
     }
 
 
-def _mention_census(mentions, entities: list[tuple[str, str]]) -> list[tuple[str, int]]:
+def _mention_census(mentions, entities: list["EntityNames"]) -> list[tuple[str, int]]:
     """`(name, mentions)` for this chapter, most-mentioned first.
 
     Printed on every write BECAUSE junk is not filtered out of the scan. A
@@ -1606,7 +1783,7 @@ def _mention_census(mentions, entities: list[tuple[str, str]]) -> list[tuple[str
     """
     from backend.canon.spine import mention_counts
 
-    return mention_counts(mentions, dict(entities))
+    return mention_counts(mentions, {e.id: e.name for e in entities})
 
 
 def write_chapter(
@@ -1615,10 +1792,11 @@ def write_chapter(
     nodes: list[WriteNode],
     edges: list[WriteEdge],
     spine: "ChapterSpine",
+    aliases: "list[WriteAlias] | None" = None,
     *,
     replace: bool = False,
 ) -> dict:
-    """Write one chapter's canon and its spine in a single transaction.
+    """Write one chapter's canon, its spine and its aliases in one transaction.
 
     `session.execute_write` commits when the unit of work returns and rolls back
     when it raises, so a failure anywhere -- a missing endpoint, a constraint,
@@ -1629,5 +1807,14 @@ def write_chapter(
     that skipped the spine would commit nodes into a chapter that then reads as
     unwritten, which is precisely the half-committed state this whole module is
     built to make impossible.
+
+    `aliases` is OPTIONAL, and that is not the same concession. It is the
+    HAND-AUTHORED extra spellings, and a chapter for which nobody has authored
+    any is the ordinary case -- eleven entries cover the whole book. Every
+    entity still gets its own name as an `:Alias` regardless, from
+    `_BACKFILL_ALIASES` inside the transaction, so the invariant lookup rests on
+    does not depend on a caller remembering to pass anything.
     """
-    return session.execute_write(_write_tx, chapter_slug, nodes, edges, spine, replace)
+    return session.execute_write(
+        _write_tx, chapter_slug, nodes, edges, spine, aliases or [], replace
+    )

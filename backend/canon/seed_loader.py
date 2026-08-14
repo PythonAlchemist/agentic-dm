@@ -194,6 +194,85 @@ def load_artifacts(path: str | Path = LOCATION_SUBTYPE_SEED) -> frozenset[str]:
     return frozenset(slugs)
 
 
+def validate_aliases(data: dict) -> list[str]:
+    """Return human-readable problems with the alias block.
+
+    Three refusals, each catching a failure that is silent in the graph:
+
+    * a missing or unslugifiable name can never be matched against an entity,
+      so the aliases under it would never reach one;
+    * an alias that slugifies to nothing can never be an `:Alias` node, and the
+      spelling it was meant to record would read exactly like one nobody
+      authored;
+    * two entries reaching one slug with DIFFERENT sets of spellings is a
+      contradiction a dict would resolve by keeping whichever came last. Two
+      entries agreeing is not a problem -- the same name written twice is the
+      same claim.
+    """
+    problems: list[str] = []
+    claimed: dict[str, frozenset[str]] = {}
+
+    for entry in data.get("aliases", []):
+        name = entry.get("name")
+        spellings = entry.get("aliases") or []
+        if not name:
+            problems.append(f"alias entry missing name: {entry}")
+            continue
+        if not spellings:
+            problems.append(f"alias entry for {name!r} records no spellings: {entry}")
+        for spelling in spellings:
+            if not spelling or not slugify(spelling):
+                problems.append(f"alias {spelling!r} slugifies to nothing: {entry}")
+
+        forms = frozenset([name, *spellings])
+        for key in [name, *spellings]:
+            slug = slugify(key) if key else ""
+            if not slug:
+                problems.append(f"name {key!r} slugifies to nothing: {entry}")
+                continue
+            if slug in claimed and claimed[slug] != forms:
+                problems.append(
+                    f"{slug!r} is claimed by two alias entries, as "
+                    f"{sorted(claimed[slug])} and {sorted(forms)}"
+                )
+            claimed[slug] = forms
+
+    return problems
+
+
+def load_aliases(path: str | Path = LOCATION_SUBTYPE_SEED) -> dict[str, tuple[str, ...]]:
+    """The authored surface forms, keyed on the slug of every spelling.
+
+    The same seed as the location rungs and the artifact list, read the same way
+    and handed to a pure planner the same way: one hand-authored file and one
+    mechanism, because three mechanisms for three kinds of authored claim is
+    three things that drift.
+
+    Keyed on the slug of the entry's `name` AND of every alias under it, the way
+    `load_location_subtypes` is. That is what lets one entry cover a straight and
+    a curly apostrophe, and what lets `The Village of Barovia` be found whether
+    the extractor's provenance tiebreak minted the node under that spelling or
+    under `Village of Barovia`.
+
+    The VALUE is every spelling in the entry, canonical included, because the
+    entity's own name may be any of them. `plan_aliases` unions the node's real
+    name in and deduplicates, so an entry cannot cost an entity its own name.
+
+    Returns a plain mapping and touches no database.
+    """
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    problems = validate_aliases(data)
+    if problems:
+        raise ValueError("invalid alias seed:\n  " + "\n  ".join(problems))
+
+    authored: dict[str, tuple[str, ...]] = {}
+    for entry in data.get("aliases", []):
+        forms = tuple(dict.fromkeys([entry["name"], *(entry.get("aliases") or [])]))
+        for key in forms:
+            authored[slugify(key)] = forms
+    return authored
+
+
 def extractable_subset(data: dict, source: str = DEFAULT_SOURCE) -> dict:
     """The nodes and edges an extraction run over `source` should be graded against.
 

@@ -37,10 +37,18 @@ junk MORE visible, not less, the same way merging duplicate nodes did. Report th
 top entities by mention count and anything absurd surfaces immediately; suppress
 them and the graph merely looks tidy.
 
-`:Alias` is deliberately absent. Aliases are hand-authored and land in a separate
-piece of work, and `:Mention` is shaped so that arriving is purely additive: a
-mention is one node per (entity, section) with no `surface` scalar on it, so
-`USES_ALIAS` edges attach to nodes that already exist rather than reshaping them.
+**An entity is matched under every RECORDED name it has**, canonical or alias,
+and `backend/canon/aliases.py` holds the rule for what counts as one. That is
+what takes Strahd from one mention in chapter 3 to eight: the aliases are
+authored by hand, and the matcher below is untouched by their arrival. Nothing
+here infers that `Strahd` and `Strahd von Zarovich` are the same person -- a
+human wrote it down.
+
+Where two recorded names hit the SAME RUN OF TEXT, the longer one wins and the
+occurrence is counted once. `Strahd` matches inside `Strahd von Zarovich`, and a
+section that spells him out in full said his name once, not twice. Nothing about
+that is a similarity judgment: both spans are exact whole-word matches, and the
+only decision is which of two exact matches to attribute an overlap to.
 """
 
 from __future__ import annotations
@@ -144,16 +152,51 @@ class WriteSection:
 
 
 @dataclass(frozen=True)
-class WriteMention:
-    """One entity, named in one section, with the words that say so.
+class EntityNames:
+    """An entity and every surface form recorded for it.
 
-    NO `surface` property, and its absence is a design decision rather than an
-    omission. A mention can eventually be made under several names at once --
-    "the devil Strahd" and "Strahd von Zarovich" in one section -- so which names
-    were used is a set, and a set belongs on edges (`USES_ALIAS`) rather than in
-    a scalar that would have to pick one. Aliases are a separate piece of work,
-    and shaping the node this way is what makes them additive to it.
+    `name` is what the census prints and what `:Entity.name` holds; `aliases` is
+    what `ALIAS_OF` records, which INCLUDES the canonical name in the graph.
+    `forms` deduplicates the two, so a caller cannot construct an entity the
+    scan will not look for under its own name -- the silent zero this module
+    exists to remove.
     """
+
+    id: str
+    name: str
+    aliases: tuple[str, ...] = ()
+
+    @property
+    def forms(self) -> tuple[str, ...]:
+        """The canonical name first, then every alias, deduplicated exactly.
+
+        Exactly, not by `normalize`: `Bildrath's Mercantile` and
+        `Bildrath’s Mercantile` are two surface forms that normalize alike, and
+        which one a section set is the thing `USES_ALIAS` is for.
+        """
+        seen: dict[str, None] = {}
+        for form in (self.name, *self.aliases):
+            seen.setdefault(form, None)
+        return tuple(seen)
+
+
+@dataclass(frozen=True)
+class AliasUse:
+    """One surface form the book used at one mention, and how often.
+
+    An edge rather than a property, which is why `WriteMention` has never had a
+    `surface` scalar: a section can name someone under two spellings at once --
+    "the devil Strahd" and "Strahd von Zarovich" -- so which names were used is
+    a SET, and a scalar would have to pick one of them and throw the rest away.
+    """
+
+    name: str
+    occurrences: int
+
+
+@dataclass(frozen=True)
+class WriteMention:
+    """One entity, named in one section, with the words that say so."""
 
     id: str
     entity_id: str
@@ -162,11 +205,15 @@ class WriteMention:
     #: A literal substring of the section, never assembled or elided -- see
     #: `evidence_span`.
     evidence: str
-    #: How many times the name occurs in this section. The mention is still one
+    #: How many times the entity is named in this section, counting a run of
+    #: text once however many recorded forms match it. The mention is still one
     #: node; this says how loudly the section says it.
     occurrences: int
     #: Character offset of the FIRST occurrence, into the section's own text.
     offset: int
+    #: Which surface forms did the naming, most-used first. Empty is impossible
+    #: for a scanned mention -- something matched, or there would be no mention.
+    uses: tuple[AliasUse, ...] = ()
 
     @property
     def properties(self) -> dict:
@@ -343,18 +390,88 @@ def evidence_span(text: str, start: int, end: int) -> str:
     return text[low:high].strip()
 
 
+def _spell_rank(form: str, raw: str) -> int:
+    """How closely a recorded form spells the text it matched. Lower is closer.
+
+    Three tiers, and every one of them is an EXACT string equality under a
+    transformation named in full above -- there is no distance here and there
+    must never be one:
+
+    0. identical, character for character, typography and case included;
+    1. identical once U+2019 is folded -- the ASCII form of a curly possessive;
+    2. identical once case is also dropped, which is the only way a multi-word
+       form can match text it does not equal.
+
+    Every form that matched a span reaches tier 2 by construction, so this
+    refines an attribution rather than deciding one.
+    """
+    if form == raw:
+        return 0
+    if fold_apostrophe(form) == fold_apostrophe(raw):
+        return 1
+    return 2
+
+
+def attribute_spans(
+    text: str, folded: str, forms: Sequence[str]
+) -> list[tuple[int, int, str]]:
+    """The occurrences of an entity in one section, one form per run of text.
+
+    Returns `(start, end, form)` in reading order, over `text`'s own offsets.
+
+    TWO RULES, AND NEITHER IS A SIMILARITY JUDGMENT.
+
+    **The longest match wins an overlap.** `Strahd` matches inside `Strahd von
+    Zarovich`, so a section that spells him out in full produces two exact
+    whole-word matches over one run of text -- and the section named him once.
+    Counting both would make `occurrences` a count of recorded aliases rather
+    than of appearances, and would put a `USES_ALIAS` edge on a spelling the
+    book did not use. Ties in length go to the earlier span, then to the
+    alphabetically first form, so the output is fully determined.
+
+    **A span attributes to the form that spells it best**, by `_spell_rank`.
+    Both `Bildrath's Mercantile` and `Bildrath’s Mercantile` match the book's
+    curly setting -- the scan folds -- and only one of them is what the section
+    actually says.
+    """
+    by_span: dict[tuple[int, int], list[str]] = {}
+    for form in forms:
+        pattern = mention_pattern(form)
+        if pattern is None:
+            continue
+        for match in pattern.finditer(folded):
+            by_span.setdefault((match.start(), match.end()), []).append(form)
+
+    chosen = {
+        span: min(candidates, key=lambda f: (_spell_rank(f, text[span[0]:span[1]]), f))
+        for span, candidates in by_span.items()
+    }
+
+    kept: list[tuple[int, int, str]] = []
+    taken: list[tuple[int, int]] = []
+    for start, end in sorted(chosen, key=lambda s: (s[0] - s[1], s[0], chosen[s])):
+        if any(start < high and low < end for low, high in taken):
+            continue
+        taken.append((start, end))
+        kept.append((start, end, chosen[(start, end)]))
+    return sorted(kept)
+
+
 def scan_mentions(
     sections: Iterable[WriteSection],
-    entities: Iterable[tuple[str, str]],
+    entities: Iterable[EntityNames],
     chapter_slug: str,
 ) -> list[WriteMention]:
     """Every (entity, section) pair the text supports, with its evidence.
 
-    `entities` is `(id, name)` for every canon entity the graph knows -- not only
-    this chapter's. An entity is global to the book, so chapter 3 naming Castle
-    Ravenloft is a fact about chapter 3 whatever chapter minted the castle, and
-    scanning only the chapter's own nodes would rebuild the defect this replaces
-    one level up.
+    `entities` is every canon entity the graph knows -- not only this chapter's.
+    An entity is global to the book, so chapter 3 naming Castle Ravenloft is a
+    fact about chapter 3 whatever chapter minted the castle, and scanning only
+    the chapter's own nodes would rebuild the defect this replaces one level up.
+
+    Each entity is looked for under EVERY form recorded for it, which is where
+    the eight comes from and the only reason the number moves. The matcher is
+    the same one, applied once per form.
 
     ORDERED BY (section, entity id), not by whatever order the caller or a Cypher
     result happened to arrive in. A diff between two runs then reads as a diff of
@@ -363,32 +480,34 @@ def scan_mentions(
     Nothing is filtered. See the module docstring: junk mentions make junk
     entities visible, and that is the point of not having a filter here.
     """
-    ordered_entities = sorted(set(entities))
-    patterns = [
-        (entity_id, pattern)
-        for entity_id, name in ordered_entities
-        if (pattern := mention_pattern(name)) is not None
-    ]
+    ordered_entities = sorted(set(entities), key=lambda e: e.id)
 
     mentions: list[WriteMention] = []
     for section in sections:
-        # Folded once per section rather than once per entity: a single-character
+        # Folded once per section rather than once per form: a single-character
         # substitution, so every offset below indexes `section.text` unchanged.
         folded = fold_apostrophe(section.text)
-        for entity_id, pattern in patterns:
-            hits = list(pattern.finditer(folded))
-            if not hits:
+        for entity in ordered_entities:
+            spans = attribute_spans(section.text, folded, entity.forms)
+            if not spans:
                 continue
-            first = hits[0]
+            start, end, _ = spans[0]
+            used = Counter(form for _, _, form in spans)
             mentions.append(
                 WriteMention(
-                    id=mention_id(entity_id, section.id),
-                    entity_id=entity_id,
+                    id=mention_id(entity.id, section.id),
+                    entity_id=entity.id,
                     section_id=section.id,
                     chapter_slug=chapter_slug,
-                    evidence=evidence_span(section.text, first.start(), first.end()),
-                    occurrences=len(hits),
-                    offset=first.start(),
+                    evidence=evidence_span(section.text, start, end),
+                    occurrences=len(spans),
+                    offset=start,
+                    # Most-used first, ties by name: a stable order, and the
+                    # form the section leans on reads first.
+                    uses=tuple(
+                        AliasUse(name=form, occurrences=count)
+                        for form, count in sorted(used.items(), key=lambda p: (-p[1], p[0]))
+                    ),
                 )
             )
     return mentions
