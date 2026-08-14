@@ -5,14 +5,17 @@ records calls passes whether or not the calls shared a transaction, which is
 precisely the bug. Every test here runs against the live local database and is
 marked `neo4j`, which the suite deselects by default.
 
-Test chapters use slugs prefixed `pytest-`, so the fixture's cleanup can never
-reach a real chapter's canon.
+Test nodes carry the `pytest:` BOOK prefix in their ids rather than `cos:`, so
+the fixture's cleanup can never reach a real chapter's canon -- and, now that
+ids are global to a book, a test node named `Church` can never MERGE onto the
+real book's. Test chapters are additionally slugged `pytest-`.
 """
 
 from dataclasses import replace
 
 import pytest
 
+from backend.canon.assembler import slugify
 from backend.canon.writer import (
     CANON_PLANE,
     CampaignDataAttached,
@@ -21,7 +24,6 @@ from backend.canon.writer import (
     WriteNode,
     count_canon_nodes,
     ensure_schema,
-    mint_id,
     write_chapter,
 )
 from backend.core.database import neo4j_session
@@ -36,14 +38,18 @@ TEST_ID_PREFIX = "pytest:"
 
 
 def _clean(session) -> None:
+    """Ids are GLOBAL now, so a test node named `Church` would MERGE onto the
+    real book's Church and this cleanup would then delete it. Every test node
+    therefore carries the `pytest:` book prefix instead of `cos:`, and cleanup
+    reaches nothing else."""
     session.run(
-        """
-        MATCH (n:Entity)
-        WHERE n.chapter_slug IN $slugs OR n.id STARTS WITH $prefix
-        DETACH DELETE n
-        """,
-        {"slugs": [CHAPTER_A, CHAPTER_B], "prefix": TEST_ID_PREFIX},
+        "MATCH (n:Entity) WHERE n.id STARTS WITH $prefix DETACH DELETE n",
+        {"prefix": TEST_ID_PREFIX},
     )
+    session.run("MATCH (c:Chapter) WHERE c.slug IN $slugs DETACH DELETE c", {"slugs": SLUGS})
+
+
+SLUGS = [CHAPTER_A, CHAPTER_B]
 
 
 @pytest.fixture
@@ -56,11 +62,23 @@ def graph():
         _clean(session)
 
 
-def node(name: str, chapter_slug: str = CHAPTER_A, entity_type: str = "LOCATION") -> WriteNode:
+def ident(name: str, key: str = "", chapter_slug: str = CHAPTER_A) -> str:
+    """`mint_id`'s shape under the `pytest:` book -- see `_clean`."""
+    if key:
+        return f"{TEST_ID_PREFIX}{chapter_slug}:{key.lower()}-{slugify(name)}"
+    return f"{TEST_ID_PREFIX}{slugify(name)}"
+
+
+def node(
+    name: str,
+    chapter_slug: str = CHAPTER_A,
+    entity_type: str = "LOCATION",
+    key: str = "",
+) -> WriteNode:
     return WriteNode(
-        id=mint_id(chapter_slug, entity_type, name),
+        id=ident(name, key, chapter_slug),
         name=name,
-        entity_type=entity_type,
+        entity_types=(entity_type,),
         chapter_slug=chapter_slug,
         section_heading="E5. Church",
         section_index=3,
@@ -175,8 +193,8 @@ class TestStatusInTheGraph:
         write_chapter(graph, CHAPTER_A, [accepted, node("Gertruda", entity_type="NPC")], [])
 
         rows = graph.run(
-            "MATCH (n:Entity {chapter_slug:$slug}) RETURN n.name AS name, n.status AS status "
-            "ORDER BY name",
+            "MATCH (n:Entity)-[:MENTIONED_IN]->(:Chapter {slug:$slug}) "
+            "RETURN n.name AS name, n.status AS status ORDER BY name",
             {"slug": CHAPTER_A},
         ).data()
         assert rows == [
@@ -277,7 +295,7 @@ class TestRewriteRefusal:
         assert count_canon_nodes(graph, CHAPTER_A) == 1
         assert graph.run(
             "MATCH (n:Entity {id:$id}) RETURN count(n) AS c",
-            {"id": mint_id(CHAPTER_A, "LOCATION", "Undercroft")},
+            {"id": ident("Undercroft")},
         ).single()["c"] == 0
 
     def test_an_empty_chapter_is_not_a_written_one(self, graph):
@@ -289,14 +307,14 @@ class TestRewriteRefusal:
 class TestReplace:
     def test_replace_removes_only_that_chapters_canon(self, graph):
         a_church = node("Church", CHAPTER_A)
-        b_church = node("Church", CHAPTER_B)
+        b_chapel = node("Chapel", CHAPTER_B)
         b_undercroft = node("Undercroft", CHAPTER_B)
         write_chapter(graph, CHAPTER_A, [a_church], [])
         write_chapter(
             graph,
             CHAPTER_B,
-            [b_church, b_undercroft],
-            [link(b_undercroft, b_church, chapter_slug=CHAPTER_B)],
+            [b_chapel, b_undercroft],
+            [link(b_undercroft, b_chapel, chapter_slug=CHAPTER_B)],
         )
 
         summary = write_chapter(graph, CHAPTER_A, [node("Crypt", CHAPTER_A)], [], replace=True)
@@ -306,8 +324,8 @@ class TestReplace:
         assert graph.run(
             "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": a_church.id}
         ).single()["c"] == 0
-        # Chapter B is a different chapter of the same book, and same-named
-        # rooms in two chapters are two rooms.
+        # Chapter B named different entities, and nothing about replacing A
+        # reaches them.
         assert count_canon_nodes(graph, CHAPTER_B) == 2
         assert (
             graph.run(
@@ -412,24 +430,210 @@ class TestReplace:
         )
 
 
-class TestChapterScoping:
-    def test_two_chapters_same_room_are_two_nodes(self, graph):
-        a = node("Chapel", CHAPTER_A)
-        b = node("Chapel", CHAPTER_B)
+class TestTypeIsALabel:
+    """`MATCH (n:NPC)` rather than `MATCH (n:Entity {entity_type:'NPC'})`.
+
+    A label is what Neo4j indexes, what the browser colours by, and -- unlike a
+    scalar property -- what can hold two readings of a disputed type at once.
+    """
+
+    def test_the_type_is_a_label(self, graph):
+        eva = node("Madam Eva", entity_type="NPC")
+        write_chapter(graph, CHAPTER_A, [eva], [])
+
+        assert graph.run(
+            "MATCH (n:NPC {id:$id}) RETURN count(n) AS c", {"id": eva.id}
+        ).single()["c"] == 1
+
+    def test_the_type_is_not_also_a_property(self, graph):
+        eva = node("Madam Eva", entity_type="NPC")
+        write_chapter(graph, CHAPTER_A, [eva], [])
+
+        assert graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN n.entity_type AS t", {"id": eva.id}
+        ).single()["t"] is None
+
+    def test_a_disputed_type_is_one_node_wearing_both_labels(self, graph):
+        barovia = replace(node("Barovia"), entity_types=("LOCATION", "SETTING"))
+        write_chapter(graph, CHAPTER_A, [barovia], [])
+
+        rows = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": barovia.id}
+        ).data()
+        assert len(rows) == 1
+        assert sorted(rows[0]["labels"]) == ["Entity", "LOCATION", "SETTING"]
+
+    def test_entity_still_finds_everything(self, graph):
+        """The `:Entity` label is kept so existing whole-graph queries survive."""
+        write_chapter(graph, CHAPTER_A, [node("Madam Eva", entity_type="NPC")], [])
+        assert count_canon_nodes(graph, CHAPTER_A) == 1
+
+
+class TestLocationSubtypeIsALabel:
+    """A rung of the spatial hierarchy, beside `:LOCATION` and never instead.
+
+    `:LOCATION` is what makes "every place" a one-word query, and it stays on
+    every one of them. The subtype narrows it: `MATCH (n:AREA)` is every room.
+    """
+
+    def area(self, name: str = "Chapel", subtype: str = "AREA") -> WriteNode:
+        return replace(node(name), location_subtype=subtype)
+
+    def test_the_subtype_lands_beside_location(self, graph):
+        chapel = self.area()
+        write_chapter(graph, CHAPTER_A, [chapel], [])
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": chapel.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["AREA", "Entity", "LOCATION"]
+
+    def test_an_unclassified_place_gets_no_rung(self, graph):
+        """No default: a place with no derivable and no authored subtype must be
+        visibly unclassified rather than quietly filed somewhere."""
+        castle = node("Castle Ravenloft")
+        write_chapter(graph, CHAPTER_A, [castle], [])
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": castle.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["Entity", "LOCATION"]
+
+    def test_a_place_wears_exactly_one_rung(self, graph):
+        """A place reclassified must not end up wearing both rungs. `SET`
+        unions, so the write has to clear the rungs it is replacing.
+
+        Two CHAPTERS, not a `--replace` of one. A replace deletes the node and
+        writes it fresh, so the old labels go with the node and the REMOVE is
+        never exercised -- the version of this test that did that passed with
+        the REMOVE clause deleted, which is a test that cannot fail.
+
+        The scenario is real: an unkeyed place is one global node, and editing
+        its authored rung (`Vallaki` REGION to SETTLEMENT) re-labels a node that
+        every other chapter naming it keeps alive.
+        """
+        first = self.area("Vallaki", "SETTLEMENT")
+        write_chapter(graph, CHAPTER_A, [first], [])
+        write_chapter(
+            graph,
+            CHAPTER_B,
+            [replace(first, chapter_slug=CHAPTER_B, location_subtype="REGION")],
+            [],
+        )
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": first.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["Entity", "LOCATION", "REGION"]
+
+    def test_the_superseded_rung_is_gone_not_merely_outnumbered(self, graph):
+        """Stated as its own assertion because the one above passes on a node
+        wearing `:REGION:SETTLEMENT` if the reader only checks membership."""
+        first = self.area("Vallaki", "SETTLEMENT")
+        write_chapter(graph, CHAPTER_A, [first], [])
+        write_chapter(
+            graph,
+            CHAPTER_B,
+            [replace(first, chapter_slug=CHAPTER_B, location_subtype="REGION")],
+            [],
+        )
+
+        assert graph.run(
+            "MATCH (n:SETTLEMENT {id:$id}) RETURN count(n) AS c", {"id": first.id}
+        ).single()["c"] == 0
+
+    def test_a_chapter_that_says_nothing_about_the_rung_leaves_it_alone(self, graph):
+        """A chapter merely MENTIONING a place must not strip the rung the
+        chapter that is ABOUT it established. Only a write that HAS a rung
+        clears, which is why the REMOVE is conditional.
+
+        `Vallaki` unkeyed is one global node. Chapter 5 is about it and writes
+        SITE; chapter 3 names it in passing, derives nothing, and writes the
+        same id. Whichever lands second must not be the one that decides.
+        """
+        about = self.area("Vallaki", "SITE")
+        write_chapter(graph, CHAPTER_A, [about], [])
+        write_chapter(graph, CHAPTER_B, [node("Vallaki", CHAPTER_B)], [])
+
+        labels = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": about.id}
+        ).single()["labels"]
+        assert sorted(labels) == ["Entity", "LOCATION", "SITE"]
+
+    def test_every_place_is_still_one_word_away(self, graph):
+        write_chapter(
+            graph,
+            CHAPTER_A,
+            [self.area(), self.area("Church", "SITE"), node("Castle Ravenloft")],
+            [],
+        )
+
+        found = graph.run(
+            "MATCH (n:LOCATION {plane:$plane}) WHERE n.id STARTS WITH $prefix "
+            "RETURN count(n) AS c",
+            {"plane": CANON_PLANE, "prefix": TEST_ID_PREFIX},
+        ).single()["c"]
+        assert found == 3
+
+
+class TestGlobalEntities:
+    def test_one_npc_named_by_two_chapters_is_one_node(self, graph):
+        a = node("Madam Eva", CHAPTER_A, "NPC")
+        b = node("Madam Eva", CHAPTER_B, "NPC")
+        write_chapter(graph, CHAPTER_A, [a], [])
+        write_chapter(graph, CHAPTER_B, [b], [])
+
+        assert a.id == b.id
+        assert graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": a.id}
+        ).single()["c"] == 1
+
+    def test_a_second_chapter_adds_an_edge_rather_than_a_node(self, graph):
+        write_chapter(graph, CHAPTER_A, [node("Madam Eva", CHAPTER_A, "NPC")], [])
+        write_chapter(graph, CHAPTER_B, [node("Madam Eva", CHAPTER_B, "NPC")], [])
+
+        slugs = graph.run(
+            """
+            MATCH (n:Entity {id:$id})-[:MENTIONED_IN]->(c:Chapter)
+            RETURN c.slug AS slug ORDER BY slug
+            """,
+            {"id": ident("Madam Eva")},
+        ).value()
+        assert slugs == [CHAPTER_A, CHAPTER_B]
+
+    def test_a_keyed_place_in_two_chapters_is_still_two_rooms(self, graph):
+        """`K61a. Empty Cell` and a same-named cell in another chapter are not
+        one room, and merging them by name would delete an edge."""
+        a = node("Empty Cell", CHAPTER_A, key="K61a")
+        b = node("Empty Cell", CHAPTER_B, key="K61a")
         write_chapter(graph, CHAPTER_A, [a], [])
         write_chapter(graph, CHAPTER_B, [b], [])
 
         assert a.id != b.id
-        # Scoped to the test chapters: a real chapter's canon may be in this
-        # database, and it has a `Chapel` of its own.
-        assert (
-            graph.run(
-                """
-                MATCH (n:Entity)
-                WHERE n.name = 'Chapel' AND n.plane = $plane AND n.chapter_slug IN $slugs
-                RETURN count(n) AS c
-                """,
-                {"plane": CANON_PLANE, "slugs": [CHAPTER_A, CHAPTER_B]},
-            ).single()["c"]
-            == 2
-        )
+        assert graph.run(
+            "MATCH (n:Entity) WHERE n.id STARTS WITH $p AND n.name = 'Empty Cell' "
+            "RETURN count(n) AS c",
+            {"p": TEST_ID_PREFIX},
+        ).single()["c"] == 2
+
+    def test_the_appearance_carries_the_section_it_was_read_in(self, graph):
+        write_chapter(graph, CHAPTER_A, [node("Madam Eva", entity_type="NPC")], [])
+
+        props = graph.run(
+            "MATCH (:Entity {id:$id})-[m:MENTIONED_IN]->(:Chapter {slug:$slug}) "
+            "RETURN properties(m) AS p",
+            {"id": ident("Madam Eva"), "slug": CHAPTER_A},
+        ).single()["p"]
+        assert props == {"section_heading": "E5. Church", "section_index": 3}
+
+    def test_replacing_one_chapter_keeps_a_node_another_chapter_still_names(self, graph):
+        write_chapter(graph, CHAPTER_A, [node("Madam Eva", CHAPTER_A, "NPC")], [])
+        write_chapter(graph, CHAPTER_B, [node("Madam Eva", CHAPTER_B, "NPC")], [])
+
+        write_chapter(graph, CHAPTER_B, [node("Strahd", CHAPTER_B, "NPC")], [], replace=True)
+
+        assert graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": ident("Madam Eva")}
+        ).single()["c"] == 1
+        assert count_canon_nodes(graph, CHAPTER_A) == 1
+        assert count_canon_nodes(graph, CHAPTER_B) == 1

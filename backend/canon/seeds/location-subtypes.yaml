@@ -1,0 +1,57 @@
+# Curse of Strahd -- the hand-authored half of the LOCATION hierarchy.
+#
+# Only REGION, SETTLEMENT and WILD appear here. SITE and AREA are DERIVED from
+# the book's own key convention -- an unsuffixed key like `E5` is a building, a
+# suffixed one like `E5g` is a room inside it -- and the loader refuses either
+# of them in this file. A hand-authored SITE would be a human guessing at
+# something the deterministic layer already answers, and that layer is the only
+# part of this pipeline that has never been wrong.
+#
+# Nothing infers these from a name. "Village of" would classify Barovia and
+# then mislabel the next book's Villagers' Rest; a wrong rung is worse than no
+# rung because it is indistinguishable in the graph from a checked one. A place
+# absent from this file and unreachable by a key stays plain `:LOCATION`, on
+# purpose: an unclassified place must be visibly unclassified.
+#
+# Matched on the SLUG of the name, the way `mint_id` mints ids, so a straight
+# and a curly apostrophe are one entry. `aliases` exists for the case where the
+# extractor's spelling and the chapter title's genuinely differ -- listing both
+# by hand is authorship, not a fuzzy match.
+#
+# Roughly fifteen entries covers the whole book. This is not a place to be
+# thorough; it is a place to be right.
+
+locations:
+  # --- The land itself ---
+  - name: Barovia
+    subtype: REGION
+    note: >-
+      The valley, the domain, and the mist-walled demiplane. The extractor also
+      types this SETTING in places, which is a disagreement about a label rather
+      than about the world -- the node wears both, and this rung sits beside them.
+
+  # --- Settlements ---
+  # The village and the valley share a name in the book's prose. They are not
+  # the same place, and only the longer form ever names the village.
+  - name: Village of Barovia
+    aliases:
+      # The chapter title, which is what `place_from_chapter_title` yields and
+      # therefore what the chapter's own place node is called.
+      - The Village of Barovia
+    subtype: SETTLEMENT
+  - name: Vallaki
+    subtype: SETTLEMENT
+  - name: Krezk
+    aliases:
+      - Village of Krezk
+    subtype: SETTLEMENT
+
+  # --- Wilderness ---
+  - name: Svalich Woods
+    subtype: WILD
+  - name: Old Svalich Road
+    subtype: WILD
+  - name: Tsolenka Pass
+    subtype: WILD
+  - name: Yester Hill
+    subtype: WILD

@@ -61,8 +61,8 @@ def seeded(graph):
         CREATE (anchor)-[:KNOWS {layer:'social', revealed_in_session:1}]->(future)
 
         // Canon, never instantiated by this table
-        CREATE (canon:Entity {id:'pytest:loc:canon-spoiler', name:'Canon Spoiler',
-                              entity_type:'LOCATION', plane:'canon'})
+        CREATE (canon:Entity:LOCATION {id:'pytest:loc:canon-spoiler', name:'Canon Spoiler',
+                              plane:'canon'})
         CREATE (anchor)-[:LOCATED_IN {layer:'spatial', revealed_in_session:1}]->(canon)
 
         // Another campaign's node

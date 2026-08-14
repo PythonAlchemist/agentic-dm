@@ -10,9 +10,21 @@ from pathlib import Path
 
 import yaml
 
-from backend.graph.schema import LAYER_MAP, EntityType, RelationshipType
+from backend.canon.assembler import slugify
+from backend.graph.schema import (
+    DERIVED_LOCATION_SUBTYPES,
+    LAYER_MAP,
+    EntityType,
+    LocationSubtype,
+    RelationshipType,
+)
 
 SEED_DIR = Path(__file__).parent / "seeds"
+
+#: The hand-authored half of the LOCATION hierarchy. A seed rather than data,
+#: for the reason every seed is: it is committed, reviewed and diffable, and
+#: `data/` is gitignored because the corpus under it is copyrighted.
+LOCATION_SUBTYPE_SEED = SEED_DIR / "location-subtypes.yaml"
 
 # Grading metadata, not graph data. A marked entry is a fact the seed asserts but the
 # seed's own chapter does not state, so a run over that chapter must not be scored
@@ -66,6 +78,80 @@ def validate_seed(data: dict) -> list[str]:
             )
 
     return problems
+
+
+def validate_location_subtypes(data: dict) -> list[str]:
+    """Return human-readable problems with a location-subtype seed.
+
+    Four refusals, and each one exists because the failure it catches is silent
+    in the graph rather than loud at load time:
+
+    * an unknown rung (`WILDS` for `WILD`) would confer no label, and the place
+      would be indistinguishable from one deliberately left unclassified;
+    * a missing or unslugifiable name can never be matched against anything;
+    * a hand-authored SITE or AREA is a human overriding the key convention,
+      which is the one layer here that has never been wrong -- and this file
+      wins ties, so it would win that one too;
+    * two entries claiming one slug is a contradiction that a dict would
+      resolve by silently keeping whichever the author wrote last.
+    """
+    problems: list[str] = []
+    known = {s.value for s in LocationSubtype}
+    claimed: dict[str, str] = {}
+
+    for entry in data.get("locations", []):
+        name = entry.get("name")
+        subtype = entry.get("subtype")
+        if not name:
+            problems.append(f"location missing name: {entry}")
+        if not subtype:
+            problems.append(f"location missing subtype: {entry}")
+        elif subtype not in known:
+            problems.append(f"unknown subtype {subtype!r} in {entry}")
+        elif LocationSubtype(subtype) in DERIVED_LOCATION_SUBTYPES:
+            problems.append(
+                f"subtype {subtype!r} is derived from the book's key convention "
+                f"and must not be hand-authored: {entry}"
+            )
+
+        for spelling in [name, *entry.get("aliases", [])]:
+            if not spelling:
+                continue
+            slug = slugify(spelling)
+            if not slug:
+                problems.append(f"name {spelling!r} slugifies to nothing: {entry}")
+                continue
+            if slug in claimed and claimed[slug] != subtype:
+                problems.append(
+                    f"{slug!r} is claimed by two entries, as {claimed[slug]!r} and {subtype!r}"
+                )
+            claimed[slug] = subtype
+
+    return problems
+
+
+def load_location_subtypes(path: str | Path = LOCATION_SUBTYPE_SEED) -> dict[str, LocationSubtype]:
+    """The authored rungs, keyed on the slug of every spelling that reaches one.
+
+    Slug rather than folded text, for the reason `KeyedIndex` matches on slugs:
+    `Bildrath's Mercantile` and `Bildrath’s Mercantile` differ by one invisible
+    character, and anything `slugify` already treats as one name is one name.
+
+    Returns a plain mapping and touches no database -- `plan_write` is a pure
+    function, so the file is read by its caller and handed in, exactly as the
+    gazetteer is.
+    """
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    problems = validate_location_subtypes(data)
+    if problems:
+        raise ValueError("invalid location-subtype seed:\n  " + "\n  ".join(problems))
+
+    subtypes: dict[str, LocationSubtype] = {}
+    for entry in data.get("locations", []):
+        subtype = LocationSubtype(entry["subtype"])
+        for spelling in [entry["name"], *entry.get("aliases", [])]:
+            subtypes[slugify(spelling)] = subtype
+    return subtypes
 
 
 def extractable_subset(data: dict, source: str = DEFAULT_SOURCE) -> dict:
@@ -129,11 +215,23 @@ def load_seed(path: str | Path, session) -> dict:
         raise ValueError("invalid seed:\n  " + "\n  ".join(problems))
 
     for node in data["nodes"]:
-        props = {k: v for k, v in node.items() if k != "id" and k not in _GRADING_KEYS}
+        props = {
+            k: v
+            for k, v in node.items()
+            if k != "id" and k != "entity_type" and k not in _GRADING_KEYS
+        }
         props.setdefault("plane", "canon")
         props.setdefault("source_book", "cos")
+        # The type is a LABEL, as it is on every node `canon.writer` writes --
+        # `MATCH (n:NPC)`, not `MATCH (n:Entity {entity_type:'NPC'})`. Coerced
+        # through the enum first because a label cannot be parameterized in
+        # Cypher and is interpolated into the statement; `validate_seed` has
+        # already refused anything the enum does not know, and this is the
+        # second lock on the same door.
+        raw_type = node.get("entity_type")
+        label = f":{EntityType(raw_type).value}" if raw_type else ""
         session.run(
-            "MERGE (e:Entity {id:$id}) SET e += $props",
+            f"MERGE (e:Entity {{id:$id}}) {f'SET e{label} ' if label else ''}SET e += $props",
             {"id": node["id"], "props": props},
         )
 

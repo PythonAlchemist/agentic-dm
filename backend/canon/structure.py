@@ -16,6 +16,7 @@ to say. Reading the key first would put the pipeline back where it started: a
 book with no keyed rooms would derive nothing.
 """
 
+import re
 from dataclasses import dataclass
 
 from backend.canon.models import CandidateEdge, CandidateNode, Section
@@ -26,6 +27,26 @@ from backend.canon.models import CandidateEdge, CandidateNode, Section
 from backend.canon.sections import KEYED_HEADING
 
 STRUCTURAL_EVIDENCE = "derived from document structure"
+
+# "Chapter 3: The Village of Barovia" -> "The Village of Barovia". The numbering
+# is the book's table of contents talking, not a place.
+_CHAPTER_PREFIX = re.compile(r"^(chapter\s+\d+|appendix\s+[a-z])\s*[:.]\s*", re.IGNORECASE)
+
+
+def place_from_chapter_title(title: str) -> str | None:
+    """The place a chapter's title names, or None if it names nothing.
+
+    Lives here, beside the deriver that USES the result as an edge's source
+    name, rather than in either caller. The extractor derives the chapter place
+    to build the CONTAINS edges; the writer derives it again to mint the node
+    those edges point out of. Two copies of this rule would put the writer's
+    node name out of step with the deriver's edge, and every chapter-level
+    CONTAINS would dangle -- which is exactly the defect this repairs.
+
+    The article is kept: "The Village of Barovia" is how the book writes it.
+    """
+    stripped = _CHAPTER_PREFIX.sub("", title).strip()
+    return stripped or None
 
 
 @dataclass

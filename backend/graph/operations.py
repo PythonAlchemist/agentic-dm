@@ -159,6 +159,20 @@ class CampaignGraphOps:
     # Campaign-scoped entity types
     CAMPAIGN_SCOPED_TYPES = {"NPC", "LOCATION", "QUEST", "EVENT", "FACTION", "LORE", "SETTING", "SHOP", "PC", "SESSION", "PLAYER"}
 
+    #: "This entity belongs to no campaign in particular, so every campaign sees
+    #: it" -- rules, spells, the SRD, and the book's own canon.
+    #:
+    #: `e.entity_type IS NULL OR` is load-bearing and must not be tidied away.
+    #: `NOT NULL IN [...]` evaluates to NULL rather than true, and Cypher DROPS a
+    #: row whose WHERE is NULL, so without it every node lacking the property
+    #: vanishes from these queries -- not filtered, not errored, absent. Canon
+    #: nodes have carried their type as a LABEL and no `entity_type` property
+    #: since entities became globally unique, which silently emptied the canon
+    #: plane out of `list_entities`, `search` and `get_full_graph`.
+    #:
+    #: One string, interpolated in three places, so the three cannot drift.
+    SHARED_ENTITY_PREDICATE = "(e.entity_type IS NULL OR NOT e.entity_type IN $scoped_types)"
+
     def list_entities(
         self,
         entity_type: Optional[str] = None,
@@ -178,20 +192,20 @@ class CampaignGraphOps:
         if campaign_id:
             # Return campaign-scoped entities + shared SRD entities
             if entity_type:
-                query = """
-                MATCH (e:Entity {entity_type: $entity_type})
-                WHERE (e)-[:BELONGS_TO]->(:Entity {id: $campaign_id})
-                   OR NOT e.entity_type IN $scoped_types
+                query = f"""
+                MATCH (e:Entity {{entity_type: $entity_type}})
+                WHERE (e)-[:BELONGS_TO]->(:Entity {{id: $campaign_id}})
+                   OR {self.SHARED_ENTITY_PREDICATE}
                 RETURN e
                 ORDER BY e.name
                 LIMIT $limit
                 """
                 params = {"entity_type": entity_type, "limit": limit, "campaign_id": campaign_id, "scoped_types": list(self.CAMPAIGN_SCOPED_TYPES)}
             else:
-                query = """
+                query = f"""
                 MATCH (e:Entity)
-                WHERE (e)-[:BELONGS_TO]->(:Entity {id: $campaign_id})
-                   OR NOT e.entity_type IN $scoped_types
+                WHERE (e)-[:BELONGS_TO]->(:Entity {{id: $campaign_id}})
+                   OR {self.SHARED_ENTITY_PREDICATE}
                 RETURN e
                 ORDER BY e.name
                 LIMIT $limit
@@ -346,7 +360,10 @@ class CampaignGraphOps:
         campaign_filter = ""
         params: dict = {"query": query, "limit": limit}
         if campaign_id:
-            campaign_filter = "AND ((e)-[:BELONGS_TO]->(:Entity {id: $campaign_id}) OR NOT e.entity_type IN $scoped_types)"
+            campaign_filter = (
+                "AND ((e)-[:BELONGS_TO]->(:Entity {id: $campaign_id}) "
+                f"OR {self.SHARED_ENTITY_PREDICATE})"
+            )
             params["campaign_id"] = campaign_id
             params["scoped_types"] = list(self.CAMPAIGN_SCOPED_TYPES)
 
@@ -462,7 +479,10 @@ class CampaignGraphOps:
         campaign_filter = ""
         params: dict = {"limit": limit}
         if campaign_id:
-            campaign_filter = "AND ((e)-[:BELONGS_TO]->(:Entity {id: $campaign_id}) OR NOT e.entity_type IN $scoped_types)"
+            campaign_filter = (
+                "AND ((e)-[:BELONGS_TO]->(:Entity {id: $campaign_id}) "
+                f"OR {self.SHARED_ENTITY_PREDICATE})"
+            )
             params["campaign_id"] = campaign_id
             params["scoped_types"] = list(self.CAMPAIGN_SCOPED_TYPES)
 

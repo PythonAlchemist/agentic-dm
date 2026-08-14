@@ -30,6 +30,32 @@ class EntityType(str, Enum):
     SHOP = "SHOP"  # Shops and merchants
 
 
+class LocationSubtype(str, Enum):
+    """Where a LOCATION sits in the spatial hierarchy.
+
+    An ADDITIONAL label, never a replacement: `:LOCATION` stays on every place,
+    because it is what makes "every place in the book" a one-word query. The
+    subtype narrows it -- `MATCH (n:AREA)` is every room.
+
+    A place wears at most one of these. They are rungs of a single ladder, not
+    orthogonal facets, so `:SITE:SETTLEMENT` would be a contradiction rather
+    than two readings the way a disputed `:NPC:MONSTER` is.
+
+    SITE and AREA are DERIVED from the book's own key convention -- see
+    `KEYED_HEADING` -- and are never authored by hand. REGION, SETTLEMENT and
+    WILD cannot be derived from anything the document says about itself and are
+    authored, roughly fifteen entries for a whole book. A place with neither
+    stays plain `:LOCATION`: there is no default, because an unclassified place
+    must be visibly unclassified rather than quietly filed somewhere plausible.
+    """
+
+    REGION = "REGION"  # A land or domain -- Barovia
+    SETTLEMENT = "SETTLEMENT"  # Village, town, city
+    SITE = "SITE"  # A discrete building or landmark -- a top-level key
+    AREA = "AREA"  # A room or sub-area within a site -- a suffixed key
+    WILD = "WILD"  # Wilderness, roads, passes
+
+
 class RelationshipType(str, Enum):
     """Types of relationships between entities."""
 
@@ -78,6 +104,7 @@ class RelationshipType(str, Enum):
 
     # Reference
     INSTANCE_OF = "INSTANCE_OF"
+    MENTIONED_IN = "MENTIONED_IN"  # Canon entity -> :Chapter it appears in
 
     # Player/Campaign
     PLAYS_AS = "PLAYS_AS"  # Player -> PC
@@ -131,6 +158,9 @@ LAYER_MAP: dict[RelationshipType, Layer | None] = {
     RelationshipType.OBJECTIVE_AT: Layer.NARRATIVE,
     # Structural: plane-linking, character sheet, runtime, campaign history
     RelationshipType.INSTANCE_OF: None,
+    # Provenance, not a surface: it says WHERE a canon entity is written about,
+    # which is deterministic and unfalsifiable, and says nothing about the world.
+    RelationshipType.MENTIONED_IN: None,
     RelationshipType.BELONGS_TO: None,
     RelationshipType.PLAYS_AS: None,
     RelationshipType.ATTENDED: None,
@@ -160,6 +190,19 @@ CANON_ENTITY_TYPES: frozenset[EntityType] = frozenset({
     EntityType.QUEST,
     EntityType.SETTING,
 })
+
+# The two rungs the book's own key convention decides -- an unsuffixed key is a
+# building, a suffixed one is a room inside it. Everything else is hand-authored.
+# Split here rather than at either use site so the seed's validator and the
+# writer's deriver cannot disagree about which half owns a rung.
+DERIVED_LOCATION_SUBTYPES: frozenset[LocationSubtype] = frozenset({
+    LocationSubtype.SITE,
+    LocationSubtype.AREA,
+})
+
+AUTHORED_LOCATION_SUBTYPES: frozenset[LocationSubtype] = (
+    frozenset(LocationSubtype) - DERIVED_LOCATION_SUBTYPES
+)
 
 # A directional gloss for every relationship type offered to the extraction prompt
 # (i.e. every type in a layer vocabulary -- see `layer_vocabulary`). A bare type
@@ -473,6 +516,10 @@ class Relationship(BaseModel):
 GRAPH_SCHEMA = {
     "constraints": [
         "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
+        # A chapter is identified by its slug and nothing else, and every canon
+        # entity MERGEs its MENTIONED_IN edge against it -- a second node for one
+        # slug would split a chapter's appearances in two.
+        "CREATE CONSTRAINT chapter_slug IF NOT EXISTS FOR (c:Chapter) REQUIRE c.slug IS UNIQUE",
     ],
     "indexes": [
         "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",

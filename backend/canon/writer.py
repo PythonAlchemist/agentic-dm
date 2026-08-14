@@ -19,6 +19,7 @@ refuses rather than reaching for DETACH DELETE.
 """
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 
 from neo4j.exceptions import Neo4jError
@@ -30,10 +31,12 @@ from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.sections import KEYED_HEADING
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
+    CANON_ENTITY_TYPES,
     GRAPH_SCHEMA,
     LAYER_MAP,
     RELATIONSHIP_DOMAIN_RANGE,
     EntityType,
+    LocationSubtype,
     RelationshipType,
 )
 
@@ -60,9 +63,29 @@ PROPOSED = "proposed"
 #: becomes indistinguishable from a checked one.
 CONFLICTED = "conflicted"
 
-#: Every id is prefixed with the book. Nothing merges across chapters -- see
-#: `mint_id` -- and nothing merges across books either.
+#: Every id is prefixed with the book. Entities merge across the chapters of one
+#: book -- see `mint_id` -- but never across books.
 BOOK = "cos"
+
+#: Provenance edge: entity -> the :Chapter it is written about in. Named through
+#: the enum rather than as a literal so the graph's vocabulary stays in one file.
+MENTIONED_IN = RelationshipType.MENTIONED_IN.value
+
+#: The labels a canon node may carry beside `:Entity`, derived from the ontology
+#: rather than restated. A label CANNOT be parameterized in Cypher, so it is
+#: interpolated into the query text; this frozenset is the only thing standing
+#: between a corrupt artifact's `entity_type` and injected Cypher.
+CANON_LABELS: frozenset[str] = frozenset(t.value for t in CANON_ENTITY_TYPES)
+
+#: The rungs of the LOCATION hierarchy, as label text. Same reasoning as
+#: `CANON_LABELS`: a label is interpolated rather than parameterized, and this
+#: frozenset is what stands between a hand-edited YAML and injected Cypher.
+LOCATION_SUBTYPE_LABELS: frozenset[str] = frozenset(s.value for s in LocationSubtype)
+
+#: The label a place must already carry for a rung to mean anything. A rung is
+#: a position in the LOCATION hierarchy, so an ITEM keyed as `E5d. Trapdoor`
+#: gets none -- an item is not on that ladder.
+LOCATION_LABEL = EntityType.LOCATION.value
 
 logger = logging.getLogger(__name__)
 
@@ -112,35 +135,46 @@ class CampaignDataAttached(Exception):
         self.relationships = relationships
 
 
-def mint_id(chapter_slug: str, entity_type: str, name: str, key: str = "") -> str:
-    """`cos:<chapter-slug>:<entity-type>:<key>-<name-slug>`, key omitted when absent.
+def mint_id(chapter_slug: str, name: str, key: str = "") -> str:
+    """`cos:<name-slug>`, or `cos:<chapter-slug>:<key>-<name-slug>` when keyed.
 
-    Chapter-scoped because NOTHING merges across chapters in this pipeline.
-    Cross-chapter resolution is a separate pass with its own measurement.
+    UNKEYED ENTITIES ARE GLOBAL TO THE BOOK. Madam Eva is one woman whether the
+    introduction or chapter 3 names her, and a chapter-scoped id gave her one
+    node per chapter -- nine duplicated names across three chapters, and a major
+    NPC heading for twenty nodes by chapter 25, each holding a slice of her
+    edges. Merging on the exact name accepts that two different people sharing
+    one name would collapse; in a single sourcebook that trade is worth one
+    Strahd.
 
     A KEYED PLACE RESOLVES TO `(book, chapter, key)`, NEVER TO ITS NAME. Chapter
     4 holds `Closet` x2 and `Empty Cell` x3 as genuinely distinct rooms, and
     both `North Dungeon CONTAINS Empty Cell` and `South Dungeon CONTAINS Empty
     Cell` are real within that one chapter -- so a name-only id would merge
-    three rooms into one and silently delete two of those edges. Chapter
-    scoping alone does not address this; the key does. `K61a. Empty Cell` and
-    `K62a. Empty Cell` mint `…:location:k61a-empty-cell` and
-    `…:location:k62a-empty-cell`.
+    three rooms into one and silently delete two of those edges. `K61a. Empty
+    Cell` and `K62a. Empty Cell` mint `cos:castle-ravenloft:k61a-empty-cell` and
+    `cos:castle-ravenloft:k62a-empty-cell`. An unkeyed place has no key to
+    resolve to and falls back to its name like everything else, which is the
+    riskiest case here and the one to watch.
 
     The name is kept alongside the key rather than replaced by it: `k61a` alone
     is opaque in a report, a query, or a stack trace, and the key already
-    carries the uniqueness. Entities the book does not key keep the plain
-    name-based form -- there is no key to resolve them to.
+    carries the uniqueness.
 
-    `entity_type` is part of the id because a coined QUEST sharing a LOCATION's
-    name is a measured occurrence in this corpus -- `anchor_quests` keys on
-    `(name, type)` for the same reason.
+    THE TYPE IS NOT IN THE ID. It used to be, and that is precisely what made
+    `Barovia` two nodes when one sample called it a LOCATION and another a
+    SETTING, and `Doru` two nodes over NPC versus MONSTER -- seven names split
+    by a disagreement about a label rather than about the world. The type is
+    now a Neo4j label, several are allowed at once, and a disputed type
+    dissolves into one node wearing both rather than into two nodes wearing one
+    each. Nothing has to pick a winner.
 
     Reuses `assembler.slugify` rather than growing a second slugifier that
     drifts from it.
     """
     tail = "-".join(part for part in (key.strip().lower(), slugify(name)) if part)
-    return f"{BOOK}:{chapter_slug}:{entity_type.strip().lower()}:{tail}"
+    if key.strip():
+        return f"{BOOK}:{chapter_slug}:{tail}"
+    return f"{BOOK}:{tail}"
 
 
 @dataclass(frozen=True)
@@ -149,7 +183,13 @@ class WriteNode:
 
     id: str
     name: str
-    entity_type: str
+    #: Every type any candidate for this id gave it, sorted and deduplicated.
+    #: A TUPLE rather than a scalar because two extraction samples routinely
+    #: disagree -- `Barovia` is a LOCATION to one and a SETTING to another --
+    #: and there is nothing to choose between them. Both become labels.
+    entity_types: tuple[str, ...]
+    #: The chapter this write is for. Provenance for the MENTIONED_IN edge, NOT
+    #: a property of the entity: a globally unique node has no one chapter.
     chapter_slug: str
     section_heading: str = ""
     section_index: int = -1
@@ -160,17 +200,62 @@ class WriteNode:
     #: acceptance has to be EARNED from evidence -- a node built by hand, or by
     #: a caller that has not thought about it, must not arrive pre-trusted.
     status: str = PROPOSED
+    #: Where this place sits in the spatial hierarchy -- a `LocationSubtype`
+    #: value, or `""` for a place with no derivable rung and no authored one.
+    #: A SCALAR, unlike `entity_types`: the rungs are a single ladder, so two at
+    #: once is a contradiction rather than two readings the way `:NPC:MONSTER`
+    #: is. Empty by default and never defaulted to a value: an unclassified
+    #: place must be visibly unclassified.
+    location_subtype: str = ""
+
+    @property
+    def labels(self) -> tuple[str, ...]:
+        """The Neo4j labels beside `:Entity`, one per type, sorted.
+
+        Filtered through `CANON_LABELS` because a label is interpolated into
+        Cypher rather than parameterized. A type the ontology does not admit as
+        canon -- a campaign-plane `PC`, or garbage out of a corrupt artifact --
+        confers no label at all, leaving a plain `:Entity` that every "everything"
+        query still finds and no type query wrongly claims.
+        """
+        return tuple(sorted(t for t in self.entity_types if t in CANON_LABELS))
+
+    @property
+    def subtype_label(self) -> str:
+        """The hierarchy rung's label, or `""` when there is none to write.
+
+        Kept apart from `labels` rather than folded into it, because the two are
+        written differently: a type label is only ever ADDED (a second chapter
+        typing `Barovia` a SETTING adds to the chapter that typed it a LOCATION),
+        while a rung REPLACES the rung a node was wearing -- a place is not both
+        a room and a building. `_write_node` needs to tell them apart.
+
+        Filtered through `LOCATION_SUBTYPE_LABELS` for the same reason `labels`
+        is filtered: this text is interpolated into Cypher. It is also gated on
+        the node actually being a LOCATION, so `E5d. Trapdoor` -- which the
+        extractor typed ITEM -- gets no rung on a ladder it is not standing on.
+        """
+        if LOCATION_LABEL not in self.labels:
+            return ""
+        return self.location_subtype if self.location_subtype in LOCATION_SUBTYPE_LABELS else ""
 
     @property
     def properties(self) -> dict:
-        """What lands on the node. `id` is the MERGE key, so it is not here."""
+        """What lands on the node. `id` is the MERGE key, so it is not here.
+
+        NO `entity_type`. The labels are the type, and a scalar property beside
+        them would be the same fact in two places -- with the disputed case
+        forcing it to be a lie, since `Barovia` is `:LOCATION:SETTING` and no
+        single string says that. A consumer that needs a scalar derives it from
+        `labels(n)` at read time.
+
+        NO `chapter_slug`, `section_heading` or `section_index` either: an
+        entity the whole book shares appears in many chapters and many sections,
+        and each appearance is a MENTIONED_IN edge carrying its own.
+        """
         props: dict = {
             "name": self.name,
-            "entity_type": self.entity_type,
             "plane": CANON_PLANE,
-            "chapter_slug": self.chapter_slug,
-            "section_heading": self.section_heading,
-            "section_index": self.section_index,
             "votes": self.votes,
             "status": self.status,
         }
@@ -180,6 +265,21 @@ class WriteNode:
         if self.description:
             props["description"] = self.description
         return props
+
+    @property
+    def appearance(self) -> dict:
+        """What lands on this node's MENTIONED_IN edge to one chapter.
+
+        No `chapter_slug` and no `plane`: the edge already points AT the chapter
+        and comes FROM a node stamped canon, so both would be the same fact in a
+        second place -- and `r.chapter_slug` would then stop meaning "an
+        ontology edge this chapter asserted", which is what the review queue and
+        the replace path read it as.
+        """
+        return {
+            "section_heading": self.section_heading,
+            "section_index": self.section_index,
+        }
 
 
 @dataclass(frozen=True)
@@ -283,6 +383,13 @@ class FilterReport:
 
     candidate_nodes: int = 0
     candidate_edges: int = 0
+    # NOT a drop and NOT a candidate: nodes this stage MINTED rather than
+    # received. Only the chapter's own place, today. Counted because the
+    # verifier's accounting identity is `written + every named drop ==
+    # candidates`, and a node that arrived from outside the candidate set breaks
+    # it by exactly one -- correctly. The identity gains a term rather than a
+    # fudge factor: `written + drops == candidates + derived`.
+    derived_nodes: int = 0
     # Node drops
     gazetteer_dropped: int = 0
     unnameable: int = 0
@@ -334,6 +441,7 @@ class FilterReport:
         return {
             "candidate_nodes": self.candidate_nodes,
             "candidate_edges": self.candidate_edges,
+            "derived_nodes": self.derived_nodes,
             "gazetteer_dropped": self.gazetteer_dropped,
             "unnameable": self.unnameable,
             "undecidable_keyed": self.undecidable_keyed,
@@ -395,11 +503,25 @@ class KeyedIndex:
     by_section: dict[int, tuple[str, str, str]]
     #: place slug -> the distinct keys naming it, in first-seen order
     keys_by_place: dict[str, list[str]]
+    #: The keys carrying a sub-area suffix -- `e5g` but not `e5`. Recorded from
+    #: the SAME `KEYED_HEADING` match that built the key, rather than re-parsed
+    #: from the joined text: a second pattern that has to agree with the first
+    #: is the defect `structure.py` keeps one copy of this regex to avoid.
+    subarea_keys: frozenset[str] = frozenset()
 
     @property
     def place_slugs(self) -> set[str]:
         """Slugs of every keyed place -- the gazetteer's exempt set."""
         return set(self.keys_by_place)
+
+    def subtype_for_key(self, key: str) -> LocationSubtype:
+        """The hierarchy rung a key implies. `E5g` is a room, `E5` a building.
+
+        The whole of the derived half of the hierarchy, and it is one lookup:
+        the book's own key convention already separates a sub-area from the
+        area containing it, so nothing here has to read a name or ask a model.
+        """
+        return LocationSubtype.AREA if key in self.subarea_keys else LocationSubtype.SITE
 
     def keys_own_name(self, name: str, section_index: int) -> bool:
         """Whether this section's own heading keys this very name."""
@@ -444,17 +566,25 @@ def keyed_index(nodes: list[CandidateNode]) -> KeyedIndex:
     """Build the chapter's keyed-area index from its candidates' provenance."""
     by_section: dict[int, tuple[str, str, str]] = {}
     keys_by_place: dict[str, list[str]] = {}
+    subarea_keys: set[str] = set()
     for node in nodes:
         match = KEYED_HEADING.match(node.section_heading.strip())
         if not match:
             continue
-        key = f"{match.group('stem')}{match.group('suffix') or ''}".strip().lower()
+        suffix = match.group("suffix") or ""
+        key = f"{match.group('stem')}{suffix}".strip().lower()
+        if suffix:
+            subarea_keys.add(key)
         place = match.group("name").strip()
         by_section.setdefault(node.section_index, (key, slugify(place), place))
         keys = keys_by_place.setdefault(slugify(place), [])
         if key not in keys:
             keys.append(key)
-    return KeyedIndex(by_section=by_section, keys_by_place=keys_by_place)
+    return KeyedIndex(
+        by_section=by_section,
+        keys_by_place=keys_by_place,
+        subarea_keys=frozenset(subarea_keys),
+    )
 
 
 def keyed_place_slugs(nodes: list[CandidateNode]) -> set[str]:
@@ -490,7 +620,7 @@ def _as_write_node(node: CandidateNode, node_id: str, chapter_slug: str) -> Writ
     return WriteNode(
         id=node_id,
         name=node.name,
-        entity_type=node.entity_type,
+        entity_types=(node.entity_type,),
         chapter_slug=chapter_slug,
         section_heading=node.section_heading,
         section_index=node.section_index,
@@ -507,33 +637,85 @@ def _resolve_endpoint(
     """Which node an edge's endpoint name means. `(id, was_resolved)`.
 
     One id, no question -- that is every ordinary edge, and it is not
-    "resolved".
+    "resolved". A DISPUTED TYPE NO LONGER REACHES HERE: `Tatyana` typed NPC by
+    one sample and LORE by four is one node wearing both labels, so the name
+    answers to a single id. What still can is a name the chapter keys twice
+    (`Empty Cell` at K61a and K62a), or one the chapter both keys and mentions
+    unkeyed.
 
-    Two or more ids means one name is answered by nodes of different types,
-    because `entity_type` is part of the id: `Tatyana` typed NPC by one sample
-    and LORE by four is two nodes. When EXACTLY ONE of them has a type the
-    relationship's domain (or range) admits, that is the only reading of the
-    edge the ontology permits, so it is the reading taken. `IDENTITY_OF`'s range
-    is `{NPC, MONSTER}`, so `Ireena IDENTITY_OF Tatyana` can only mean the NPC.
+    When EXACTLY ONE candidate has a type the relationship's domain (or range)
+    admits, that is the only reading of the edge the ontology permits, so it is
+    the reading taken. `IDENTITY_OF`'s range is `{NPC, MONSTER}`, so `Ireena
+    IDENTITY_OF Tatyana` can only mean the animate one.
 
     Zero or two or more satisfy, or the relationship has no domain/range entry
     at all: nothing decides it, and picking anyway would manufacture an
     assertion the extractor never made. The caller drops the edge.
 
-    An endpoint whose `entity_type` is not in the ontology never counts as
-    satisfying. `check_edges` treats an unknown type as unCHECKED, which is
-    right when asking "is this edge legal"; it cannot make an unknown type the
-    unique answer to "which of these two nodes is meant".
+    A candidate satisfies when ANY of its types is admitted -- a node is
+    genuinely both, and refusing the edge because one of its two labels is
+    inadmissible would drop a fact the other label supports. A type outside the
+    ontology never counts: `check_edges` treats an unknown type as unCHECKED,
+    which is right when asking "is this edge legal"; it cannot make an unknown
+    type the unique answer to "which of these two nodes is meant".
     """
     if len(ids) == 1:
         return next(iter(ids)), False
     if allowed is None:
         return None, False
-    satisfying = [i for i in ids if _entity_type(by_id[i].entity_type) in allowed]
+    satisfying = [
+        i for i in ids if any(_entity_type(t) in allowed for t in by_id[i].entity_types)
+    ]
     if len(satisfying) == 1:
         return satisfying[0], True
     return None, False
 
+
+
+def _subtype_of(
+    node: WriteNode,
+    keyed: KeyedIndex,
+    key_by_id: dict[str, str],
+    chapter_place_ids: set[str],
+    subtypes: Mapping[str, LocationSubtype],
+) -> str:
+    """Where a place sits in the hierarchy. `""` when nothing decides it.
+
+    Three sources, in priority order, and NO fourth:
+
+    1. the hand-authored seed, which is the only thing that can say REGION,
+       SETTLEMENT or WILD, because no key distinguishes a village from a wood;
+    2. the key convention -- a suffixed key is a room, an unsuffixed one is the
+       building containing it. Deterministic, free, and never wrong;
+    3. the chapter's own place, which is the thing the chapter is about and
+       therefore the SITE its keyed areas hang beneath.
+
+    The seed goes FIRST on purpose. `The Village of Barovia` is a chapter's own
+    place and derives SITE, and a human has written SETTLEMENT beside it; a key
+    convention does not overrule a human, and a village labelled a building
+    would be wrong in a way no query could see.
+
+    Anything that reaches the end stays `""`. There is no default rung: a place
+    with no key and no entry is genuinely unclassified, and filing it somewhere
+    plausible would make a guess indistinguishable from a derivation.
+
+    Everything is gated on the node BEING a location. A rung is a position in
+    the LOCATION hierarchy, so `E5d. Trapdoor` -- keyed, but typed ITEM by the
+    extractor -- gets none. The node passed in must already carry its unioned
+    types, so a disputed `:LOCATION:SETTING` still qualifies on the half of the
+    disagreement that is on the ladder.
+    """
+    if LOCATION_LABEL not in node.labels:
+        return ""
+    authored = subtypes.get(slugify(node.name))
+    if authored is not None:
+        return authored.value
+    key = key_by_id.get(node.id)
+    if key:
+        return keyed.subtype_for_key(key).value
+    if node.id in chapter_place_ids:
+        return LocationSubtype.SITE.value
+    return ""
 
 
 def _mark_conflicts(edges: list[WriteEdge], report: FilterReport) -> list[WriteEdge]:
@@ -643,12 +825,31 @@ def plan_write(
     edges: list[CandidateEdge],
     gazetteer: Gazetteer,
     chapter_slug: str,
+    *,
+    chapter_place: str | None = None,
+    subtypes: Mapping[str, LocationSubtype] | None = None,
 ) -> tuple[list[WriteNode], list[WriteEdge], FilterReport]:
     """Decide exactly what to write, and count every candidate that is dropped.
 
     `chapter_slug` is the CALLER's, not the artifact's: the loop keys the graph
     on the corpus filename while the extractor derived its slug from the chapter
     title, and the graph must be keyed on the one the loop discovers.
+
+    `chapter_place` IS A NODE, and this is the fix for a severed hierarchy.
+    `derive_structure` hangs every top-level keyed area off the chapter's own
+    place -- `The Village of Barovia CONTAINS Church` -- naming it after the
+    chapter title, which is a heading rather than anything the extractor
+    proposed. No candidate was ever called that, so all seven of chapter 3's
+    chapter-level CONTAINS edges were dropped as dangling and the graph held
+    rooms nested inside `Church` while `Church` itself hung from nothing.
+    Minting the node makes those edges land. It is exempt from the gazetteer and
+    ACCEPTED for the same reason a keyed area is: the book's own heading is the
+    book asserting the place exists, not a model's opinion.
+
+    `subtypes` is the hand-authored half of the LOCATION hierarchy, slug ->
+    rung, read from a seed by the caller the way the gazetteer is. It WINS over
+    the derived rung: the village is a chapter's own place, which derives SITE,
+    and a human has said SETTLEMENT. A key does not overrule a human.
 
     Filters, in this order:
 
@@ -711,9 +912,17 @@ def plan_write(
     ids_by_name: dict[str, set[str]] = {}
     ids_by_section: dict[int, set[str]] = {}
     provenance_rank: dict[str, int] = {}
-    # Ids the BOOK keys, which is the half of node acceptance that owes nothing
-    # to any edge -- a keyed room with no relationships is still the book's own.
+    #: id -> every type any candidate for it gave, unioned at the end into the
+    #: node's labels. Two samples disagreeing is a disagreement about a label,
+    #: not about the world, and both readings are kept.
+    types_seen: dict[str, list[str]] = {}
+    # Ids the BOOK ITSELF asserts -- through a keyed heading or the chapter's own
+    # title -- which is the half of node acceptance that owes nothing to any
+    # edge: a keyed room with no relationships is still the book's own.
     keyed_ids: set[str] = set()
+    #: id -> the key that minted it, so the hierarchy rung can be read off the
+    #: same key rather than re-derived from a name.
+    key_by_id: dict[str, str] = {}
     for node in kept_nodes:
         node_key, undecidable = keyed.key_for(node.name, node.section_index)
         if undecidable:
@@ -730,9 +939,10 @@ def plan_write(
             # A name that slugifies to nothing cannot be given an id at all.
             report.unnameable += 1
             continue
-        node_id = mint_id(chapter_slug, node.entity_type, node.name, node_key)
+        node_id = mint_id(chapter_slug, node.name, node_key)
         if node_key:
             keyed_ids.add(node_id)
+            key_by_id[node_id] = node_key
         # Every kept candidate is indexed under its own folded name and its own
         # section, duplicate or not: a second spelling of a name already written
         # -- straight for curly apostrophe, say -- must still lead an edge to
@@ -756,6 +966,12 @@ def plan_write(
         rank = 0
         if keyed.keys_own_name(node.name, node.section_index):
             rank = 2 if keyed.spells_it_as_the_book_does(node.name, node.section_index) else 1
+        # The TYPE unions across every candidate for this id, whichever one wins
+        # the provenance tiebreak. The tiebreak is about which section to cite;
+        # it is not evidence about what the thing is, and letting it pick a
+        # single type would put back the winner-picking that folding the type
+        # out of the id removed.
+        types_seen.setdefault(node_id, []).append(node.entity_type)
         if node_id in by_id:
             report.duplicate_nodes += 1
             if rank > provenance_rank[node_id]:
@@ -764,6 +980,57 @@ def plan_write(
             continue
         by_id[node_id] = _as_write_node(node, node_id, chapter_slug)
         provenance_rank[node_id] = rank
+
+    # The chapter's own place, which `derive_structure` has already used as the
+    # source of every top-level CONTAINS edge and which nothing else mints.
+    #
+    # ONLY when the chapter keys at least one area. A title is not evidence of a
+    # place -- chapter 1 keys Tarokka card results, not rooms -- and the deriver
+    # applies the identical guard before it emits a single chapter-level edge.
+    # Minting a node here for a chapter that keys nothing would put a place in
+    # the graph that no edge references and the book never established.
+    if chapter_place and keyed.place_slugs:
+        place_id = mint_id(chapter_slug, chapter_place)
+        keyed_ids.add(place_id)
+        # No key, so no rung from `key_by_id`. A chapter is about a discrete
+        # thing -- a village, a castle, an abbey -- and SITE is the rung for the
+        # thing itself, with its keyed areas hanging beneath it. A hand-authored
+        # entry overrides this, which is how the village becomes a SETTLEMENT.
+        chapter_place_ids = {place_id}
+        types_seen.setdefault(place_id, []).append(LOCATION_LABEL)
+        ids_by_name.setdefault(_fold(chapter_place), set()).add(place_id)
+        # Not `setdefault` on a dict that may already hold this id from a
+        # candidate: the candidate carries a real section heading and this does
+        # not, and overwriting it would send a reader to nowhere.
+        if place_id not in by_id:
+            by_id[place_id] = WriteNode(
+                id=place_id,
+                name=chapter_place,
+                entity_types=(LOCATION_LABEL,),
+                chapter_slug=chapter_slug,
+            )
+            provenance_rank[place_id] = 0
+            report.derived_nodes += 1
+    else:
+        chapter_place_ids = set()
+
+    # Types first, rung second, in two passes: `_subtype_of` reads `labels`, and
+    # a node still carrying one sample's type would answer "not a location" for
+    # a place four other samples typed LOCATION.
+    subtypes = subtypes or {}
+    by_id = {
+        node_id: replace(written, entity_types=tuple(sorted(set(types_seen[node_id]))))
+        for node_id, written in by_id.items()
+    }
+    by_id = {
+        node_id: replace(
+            written,
+            location_subtype=_subtype_of(
+                written, keyed, key_by_id, chapter_place_ids, subtypes
+            ),
+        )
+        for node_id, written in by_id.items()
+    }
 
     report.ambiguous_names = sorted(name for name, ids in ids_by_name.items() if len(ids) > 1)
 
@@ -862,34 +1129,62 @@ def ensure_schema(session) -> None:
             logger.warning("schema statement failed: %s -- %s", statement, exc)
 
 
+#: Every canon node this chapter names, found through its appearances rather
+#: than through a property on the node. A globally unique entity belongs to as
+#: many chapters as mention it, and MENTIONED_IN is the only record of which.
+_MENTIONED_BY_CHAPTER = f"""
+MATCH (n:Entity {{plane:$plane}})-[:{MENTIONED_IN}]->(:Chapter {{slug:$slug}})
+"""
+
+
 def count_canon_nodes(session, chapter_slug: str) -> int:
-    """How many canon nodes this chapter already has. The loop's own predicate."""
+    """How many canon nodes this chapter names. The loop's own predicate."""
     record = session.run(
-        "MATCH (n:Entity {chapter_slug:$slug, plane:$plane}) RETURN count(n) AS c",
+        _MENTIONED_BY_CHAPTER + "RETURN count(n) AS c",
         {"slug": chapter_slug, "plane": CANON_PLANE},
     ).single()
     return record["c"] if record else 0
 
 
 def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
-    """Delete this chapter's canon relationships and nodes. Nothing else.
+    """Delete this chapter's canon relationships, and the nodes only it names.
 
     Scoped by `plane` AND `chapter_slug` on both statements, so another
     chapter's canon and every campaign's play are untouchable from here. A node
     still carrying a relationship this scope does not cover is refused rather
     than DETACH DELETEd -- see `CampaignDataAttached`.
+
+    A NODE ANOTHER CHAPTER ALSO NAMES SURVIVES, keeping only that chapter's
+    appearance. Madam Eva is one node for the whole book, and re-writing chapter
+    3 must cost the introduction nothing -- deleting her would silently truncate
+    a chapter nobody asked to touch. So the delete set is the nodes whose ONLY
+    appearance is this chapter's, and the check for attached campaign data is
+    narrowed to exactly those: a node that is going to survive cannot take
+    anything down with it.
     """
+    doomed = _MENTIONED_BY_CHAPTER + f"""
+    WITH n, count {{ (n)-[:{MENTIONED_IN}]->(:Chapter) }} AS chapters
+    WHERE chapters = 1
+    """
+    scope = {"slug": chapter_slug, "plane": CANON_PLANE}
     attached = tx.run(
-        """
-        MATCH (n:Entity {chapter_slug:$slug, plane:$plane})-[r]-()
-        WHERE NOT (r.plane = $plane AND r.chapter_slug = $slug)
+        doomed
+        + f"""
+        MATCH (n)-[r]-()
+        WHERE type(r) <> '{MENTIONED_IN}'
+          AND NOT (r.plane = $plane AND r.chapter_slug = $slug)
         RETURN count(r) AS c
         """,
-        {"slug": chapter_slug, "plane": CANON_PLANE},
+        scope,
     ).single()["c"]
     if attached:
         raise CampaignDataAttached(chapter_slug, attached)
 
+    # The node set is read BEFORE any delete: deleting this chapter's
+    # appearances removes the very edges that identify the nodes it owns.
+    ids = tx.run(doomed + "RETURN collect(n.id) AS ids", scope).single()["ids"]
+
+    # Counted, because it is compared against what the plan wrote.
     edges = tx.run(
         """
         MATCH ()-[r]->()
@@ -897,24 +1192,91 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         DELETE r
         RETURN count(r) AS c
         """,
-        {"slug": chapter_slug, "plane": CANON_PLANE},
+        scope,
     ).single()["c"]
+    # NOT counted: an appearance mirrors a node one-for-one, and adding it to a
+    # figure a reader compares against `written_edges` would say a replace
+    # deleted twice what it wrote.
+    tx.run(
+        f"""
+        MATCH (:Entity {{plane:$plane}})-[m:{MENTIONED_IN}]->(:Chapter {{slug:$slug}})
+        DELETE m
+        """,
+        scope,
+    )
     nodes = tx.run(
         """
-        MATCH (n:Entity {chapter_slug:$slug, plane:$plane})
+        MATCH (n:Entity {plane:$plane}) WHERE n.id IN $ids
         DELETE n
         RETURN count(n) AS c
         """,
-        {"slug": chapter_slug, "plane": CANON_PLANE},
+        {"ids": ids, "plane": CANON_PLANE},
     ).single()["c"]
     return nodes, edges
 
 
 def _write_node(tx, node: WriteNode) -> None:
-    """MERGE on the id, so a re-run after `--replace` cannot double a node."""
+    """MERGE on the id, so a second chapter naming this entity adds no node.
+
+    The labels are interpolated because Cypher cannot parameterize one. Every
+    label comes from `WriteNode.labels` or `WriteNode.subtype_label`, which
+    admit only `CANON_LABELS` and `LOCATION_SUBTYPE_LABELS`, so the interpolated
+    text can only ever be one of the ontology's own names.
+
+    TYPE LABELS UNION. `SET e:A:B` adds to whatever the node already carries,
+    which is what makes a chapter that types `Barovia` a SETTING add to, rather
+    than replace, the chapter that typed it a LOCATION.
+
+    A HIERARCHY RUNG REPLACES. The rungs are one ladder, so a place that was a
+    settlement and is now a region must not end up both -- and `SET` alone would
+    leave it wearing the pair. Editing the authored seed and re-writing is how
+    that happens, on a node another chapter keeps alive through the replace.
+
+    The REMOVE is emitted ONLY when this write actually has a rung to put there,
+    and the reachable case is a chapter that MENTIONS a place versus the chapter
+    that is ABOUT it. Both reach one id, because an unkeyed place is global:
+    chapter 5 is about `Vallaki` and writes its rung, chapter 3 names it in
+    passing and derives none. Whichever lands second must not be the one that
+    decides, so a write with nothing to say about the hierarchy says nothing.
+
+    NOT the keyed case, which cannot arise: a keyed id carries its own chapter
+    and key, so two chapters can never write one keyed node. An earlier draft of
+    this docstring cited `Church` keyed in chapter 3 and mentioned in chapter 4,
+    and `mint_id` makes that two different nodes. The guard is right; that
+    reason for it was not.
+    """
+    labels = "".join(f":{label}" for label in node.labels)
+    clauses = []
+    if labels:
+        clauses.append(f"SET e{labels}")
+    if node.subtype_label:
+        superseded = "".join(
+            f":{rung}" for rung in sorted(LOCATION_SUBTYPE_LABELS - {node.subtype_label})
+        )
+        clauses.append(f"REMOVE e{superseded}")
+        clauses.append(f"SET e:{node.subtype_label}")
+    clauses.append("SET e += $props")
     tx.run(
-        "MERGE (e:Entity {id:$id}) SET e += $props",
+        f"MERGE (e:Entity {{id:$id}}) {' '.join(clauses)}",
         {"id": node.id, "props": node.properties},
+    )
+
+
+def _write_appearance(tx, node: WriteNode, chapter_slug: str) -> None:
+    """Record that this chapter writes about this entity, and where.
+
+    Deterministic and unfalsifiable -- "Strahd is written about in chapter 3" is
+    simply true, unlike anything the extractor proposes -- and it answers the
+    question a DM actually asks, "where do I read about Ireena", in one hop.
+    """
+    tx.run(
+        f"""
+        MATCH (e:Entity {{id:$id}})
+        MERGE (c:Chapter {{slug:$slug}})
+        MERGE (e)-[m:{MENTIONED_IN}]->(c)
+        SET m += $props
+        """,
+        {"id": node.id, "slug": chapter_slug, "props": node.appearance},
     )
 
 
@@ -955,7 +1317,7 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
     write empties a chapter and leaves it looking done.
     """
     existing = tx.run(
-        "MATCH (n:Entity {chapter_slug:$slug, plane:$plane}) RETURN count(n) AS c",
+        _MENTIONED_BY_CHAPTER + "RETURN count(n) AS c",
         {"slug": chapter_slug, "plane": CANON_PLANE},
     ).single()["c"]
 
@@ -967,6 +1329,11 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
 
     for node in nodes:
         _write_node(tx, node)
+    # After the nodes and inside the same transaction: the appearance is what
+    # the loop's predicate and the replace path both read, so a chapter whose
+    # nodes committed without them would look unwritten and be unreplaceable.
+    for node in nodes:
+        _write_appearance(tx, node, chapter_slug)
     for edge in edges:
         _write_edge(tx, edge)
 
