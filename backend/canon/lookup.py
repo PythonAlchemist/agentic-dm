@@ -236,17 +236,30 @@ RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
 """
 
 #: The evidence, which is the sentence the book actually wrote. `USES_ALIAS`
-#: says which spelling it used there -- itself story information, since the
+#: says which spellings it used there -- itself story information, since the
 #: party meets `Strahd` well before `Strahd von Zarovich`.
+#:
+#: ONE ROW PER MENTION, and the `WITH` is what makes that true. A mention may
+#: use SEVERAL surface forms -- four sections of chapter 3 and the introduction
+#: write both of Strahd's names -- so the obvious join emits one row per
+#: `USES_ALIAS` edge and repeats the passage. Measured: 14 mentions, 18 edges,
+#: 18 rows, 14 distinct sections. A DM saw `Story Overview` twice and every
+#: count taken off the list ran 29% high.
+#:
+#: Collected rather than DISTINCTed away, because dropping the surface form
+#: would cost real information to fix a duplication. `collect` also skips nulls,
+#: so a mention with no alias edge yields `[]` and the field's SHAPE never
+#: changes with the number of spellings.
 MENTIONS = """
 MATCH (n:Entity {plane:$plane})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
 WHERE n.id IN $ids
 MATCH (c:Chapter)-[:HAS_SECTION]->(s)
 OPTIONAL MATCH (m)-[:USES_ALIAS]->(a:Alias)
-RETURN n.id AS entity_id, c.slug AS chapter, c.index AS chapter_index,
+WITH n, m, c, s, collect(DISTINCT a.name) AS aliases
+RETURN n.id AS entity_id, m.id AS mention_id, c.slug AS chapter, c.index AS chapter_index,
        s.heading AS section, s.index AS section_index, s.key AS section_key,
-       a.name AS alias, m.evidence AS evidence, m.occurrences AS occurrences
-ORDER BY chapter_index, section_index, alias
+       aliases AS aliases, m.evidence AS evidence, m.occurrences AS occurrences
+ORDER BY chapter_index, section_index, mention_id
 """
 
 #: Which chapters the graph holds. Read off `:Chapter`, because an entity no
@@ -365,7 +378,12 @@ class CanonLookup:
                 }
                 for row in rows
             ]
-            mentions = self._run(session, MENTIONS, ids)
+            # `collect` gives no order guarantee, so two runs of the same
+            # question would otherwise print the spellings differently.
+            mentions = [
+                {**row, "aliases": sorted(row["aliases"])}
+                for row in self._run(session, MENTIONS, ids)
+            ]
             return self._finish(
                 session,
                 tool="lookup",

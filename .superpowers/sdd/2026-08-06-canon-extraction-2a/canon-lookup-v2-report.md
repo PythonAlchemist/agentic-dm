@@ -102,13 +102,13 @@ Run against the live graph: 58 entities, 3 of 25 chapters, the gazetteer loaded.
 | # | Question | Call | Result |
 |---|---|---|---|
 | 1 | who's in the burgomaster's mansion | `whats_here("Burgomaster's Mansion")` | HIT 3 accepted, 2 proposed, 1 section |
-| 2 | where do I read about Ismark | `lookup("Ismark")` | HIT 1 accepted, 4 proposed, 3 mentions |
+| 2 | where do I read about Ismark | `lookup("Ismark")` | HIT 1 accepted, 4 proposed, 2 mentions |
 | 3 | what's in the church | `whats_here("Church")` | HIT 8 accepted, 0 proposed, 1 section |
-| 4 | who is Ireena related to | `lookup("Ireena")` | HIT 3 accepted, 12 proposed, 10 mentions |
+| 4 | who is Ireena related to | `lookup("Ireena")` | HIT 3 accepted, 12 proposed, 5 mentions |
 | 5 | where is the Tome of Strahd | `where_is("Tome of Strahd")` | MISS `no_such_relationship` — node present (`:ITEM:Artifact`), no placement |
 | 6 | who's in the tavern | `whats_here("Blood on the Vine")` | HIT 8 accepted, 0 proposed, 1 section |
 | 7 | where is Doru | `where_is("Doru")` | HIT 3 accepted, 2 proposed, 3 passages |
-| 8 | what do we know about Strahd | `lookup("Strahd")` | HIT 0 accepted, 4 proposed, 18 mentions |
+| 8 | what do we know about Strahd | `lookup("Strahd")` | HIT 0 accepted, 4 proposed, 14 mentions |
 | 9 | what's in the village of Barovia | `whats_here("Village of Barovia")` | HIT 7 accepted, 0 proposed |
 | 10 | where do I find Madam Eva | `where_is("Madam Eva")` | HIT 1 accepted, 0 proposed, 2 passages |
 | 11 | who is Morgantha | `lookup("Morgantha")` | HIT 0 accepted, 1 proposed, 1 mention |
@@ -204,11 +204,60 @@ One new observation the labels make available: `whats_here("Church")` returns
 gets no rung — the ladder it would be standing on is one it is not on. The read
 path surfaces that rather than smoothing it over.
 
+## One bug, found in review by calling the tools rather than reading the table
+
+`lookup` fanned out through `USES_ALIAS`. Measured on Strahd before the fix:
+
+```
+:Mention nodes                        14
+USES_ALIAS edges from those mentions  18
+rows returned by lookup("Strahd")     18
+distinct (chapter, section) in them   14
+```
+
+Four sections — `Foreword`, `Introduction`, `Story Overview` and chapter 3's
+opener — write both `Strahd` and `Strahd von Zarovich`, so each of those mentions
+carries two `USES_ALIAS` edges and the join emitted one row per edge instead of
+one per mention. A DM asking where Strahd is discussed saw four passages twice,
+and any count taken off the list ran 29% high. `Ireena` was worse: 10 rows for 5
+mentions, because *every* section that names her uses both `Ireena` and `Ireena
+Kolyana`. A 100% overcount.
+
+The fix is a `WITH ... collect(DISTINCT a.name) AS aliases` — one row per
+mention, carrying the spellings it used as a **list**. Deduplicating by dropping
+the surface form would have been the cheaper fix and the wrong one: which name
+the book used at a given point is real story information, since the party meets
+`Strahd` long before `Strahd von Zarovich`. `collect` skips nulls, so a mention
+with no alias edge yields `[]` and the field's shape never changes with the
+number of spellings.
+
+**The other two tools were checked for the same shape and are clean.**
+`PASSAGES` already carried `RETURN DISTINCT` over the section tuple and never
+touches `:Alias` (14 rows, 14 distinct). `DESCRIBING_SECTIONS` aggregates its
+mentions with `collect(DISTINCT ...)`. `OCCUPANTS`, `PLACEMENTS`, `EDGES` and
+`SUBJECTS` never join through `:Alias` at all, and `resolve_name` already returns
+`DISTINCT` ids. Each of those five now carries a no-duplicate assertion anyway,
+because the property is cheap to state and the cost of it silently ceasing to
+hold is another inflated answer.
+
+**Why 41 live tests passed with this present.** Every assertion about mentions
+was written over a `set` — `{m["section"] for m in mentions}` — which is exactly
+the operation that hides a duplicated row. The replacement asserts the property
+directly (`len(seen) == len(set(seen))`) on a fixture section that deliberately
+uses two surface forms, and count-free against the real book so the concurrent
+mention-scan work cannot move it. Restoring the fan-out while keeping the field
+name fails 5 tests; restoring the original query, whose field was a scalar
+`alias`, fails 7. The conservative number for the defect itself is 5.
+
+This is the third defect in this project's history that a green suite failed to
+catch by asserting on a collapsed collection. It is worth saying plainly: a
+`set()` in an assertion is a place where a cardinality bug can live.
+
 ## Tests
 
-56 new: 51 in `tests/test_canon/test_lookup.py` (41 marked `neo4j`, 10 pure) and
+67 new: 62 in `tests/test_canon/test_lookup.py` (52 marked `neo4j`, 10 pure) and
 5 in `tests/test_agents/test_tools.py` for the `DMTools` wiring. Full suite:
-1283 passed, 12 failed — all 12 pre-existing spacy/NER failures present on
+1294 passed, 12 failed — all 12 pre-existing spacy/NER failures present on
 `d823c0f` before this branch, confirmed by stashing.
 
 **The fixtures are not invented.** Every live test's graph is written by
@@ -228,6 +277,7 @@ load-bearing rather than decorative:
 | `split_by_status` returns one merged list | 7 |
 | resolver falls back to `CONTAINS` on the alias name | 4 |
 | `PASSAGES` selects `null` as the section heading — *the previous attempt's exact bug* | 1 |
+| `MENTIONS` drops the `WITH` and fans out through `USES_ALIAS` — *the bug review caught* | 5 |
 
 Two tests run against the real book's canon rather than a fixture
 (`TestTheRealBook`), and both are deliberately count-free: a concurrent fix to
@@ -235,6 +285,10 @@ the mention scan is moving counts, so nothing here depends on one.
 
 ## Deviations
 
+- **The module is at `backend/canon/lookup.py`, not `backend/agents/canon_tools.py`.**
+  It reads the canon graph and shares the writer's status constants and the
+  alias resolver, so it belongs beside them; `backend/agents/tools.py` holds only
+  the three delegations. Flagged because the brief implied the other path.
 - **The slug-equality miss diagnostic was dropped.** The previous version, on a
   miss, looked for a canon name that slugified to the same string and reported
   "the graph spells it X". Slug equality discards punctuation as well as case, so

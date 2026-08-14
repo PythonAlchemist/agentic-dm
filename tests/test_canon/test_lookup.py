@@ -198,6 +198,10 @@ ORPHAN = node("Orphan", "NPC")
 
 NODES = [CHURCH, UNDERCROFT, VILLAGE, DONAVICH, STRAHD, RELIC, ORPHAN]
 
+#: An AUTHORED short form, the shape `Ismark` has against `Ismark Kolyanovich`.
+#: Written as an alias rather than inferred, which is the whole mechanism.
+SHORT_FORM = "ZzDonavich"
+
 EDGES = [
     edge(UNDERCROFT, CHURCH, RelationshipType.LOCATED_IN),
     edge(CHURCH, VILLAGE, RelationshipType.LOCATED_IN),
@@ -217,11 +221,16 @@ SECTIONS = [
         f"{DONAVICH.name} weeps in the {UNDERCROFT.name} below the {CHURCH.name}.",
     ),
     prose(2, "Rumours", f"{STRAHD.name} is spoken of, and so is {DONAVICH.name} again."),
+    #: ONE section using BOTH of the priest's surface forms, which is the shape
+    #: four sections of the real book use for `Strahd` and `Strahd von
+    #: Zarovich`. It exists so a join that fans out through `USES_ALIAS` emits
+    #: this passage twice and a test can catch it.
+    prose(
+        3,
+        "Both Names",
+        f"{DONAVICH.name} keeps the faith, though the villagers call {SHORT_FORM} a fool.",
+    ),
 ]
-
-#: An AUTHORED short form, the shape `Ismark` has against `Ismark Kolyanovich`.
-#: Written as an alias rather than inferred, which is the whole mechanism.
-SHORT_FORM = "ZzDonavich"
 
 
 @pytest.fixture
@@ -343,9 +352,21 @@ class TestWhereIs:
     def test_it_reports_the_chapter_and_section_where_it_is_discussed(self, graph, canon):
         passages = canon.where_is(DONAVICH.name)["passages"]
 
-        assert {p["section"] for p in passages} == {f"E5g. {UNDERCROFT.name}", "Rumours"}
+        assert {p["section"] for p in passages} == {
+            f"E5g. {UNDERCROFT.name}",
+            "Rumours",
+            "Both Names",
+        }
         assert {p["chapter"] for p in passages} == {CHAPTER}
         assert {p["chapter_index"] for p in passages} == {7}
+
+    def test_a_passage_is_listed_once_however_many_spellings_it_used(self, graph, canon):
+        """`Both Names` uses two surface forms of the priest. A join through
+        `USES_ALIAS` emits it twice; a DM must see the passage once."""
+        passages = canon.where_is(DONAVICH.name)["passages"]
+
+        seen = [(p["chapter"], p["section"]) for p in passages]
+        assert len(seen) == len(set(seen)), seen
 
     def test_a_containing_place_is_read_from_the_other_end_too(self, graph, canon):
         """`CONTAINS` points place -> entity, so a placement written that way is
@@ -413,6 +434,25 @@ class TestWhatsHere:
         result = canon.whats_here(UNDERCROFT.name)
         assert {row["name"] for row in result["accepted"]} == {DONAVICH.name}
 
+    def test_a_section_is_listed_once_and_names_a_thing_once(self, graph, canon):
+        """The same fan-out asked of the other join. `E5g.` mentions the priest,
+        who answers to two spellings; neither the section nor his name may
+        repeat."""
+        sections = canon.whats_here(UNDERCROFT.name)["sections"]
+
+        seen = [(s["chapter"], s["section"]) for s in sections]
+        assert len(seen) == len(set(seen)), seen
+        for section in sections:
+            assert len(section["also_mentions"]) == len(set(section["also_mentions"]))
+        assert DONAVICH.name in sections[0]["also_mentions"]
+
+    def test_an_occupant_is_listed_once_per_relationship(self, graph, canon):
+        rows = canon.whats_here(CHURCH.name)["accepted"] + canon.whats_here(CHURCH.name)[
+            "proposed"
+        ]
+        seen = [(row["id"], row["relationship"]) for row in rows]
+        assert len(seen) == len(set(seen)), seen
+
 
 @pytest.mark.neo4j
 class TestLookup:
@@ -433,11 +473,46 @@ class TestLookup:
 
         assert mentions
         assert all(DONAVICH.name in m["evidence"] for m in mentions)
-        assert {m["section"] for m in mentions} == {f"E5g. {UNDERCROFT.name}", "Rumours"}
+        assert {m["section"] for m in mentions} == {
+            f"E5g. {UNDERCROFT.name}",
+            "Rumours",
+            "Both Names",
+        }
 
-    def test_a_mention_records_which_spelling_the_book_used(self, graph, canon):
-        aliases = {m["alias"] for m in canon.lookup(DONAVICH.name)["mentions"]}
-        assert DONAVICH.name in aliases
+    def test_a_mention_records_which_spellings_the_book_used(self, graph, canon):
+        mentions = canon.lookup(DONAVICH.name)["mentions"]
+        assert all(DONAVICH.name in m["aliases"] for m in mentions)
+
+    def test_one_row_per_mention_however_many_spellings_it_used(self, graph, canon):
+        """THE FAN-OUT. `Both Names` writes the priest's full name and his short
+        form, so that one mention carries two `USES_ALIAS` edges. A naive join
+        emits the passage twice, and every count taken off the list inflates --
+        by 29% for `Strahd` in the real book, whose two names collide in four
+        sections. One row per mention, always."""
+        mentions = canon.lookup(DONAVICH.name)["mentions"]
+
+        seen = [(m["chapter"], m["section"]) for m in mentions]
+        assert len(seen) == len(set(seen)), seen
+
+    def test_the_surface_forms_are_kept_rather_than_dropped(self, graph, canon):
+        """Deduplicating must not cost the information. WHICH name the book used
+        at a given point is story information -- the party meets `Strahd` well
+        before `Strahd von Zarovich` -- so the row carries a LIST."""
+        both = [
+            m for m in canon.lookup(DONAVICH.name)["mentions"] if m["section"] == "Both Names"
+        ]
+        assert len(both) == 1
+        assert both[0]["aliases"] == sorted([DONAVICH.name, SHORT_FORM])
+
+    def test_the_spellings_are_ordered_so_two_runs_agree(self, graph, canon):
+        aliases = [m["aliases"] for m in canon.lookup(DONAVICH.name)["mentions"]]
+        assert all(names == sorted(names) for names in aliases)
+
+    def test_an_entity_with_one_spelling_still_carries_it_in_a_list(self, graph, canon):
+        """The shape must not change with the number of aliases."""
+        mentions = canon.lookup(STRAHD.name)["mentions"]
+        assert mentions
+        assert all(m["aliases"] == [STRAHD.name] for m in mentions)
 
     def test_edges_in_both_directions_are_returned(self, graph, canon):
         result = canon.lookup(DONAVICH.name)
@@ -454,6 +529,19 @@ class TestLookup:
         assert {row["relationship"] for row in result["proposed"]} == {"THREATENS"}
         assert all(row["status"] == ACCEPTED for row in result["accepted"])
         assert all(row["status"] != ACCEPTED for row in result["proposed"])
+
+    def test_an_edge_is_listed_once(self, graph, canon):
+        """Neither edge query touches `:Alias`, so this is a guard rather than a
+        fix -- but it is the same property, and it is cheap to keep true."""
+        result = canon.lookup(DONAVICH.name)
+        rows = result["accepted"] + result["proposed"]
+
+        seen = [(r["direction"], r["relationship"], r["other_id"]) for r in rows]
+        assert len(seen) == len(set(seen)), seen
+
+    def test_the_entity_itself_is_listed_once(self, graph, canon):
+        entities = canon.lookup(DONAVICH.name)["entities"]
+        assert len(entities) == len({e["id"] for e in entities})
 
     def test_a_node_with_no_edge_is_still_found(self, graph, canon):
         """"Tell me about X" is answered by the node existing."""
@@ -624,6 +712,28 @@ class TestTheRealBook:
         result = canon.lookup("Ismar")
         assert result["found"] is False
         assert result["miss_reason"] == NAME_NOT_IN_GRAPH
+
+    def test_strahds_two_names_do_not_inflate_his_mentions(self, canon):
+        """Against the book's own canon, and COUNT-FREE on purpose.
+
+        Four sections write both `Strahd` and `Strahd von Zarovich`, which made
+        the naive join return 18 rows for 14 mentions. The assertion compares
+        two quantities derived from the same answer rather than naming either,
+        so the concurrent mention-scan fix can move both without touching it.
+        """
+        mentions = canon.lookup("Strahd")["mentions"]
+
+        assert mentions
+        seen = [(m["chapter"], m["section"]) for m in mentions]
+        assert len(seen) == len(set(seen)), sorted(seen)
+
+    def test_a_section_using_both_of_strahds_names_keeps_both(self, canon):
+        """Deduplicating must not have cost the surface forms."""
+        mentions = canon.lookup("Strahd")["mentions"]
+
+        multi = [m for m in mentions if len(m["aliases"]) > 1]
+        assert multi, "no section of the real book uses two of Strahd's names"
+        assert {"Strahd", "Strahd von Zarovich"} <= set(multi[0]["aliases"])
 
 
 def test_the_default_log_path_is_under_data():
