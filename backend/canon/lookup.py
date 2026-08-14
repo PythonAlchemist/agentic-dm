@@ -15,10 +15,15 @@ that does not say why is a question we would have to ask again.
 
 WHAT THIS MODULE READS, and every clause of it is load-bearing::
 
-    (:Book)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section {heading, index, key})
+    (:Book)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section {heading, index, key, text})
     (:Section)-[:DESCRIBES]->(:Entity:LOCATION)
-    (:Entity)<-[:REFERS_TO]-(:Mention {evidence})-[:IN_SECTION]->(:Section)
+    (:Entity)<-[:REFERS_TO]-(:Mention {offset})-[:IN_SECTION]->(:Section)
     (:Entity)<-[:ALIAS_OF]-(:Alias)<-[:USES_ALIAS]-(:Mention)
+
+The passage a DM reads is DERIVED from the last two of those -- `section.text`
+sliced around `mention.offset` and trimmed to the sentence, by
+`backend/canon/passage.py`. The mention used to store its own copy, which was
+35,383 characters of prose the graph already had.
 
 An entity node carries `{id, name, plane, status, votes}` and NOTHING ELSE. Its
 type is a LABEL, its rung is a LABEL, and where it appears is a set of
@@ -55,6 +60,7 @@ from typing import Any, Protocol
 
 from backend.canon.aliases import resolve_name
 from backend.canon.gazetteer import load_gazetteer
+from backend.canon.passage import derive_passage
 from backend.canon.writer import ACCEPTED, CANON_PLANE, LOCATION_SUBTYPE_LABELS
 from backend.graph.schema import ARTIFACT_LABEL
 
@@ -239,6 +245,12 @@ RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
 #: says which spellings it used there -- itself story information, since the
 #: party meets `Strahd` well before `Strahd von Zarovich`.
 #:
+#: THE PASSAGE IS DERIVED, NOT STORED. `s.text` and `m.offset` come back and
+#: `passage.derive_passage` turns them into the sentence; the mention no longer
+#: carries a copy of the prose its section already holds. The section text is
+#: consumed in `lookup` and never reaches a caller -- shipping it would put the
+#: duplication back, on the wire instead of in the graph.
+#:
 #: ONE ROW PER MENTION, and the `WITH` is what makes that true. A mention may
 #: use SEVERAL surface forms -- four sections of chapter 3 and the introduction
 #: write both of Strahd's names -- so the obvious join emits one row per
@@ -258,7 +270,8 @@ OPTIONAL MATCH (m)-[:USES_ALIAS]->(a:Alias)
 WITH n, m, c, s, collect(DISTINCT a.name) AS aliases
 RETURN n.id AS entity_id, m.id AS mention_id, c.slug AS chapter, c.index AS chapter_index,
        s.heading AS section, s.index AS section_index, s.key AS section_key,
-       aliases AS aliases, m.evidence AS evidence, m.occurrences AS occurrences
+       aliases AS aliases, s.text AS section_text, m.offset AS offset,
+       m.occurrences AS occurrences
 ORDER BY chapter_index, section_index, mention_id
 """
 
@@ -378,12 +391,7 @@ class CanonLookup:
                 }
                 for row in rows
             ]
-            # `collect` gives no order guarantee, so two runs of the same
-            # question would otherwise print the spellings differently.
-            mentions = [
-                {**row, "aliases": sorted(row["aliases"])}
-                for row in self._run(session, MENTIONS, ids)
-            ]
+            mentions = [self._mention(row) for row in self._run(session, MENTIONS, ids)]
             return self._finish(
                 session,
                 tool="lookup",
@@ -397,6 +405,31 @@ class CanonLookup:
             )
 
     # -- the machinery, which is deliberately small ------------------------
+
+    @staticmethod
+    def _mention(row: dict) -> dict:
+        """One mention row, with its passage derived and its section dropped.
+
+        `evidence` keeps its name because it is the same answer to the same
+        question -- what the book says here -- and only its storage changed.
+
+        `pop` rather than a copy without the key: the section text must not
+        survive into the result by any path, and popping fails loudly if the
+        query ever stops returning it rather than silently shipping `None`.
+
+        `offset or 0` is deliberately NOT written. A first-word mention has
+        offset 0, and a truthiness check would send every one of them to the
+        top of the section -- which is where they already are, so the bug would
+        be invisible exactly where it is wrong.
+        """
+        row = dict(row)
+        text = row.pop("section_text") or ""
+        offset = row.pop("offset")
+        row["evidence"] = derive_passage(text, offset if offset is not None else 0)
+        # `collect` gives no order guarantee, so two runs of the same question
+        # would otherwise print the spellings differently.
+        row["aliases"] = sorted(row["aliases"])
+        return row
 
     def _session(self):
         """A session per call. No pooling of our own, no cache of answers."""

@@ -220,7 +220,15 @@ SECTIONS = [
         f"E5g. {UNDERCROFT.name}",
         f"{DONAVICH.name} weeps in the {UNDERCROFT.name} below the {CHURCH.name}.",
     ),
-    prose(2, "Rumours", f"{STRAHD.name} is spoken of, and so is {DONAVICH.name} again."),
+    #: TWO sentences, and the entities are both in the SECOND. The stored
+    #: evidence quoted the whole paragraph, decoy included; a derived passage is
+    #: trimmed to the sentence that names the thing.
+    prose(
+        2,
+        "Rumours",
+        "Nobody speaks after dark. "
+        f"{STRAHD.name} is spoken of, and so is {DONAVICH.name} again.",
+    ),
     #: ONE section using BOTH of the priest's surface forms, which is the shape
     #: four sections of the real book use for `Strahd` and `Strahd von
     #: Zarovich`. It exists so a join that fans out through `USES_ALIAS` emits
@@ -323,16 +331,36 @@ class TestTheSchemaTheseQueriesTarget:
         ).single()["l"]
         assert "AREA" in labels and "LOCATION" in labels
 
-    def test_a_mention_carries_evidence_and_hangs_off_a_section(self, graph):
+    def test_a_mention_stores_an_offset_and_no_prose(self, graph):
+        """The deletion, asserted where it matters -- on the node itself. The
+        section keeps the ONE copy of the text; the mention keeps the offset
+        into it."""
         row = graph.run(
             """
             MATCH (:Entity {id:$id})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
-            RETURN m.evidence AS evidence, s.heading AS heading LIMIT 1
+            RETURN properties(m) AS props, s.text AS text, s.heading AS heading LIMIT 1
             """,
             {"id": DONAVICH.id},
         ).single()
-        assert DONAVICH.name in row["evidence"]
+        assert "evidence" not in row["props"]
+        assert row["props"]["offset"] >= 0
+        assert DONAVICH.name in row["text"]
         assert row["heading"]
+
+    def test_no_mention_in_the_graph_carries_evidence(self, graph):
+        """Over the whole chapter rather than one node: a MERGE that kept the
+        old property on a re-write would leave it on some mentions and not
+        others, and a LIMIT 1 check would pass on whichever it saw."""
+        left = graph.run(
+            "MATCH (m:Mention {chapter_slug:$c}) WHERE m.evidence IS NOT NULL "
+            "RETURN count(m) AS c",
+            {"c": CHAPTER},
+        ).single()["c"]
+        total = graph.run(
+            "MATCH (m:Mention {chapter_slug:$c}) RETURN count(m) AS c", {"c": CHAPTER}
+        ).single()["c"]
+        assert total > 0
+        assert left == 0
 
 
 @pytest.mark.neo4j
@@ -469,6 +497,7 @@ class TestLookup:
         assert entity["rung"] is None
 
     def test_it_returns_the_mentions_with_their_evidence(self, graph, canon):
+        """Nothing stores this any more, and every mention still has one."""
         mentions = canon.lookup(DONAVICH.name)["mentions"]
 
         assert mentions
@@ -478,6 +507,35 @@ class TestLookup:
             "Rumours",
             "Both Names",
         }
+
+    def test_the_evidence_is_the_sentence_and_not_the_paragraph(self, graph, canon):
+        """THE POINT OF THE CHANGE. `Rumours` opens with a sentence naming
+        nobody; the stored evidence quoted it along with everything else."""
+        rumours = [
+            m for m in canon.lookup(DONAVICH.name)["mentions"] if m["section"] == "Rumours"
+        ]
+        assert len(rumours) == 1
+        assert rumours[0]["evidence"] == (
+            f"{STRAHD.name} is spoken of, and so is {DONAVICH.name} again."
+        )
+        assert "Nobody speaks after dark" not in rumours[0]["evidence"]
+
+    def test_the_section_text_is_not_handed_back_with_the_mention(self, graph, canon):
+        """The whole section travels to derive the passage and stops there.
+        Returning it would put the duplication back on the wire and into every
+        caller's context, which is the cost this change exists to remove."""
+        mentions = canon.lookup(DONAVICH.name)["mentions"]
+        assert mentions
+        for mention in mentions:
+            assert "section_text" not in mention
+            assert "text" not in mention
+
+    def test_every_mention_gets_a_passage_even_where_the_offset_is_zero(self, graph, canon):
+        """A falsy offset is a real offset. A truthiness check on it would drop
+        the passage for every entity a section opens with."""
+        mentions = canon.lookup(STRAHD.name)["mentions"]
+        assert mentions
+        assert all(m["evidence"].strip() for m in mentions)
 
     def test_a_mention_records_which_spellings_the_book_used(self, graph, canon):
         mentions = canon.lookup(DONAVICH.name)["mentions"]

@@ -37,8 +37,8 @@ substitution rather than a normalisation: the DDB corpus preserves the book's
 U+2019 while the extractor emits an ASCII quote, so without it `Bildrath's
 Mercantile` scores zero against its own shop. A silent zero is the exact failure
 this module exists to remove, and because the substitution is single-character
-the match offsets still index the original text -- so the evidence span quotes
-the book's typography, not the folded copy.
+the match offsets still index the original text -- so the passage derived from
+an offset quotes the book's typography, not the folded copy.
 
 **Junk is not filtered.** A `Trapdoor` entity matching forty sections makes the
 junk MORE visible, not less, the same way merging duplicate nodes did. Report the
@@ -101,12 +101,6 @@ STRAIGHT_APOSTROPHE = "'"
 #: markdown, where an underscore is always emphasis and never an identifier.
 WORD_CHAR = r"[^\W_]"
 
-#: How much of its section a mention may quote. Long enough to hold the sentence
-#: the name is in with its neighbours, short enough that several hundred mentions
-#: per chapter do not turn the graph into a second copy of the book.
-EVIDENCE_MAX = 320
-
-
 def fold_apostrophe(text: str) -> str:
     """U+2019 -> `'`. Nothing else, and never a distance."""
     return text.replace(CURLY_APOSTROPHE, STRAIGHT_APOSTROPHE)
@@ -159,8 +153,9 @@ class WriteSection:
         """What lands on the node. `id` is the MERGE key, so it is not here.
 
         `text` travels, and it is the reason this node exists rather than a
-        heading string on a mention: evidence has to be quotable, and a quote
-        that cannot be checked against the source is an assertion.
+        heading string on a mention: it is the ONLY copy of the prose in the
+        graph, and every mention's passage is derived from it plus an offset.
+        A quote that cannot be checked against the source is an assertion.
 
         No `chapter_title`: the `:Chapter` this hangs off carries it, and a
         second copy would be the same defect class as the `description` this
@@ -227,15 +222,24 @@ class AliasUse:
 
 @dataclass(frozen=True)
 class WriteMention:
-    """One entity, named in one section, with the words that say so."""
+    """One entity, named in one section, and where in it.
+
+    NO `evidence`. The mention carries `offset` and its `:Section` carries
+    `text`, so the passage is already in the graph -- storing it again put
+    35,383 characters of prose onto 153 nodes, 9,894 of them literal
+    duplicates, because a paragraph naming three entities stored itself once
+    per entity. `backend/canon/passage.py` derives it on read from exactly the
+    pair this node and its section already hold.
+
+    What remains are FACTS rather than copies. `occurrences` is what the scan
+    counted; `offset` is where the section first says the name, and it is the
+    anchor the derivation expands from.
+    """
 
     id: str
     entity_id: str
     section_id: str
     chapter_slug: str
-    #: A literal substring of the section, never assembled or elided -- see
-    #: `evidence_span`.
-    evidence: str
     #: How many times the entity is named in this section, counting a run of
     #: text once however many recorded forms match it. The mention is still one
     #: node; this says how loudly the section says it.
@@ -258,7 +262,6 @@ class WriteMention:
         return {
             "plane": CANON_PLANE,
             "chapter_slug": self.chapter_slug,
-            "evidence": self.evidence,
             "occurrences": self.occurrences,
             "offset": self.offset,
         }
@@ -386,45 +389,6 @@ def mention_pattern(name: str) -> re.Pattern[str] | None:
     return re.compile(rf"(?<!{WORD_CHAR}){re.escape(folded)}(?!{WORD_CHAR})", flags)
 
 
-def evidence_span(text: str, start: int, end: int) -> str:
-    """The words around a match, as a LITERAL substring of `text`.
-
-    Never assembled, never elided, and deliberately carrying no ellipsis: "the
-    evidence quotes its section" is then checkable by `evidence in section.text`
-    rather than merely intended. A quote that has been edited is an assertion
-    about the book, and this module's entire claim is that it makes none.
-
-    The enclosing paragraph when that fits, because a paragraph is the unit the
-    book actually wrote. When it does not fit, a window CENTRED on the match --
-    truncating from the left would produce an evidence span that cut off the very
-    name it is evidence for, which is worse than no span at all -- snapped
-    outward-in to whitespace so the quote does not begin mid-word.
-    """
-    para_start = text.rfind("\n\n", 0, start)
-    para_start = 0 if para_start < 0 else para_start + 2
-    para_end = text.find("\n\n", end)
-    para_end = len(text) if para_end < 0 else para_end
-
-    if para_end - para_start <= EVIDENCE_MAX:
-        return text[para_start:para_end].strip()
-
-    slack = max(EVIDENCE_MAX - (end - start), 0)
-    low = max(para_start, start - slack // 2)
-    high = min(para_end, low + EVIDENCE_MAX)
-    low = max(para_start, min(low, high - EVIDENCE_MAX))
-
-    # Snap inwards to a whitespace boundary, but never past the match itself:
-    # the name is the reason this span exists.
-    if low > para_start:
-        space = text.find(" ", low, start)
-        low = space + 1 if space >= 0 else low
-    if high < para_end:
-        space = text.rfind(" ", end, high)
-        high = space if space >= 0 else high
-
-    return text[low:high].strip()
-
-
 def _spell_rank(form: str, raw: str) -> int:
     """How closely a recorded form spells the text it matched. Lower is closer.
 
@@ -497,7 +461,7 @@ def scan_mentions(
     entities: Iterable[EntityNames],
     chapter_slug: str,
 ) -> list[WriteMention]:
-    """Every (entity, section) pair the text supports, with its evidence.
+    """Every (entity, section) pair the text supports, with where it says so.
 
     `entities` is every canon entity the graph knows -- not only this chapter's.
     An entity is global to the book, so chapter 3 naming Castle Ravenloft is a
@@ -526,7 +490,7 @@ def scan_mentions(
             spans = attribute_spans(section.text, folded, entity.forms)
             if not spans:
                 continue
-            start, end, _ = spans[0]
+            start, _, _ = spans[0]
             used = Counter(form for _, _, form in spans)
             mentions.append(
                 WriteMention(
@@ -534,7 +498,6 @@ def scan_mentions(
                     entity_id=entity.id,
                     section_id=section.id,
                     chapter_slug=chapter_slug,
-                    evidence=evidence_span(section.text, start, end),
                     occurrences=len(spans),
                     offset=start,
                     # Most-used first, ties by name: a stable order, and the
