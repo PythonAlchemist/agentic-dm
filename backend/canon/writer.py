@@ -36,6 +36,7 @@ from backend.graph.schema import (
     ALIAS_OF,
     ARTIFACT_LABEL,
     CANON_ENTITY_TYPES,
+    CO_OCCURS_WITH,
     DESCRIBES,
     GRAPH_SCHEMA,
     HAS_CHAPTER,
@@ -53,6 +54,7 @@ from backend.graph.schema import (
 if TYPE_CHECKING:  # `spine` imports `mint_id` and `BOOK` from here, so the
     # runtime dependency runs one way only -- spine -> writer, aliases -> spine.
     from backend.canon.aliases import WriteAlias
+    from backend.canon.cooccurrence import CoOccurrence
     from backend.canon.spine import ChapterSpine, EntityNames, WriteMention
 
 #: Nodes and edges written here are the book's own canon, shared by every
@@ -1272,15 +1274,21 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
     the last entity answering to it has gone, because the alternative is
     deleting `Barovia` the name because the village was rewritten.
 
-    `ALIAS_OF` is listed beside `REFERS_TO` and `DESCRIBES` in the campaign-data
-    check as a STATEMENT OF INTENT, and a mutation pass showed it changes
-    nothing today: `ALIAS_OF` carries no `chapter_slug`, so `NOT (r.plane =
-    $plane AND r.chapter_slug = $slug)` is `NOT (true AND null)` -- null, which
-    a WHERE excludes anyway. It is kept because those three types are exactly
-    the ones this function deletes, and a reader should be able to see that set
-    in one place rather than deduce one third of it from Cypher's null
-    semantics. No test can distinguish its removal; that is recorded rather than
-    papered over with a test that would not fail.
+    `ALIAS_OF` and `CO_OCCURS_WITH` are listed beside `REFERS_TO` and
+    `DESCRIBES` in the campaign-data check as a STATEMENT OF INTENT, and a
+    mutation pass showed neither changes anything today: neither carries a
+    `chapter_slug`, so `NOT (r.plane = $plane AND r.chapter_slug = $slug)` is
+    `NOT (null AND null)` -- null, which a WHERE excludes anyway. They are kept
+    because those four types are exactly the ones this function removes, and a
+    reader should be able to see that set in one place rather than deduce half
+    of it from Cypher's null semantics. No test can distinguish their removal;
+    that is recorded rather than papered over with a test that would not fail.
+
+    CO-OCCURRENCES GO WITH THE MENTIONS and are not counted into `edges`. They
+    hang off a `:Mention`, which is DETACH DELETEd below, so nothing has to
+    scope them; and `edges` is the figure a human compares against
+    `written_edges`, which a co-occurrence is not. Giving them a `chapter_slug`
+    would sweep them into that count and make the comparison unreadable.
     """
     scope = {"slug": chapter_slug, "plane": CANON_PLANE}
     doomed = _CHAPTER_ENTITIES + f"""
@@ -1291,7 +1299,8 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         doomed
         + f"""
         MATCH (n)-[r]-()
-        WHERE NOT type(r) IN ['{REFERS_TO}', '{DESCRIBES}', '{ALIAS_OF}']
+        WHERE NOT type(r) IN ['{REFERS_TO}', '{DESCRIBES}', '{ALIAS_OF}',
+                              '{CO_OCCURS_WITH}']
           AND NOT (r.plane = $plane AND r.chapter_slug = $slug)
         RETURN count(r) AS c
         """,
@@ -1625,6 +1634,44 @@ def _write_mention(tx, mention: "WriteMention") -> None:
             )
 
 
+def _write_co_occurrence(tx, co_occurrence: "CoOccurrence") -> None:
+    """One mention, and one other entity its own sentence also names.
+
+    MERGEd on the pair, so a re-scan updates rather than doubles -- and so a
+    plan that somehow emitted the same row twice lands one edge. That is why
+    `_write_tx` reports `len(planned)` and a test compares it against the
+    graph's count: MERGE makes a duplicated plan row invisible in the graph, so
+    the only place it can be caught is the difference between those two numbers.
+
+    NO PROPERTIES. It is not in the `accepted`/`proposed` split -- that exists
+    because a model guessed a typed relationship and a hand read found a third
+    of the guesses wrong, and there is nothing here for a reviewer to accept. It
+    carries no `chapter_slug` either: the mention it hangs off carries one, and
+    `_delete_chapter` removes these by DETACH DELETEing the mentions rather than
+    by scoping on a property, so a second copy of the chapter would be a fact in
+    two places free to drift. See `_delete_chapter` for what that costs.
+
+    Both endpoints are MATCHed and a miss RAISES, as everywhere else here: a
+    `MATCH ... MERGE` that matches nothing writes nothing and reports no error.
+    """
+    written = tx.run(
+        f"""
+        MATCH (m:Mention {{id:$mention_id}}), (e:Entity {{id:$entity_id}})
+        MERGE (m)-[r:{CO_OCCURS_WITH}]->(e)
+        RETURN count(r) AS c
+        """,
+        {
+            "mention_id": co_occurrence.mention_id,
+            "entity_id": co_occurrence.entity_id,
+        },
+    ).single()["c"]
+    if not written:
+        raise ValueError(
+            f"co-occurrence endpoint missing: {co_occurrence.mention_id} "
+            f"-> {co_occurrence.entity_id}"
+        )
+
+
 def _write_edge(tx, edge: WriteEdge) -> None:
     """MERGE the relationship, and REFUSE an endpoint that is not there.
 
@@ -1727,9 +1774,20 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, aliases, replace: bool
     it would produce a chapter whose mentions were found under last week's set
     of names -- and would take a second write to correct, which is the two-pass
     write this module refuses.
+
+    CO-OCCURRENCE LANDS LAST, and it is the same rule a third time. Every edge
+    hangs off a `:Mention` node, so the mentions have to exist first; and it is
+    planned from exactly the mentions this transaction just wrote rather than
+    from a re-read of the graph, so the pairs and the nodes they point at cannot
+    disagree.
     """
     # Imported here rather than at module scope: `spine` imports `mint_id` and
     # `BOOK` from this module, so a top-level import would close the cycle.
+    from backend.canon.cooccurrence import (
+        co_occurrence_counts,
+        plan_co_occurrences,
+        widest_sentence,
+    )
     from backend.canon.spine import scan_mentions
 
     existing = tx.run(
@@ -1757,6 +1815,11 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, aliases, replace: bool
     for mention in mentions:
         _write_mention(tx, mention)
 
+    co_occurrences = plan_co_occurrences(spine.sections, mentions)
+    for co_occurrence in co_occurrences:
+        _write_co_occurrence(tx, co_occurrence)
+    names_by_id = {entity.id: entity.name for entity in entities}
+
     return {
         "nodes": len(nodes),
         "edges": len(edges),
@@ -1764,6 +1827,16 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, aliases, replace: bool
         "sections": len(spine.sections),
         "describes": len(spine.describes),
         "mentions": len(mentions),
+        # The PLAN's row count, not the graph's. The write MERGEs, so a plan
+        # that emitted a pair twice would land one edge and look correct; this
+        # figure is what a test compares the graph against to catch that.
+        "co_occurrences": len(co_occurrences),
+        # The number the design says to watch, computed where the pairs are so a
+        # caller cannot report a width its own edges do not support.
+        "co_occurrence_counts": co_occurrence_counts(co_occurrences, names_by_id),
+        "widest_sentence": widest_sentence(
+            spine.sections, mentions, co_occurrences, names_by_id
+        ),
         "scanned_entities": len(entities),
         "alias_uses": sum(len(m.uses) for m in mentions),
         # The census the design asks for, computed where the mentions are so a

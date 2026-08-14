@@ -17,6 +17,7 @@ import pytest
 
 from backend.canon.aliases import WriteAlias
 from backend.canon.assembler import slugify
+from backend.canon.cooccurrence import plan_co_occurrences
 from backend.canon.models import Section
 from backend.canon.passage import derive_passage
 from backend.canon.spine import ChapterSpine, plan_spine, section_id
@@ -32,7 +33,7 @@ from backend.canon.writer import (
     write_chapter,
 )
 from backend.core.database import neo4j_session
-from backend.graph.schema import RelationshipType
+from backend.graph.schema import CO_OCCURS_WITH, RelationshipType
 from backend.scripts.review_queue import fetch_rows, render
 
 pytestmark = pytest.mark.neo4j
@@ -1164,6 +1165,237 @@ class TestSilentNoOpsRaise:
         assert graph.run(
             "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": ghost}
         ).single()["c"] == 0
+
+    def test_a_co_occurrence_whose_mention_is_not_there_raises(self, graph):
+        """Unreachable from `write_chapter`, which plans these from the very
+        mentions it just wrote -- and asserted anyway, because the guard is what
+        makes that ordering safe to rely on rather than merely true today."""
+        from backend.canon.cooccurrence import CoOccurrence
+        from backend.canon.writer import _write_co_occurrence
+
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        orphan = CoOccurrence(
+            mention_id="pytest:nobody@" + section_id(CHAPTER_A, 0),
+            entity_id=church.id,
+        )
+        with pytest.raises(ValueError, match="co-occurrence endpoint missing"):
+            graph.execute_write(_write_co_occurrence, orphan)
+
+
+class TestCoOccurrenceInTheGraph:
+    """`(:Mention)-[:CO_OCCURS_WITH]->(:Entity)`, live.
+
+    The pairing rules are pinned without a database in `test_cooccurrence.py`.
+    What only a real Neo4j can show is that the plan's ROW COUNT survives the
+    write: every statement here MERGEs, so a planner emitting a row twice would
+    land one edge, and only comparing `len(plan)` against the graph's count
+    catches it. That is the failure mode this change is most exposed to -- the
+    quantity under test is a number of pairs.
+    """
+
+    #: Two entities in the first sentence and a third in the second, so the
+    #: right answer (2) differs from both the section-granular answer (6) and
+    #: from a one-directional read (1).
+    BODY = "{a} walks with {b}. Far away, {c} waits alone."
+
+    def _sections(self, a, b, c):
+        return [prose(0, "Section 0", self.BODY.format(a=a.name, b=b.name, c=c.name))]
+
+    def _write_three(self, graph):
+        eva = node("Madam Eva", entity_type="NPC")
+        ismark = node("Ismark", entity_type="NPC")
+        doru = node("Doru", entity_type="NPC")
+        summary = write(
+            graph,
+            CHAPTER_A,
+            [eva, ismark, doru],
+            [],
+            chapter_spine=spine(sections=self._sections(eva, ismark, doru)),
+        )
+        return eva, ismark, doru, summary
+
+    @staticmethod
+    def _edges(graph, chapter_slug: str = CHAPTER_A) -> list[tuple[str, str]]:
+        """`(the mention's own entity, the entity it co-occurs with)`, as a LIST.
+
+        A list rather than a set, and the rows are returned one per relationship
+        rather than collected: a `set` here would absorb exactly the duplicate
+        this test exists to find.
+        """
+        return [
+            (r["from"], r["to"])
+            for r in graph.run(
+                """
+                MATCH (src:Entity)<-[:REFERS_TO]-(m:Mention {chapter_slug:$slug})
+                      -[:CO_OCCURS_WITH]->(dst:Entity)
+                RETURN src.id AS from, dst.id AS to
+                """,
+                {"slug": chapter_slug},
+            )
+        ]
+
+    def test_a_mention_points_at_the_entity_its_sentence_also_names(self, graph):
+        eva, ismark, doru, _ = self._write_three(graph)
+        assert sorted(self._edges(graph)) == sorted(
+            [(eva.id, ismark.id), (ismark.id, eva.id)]
+        )
+
+    def test_the_entity_in_the_next_sentence_is_not_reached(self, graph):
+        eva, ismark, doru, _ = self._write_three(graph)
+        assert doru.id not in {end for pair in self._edges(graph) for end in pair}
+
+    def test_the_graphs_edge_count_equals_the_plans_row_count(self, graph):
+        """The duplicate guard. Every write MERGEs, so a plan that emitted the
+        same (mention, entity) row twice would land one edge and this equality
+        would break -- which is the only place it can be caught."""
+        eva, ismark, doru, summary = self._write_three(graph)
+        planned = plan_co_occurrences(
+            spine(sections=self._sections(eva, ismark, doru)).sections,
+            _scan(graph, CHAPTER_A),
+        )
+        assert len(planned) == 2
+        assert summary["co_occurrences"] == len(planned)
+        assert len(self._edges(graph)) == len(planned)
+
+    def test_no_mention_co_occurs_with_its_own_entity(self, graph):
+        """A sentence naming one entity twice names ONE entity."""
+        eva = node("Madam Eva", entity_type="NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            sections=[prose(0, "Section 0", f"{eva.name} deals for {eva.name} alone.")],
+        ))
+        assert self._edges(graph) == []
+
+    def test_the_edge_carries_no_status(self, graph):
+        """It is deterministic, so it is not in the trust split. A `status`
+        would invite a reader to look for a reviewer who never existed."""
+        self._write_three(graph)
+        props = graph.run(
+            f"""
+            MATCH (:Mention {{chapter_slug:$slug}})-[r:{CO_OCCURS_WITH}]->(:Entity)
+            RETURN properties(r) AS p LIMIT 1
+            """,
+            {"slug": CHAPTER_A},
+        ).single()["p"]
+        assert "status" not in props
+
+    def test_the_pair_can_be_read_back_out_of_the_prose(self, graph):
+        """The whole point of hanging it off a MENTION: the claim is checkable.
+        Both names must appear in the passage the mention derives."""
+        eva, ismark, _, _ = self._write_three(graph)
+        for row in graph.run(
+            f"""
+            MATCH (m:Mention {{chapter_slug:$slug}})-[:{CO_OCCURS_WITH}]->(dst:Entity),
+                  (m)-[:IN_SECTION]->(s:Section), (m)-[:REFERS_TO]->(src:Entity)
+            RETURN s.text AS text, m.offset AS offset, src.name AS src, dst.name AS dst
+            """,
+            {"slug": CHAPTER_A},
+        ):
+            passage = derive_passage(row["text"], row["offset"])
+            assert row["src"] in passage
+            assert row["dst"] in passage
+
+    def test_rewriting_a_chapter_does_not_double_them(self, graph):
+        eva, ismark, doru, _ = self._write_three(graph)
+        before = len(self._edges(graph))
+        write(
+            graph,
+            CHAPTER_A,
+            [eva, ismark, doru],
+            [],
+            chapter_spine=spine(sections=self._sections(eva, ismark, doru)),
+            replace=True,
+        )
+        assert before == 2
+        assert len(self._edges(graph)) == before
+
+    def test_a_replace_takes_them_with_the_mentions_they_hang_off(self, graph):
+        eva, ismark, doru, _ = self._write_three(graph)
+        assert len(self._edges(graph)) == 2
+        write(graph, CHAPTER_A, [node("Church")], [], replace=True)
+        assert self._edges(graph) == []
+
+    def test_a_replace_does_not_count_them_as_canon_edges(self, graph):
+        """`deleted_edges` is what a human compares against `written_edges` to
+        see whether a rewrite removed what it replaced. Co-occurrences are
+        removed with the MENTIONS, not with the edges, so putting a
+        `chapter_slug` on them would inflate that figure by the size of the
+        co-occurrence graph and make the comparison unreadable."""
+        eva, ismark, doru, _ = self._write_three(graph)
+        assert len(self._edges(graph)) == 2
+        summary = write(
+            graph,
+            CHAPTER_A,
+            [eva, ismark, doru],
+            [link(eva, ismark)],
+            chapter_spine=spine(sections=self._sections(eva, ismark, doru)),
+            replace=True,
+        )
+        assert summary["deleted_edges"] == 0  # the first write asserted none
+        assert len(self._edges(graph)) == 2
+
+    def test_they_share_the_chapters_one_transaction(self, graph):
+        """Atomicity, extended. The write raises on an edge whose endpoint no
+        node creates -- and a writer that committed as it went would leave the
+        co-occurrences behind, pointing into a chapter that has no mentions."""
+        eva, ismark = node("Madam Eva", entity_type="NPC"), node("Ismark", "NPC")
+        with pytest.raises(ValueError, match="edge endpoint missing"):
+            write(
+                graph,
+                CHAPTER_A,
+                [eva, ismark],
+                [link(eva, node("Crypt"))],
+                chapter_spine=spine(
+                    sections=[prose(0, "Section 0", f"{eva.name} walks with {ismark.name}.")],
+                ),
+            )
+        assert self._edges(graph) == []
+
+    def test_a_second_chapter_co_occurs_against_an_earlier_chapters_entity(self, graph):
+        """An entity is global to the book, so chapter B naming Madam Eva and
+        Ismark in one sentence is a fact about chapter B whichever chapter
+        minted them."""
+        eva, ismark, _, _ = self._write_three(graph)
+        later = node("Chapel", CHAPTER_B)
+        write(graph, CHAPTER_B, [later], [], chapter_spine=spine(
+            chapter_slug=CHAPTER_B,
+            chapter_index=1,
+            sections=[prose(
+                0, "Section 0", f"{eva.name} met {ismark.name} here.", CHAPTER_B
+            )],
+        ))
+        assert sorted(self._edges(graph, CHAPTER_B)) == sorted(
+            [(eva.id, ismark.id), (ismark.id, eva.id)]
+        )
+
+
+def _scan(graph, chapter_slug: str):
+    """This chapter's mentions, read back out of the graph.
+
+    Read rather than re-planned so the row count compared against the write is
+    the one the graph actually holds.
+    """
+    from backend.canon.spine import WriteMention
+
+    return [
+        WriteMention(
+            id=r["id"],
+            entity_id=r["entity"],
+            section_id=r["section"],
+            chapter_slug=chapter_slug,
+            occurrences=r["occurrences"],
+            offset=r["offset"],
+        )
+        for r in graph.run(
+            """
+            MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention {chapter_slug:$slug})
+                  -[:IN_SECTION]->(s:Section)
+            RETURN m.id AS id, e.id AS entity, s.id AS section,
+                   m.occurrences AS occurrences, m.offset AS offset
+            """,
+            {"slug": chapter_slug},
+        )
+    ]
 
 
 class TestDescriptionIsGone:

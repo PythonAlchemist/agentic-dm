@@ -17,7 +17,7 @@ import argparse
 import json
 import sys
 from collections import Counter
-from dataclasses import fields
+from dataclasses import asdict, fields
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -196,6 +196,50 @@ def format_mentions(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def format_co_occurrence(summary: dict) -> str:
+    """The co-occurrence census, printed on every write beside the mentions.
+
+    THE POINT OF PRINTING IT IS THE RATIO AND THE WIDEST SENTENCE. A sentence
+    naming n entities is n(n-1) edges, so the total is quadratic in the widest
+    span the boundary rule admits -- and a rule that quietly swallowed a
+    paragraph would show up here as a "sentence" naming eight things long before
+    it showed up as a slow query. The three loaded chapters run 0.65 edges per
+    mention with a widest sentence of three; a chapter that reports several
+    edges per mention is telling you the span rule has come loose.
+
+    A ranking too, for the same reason the mention census has one: nothing
+    filters junk out of the scan, so a common noun promoted to an entity
+    dominates this list rather than hiding in the total.
+    """
+    pairs = summary.get("co_occurrences", 0)
+    mentions = summary.get("mentions", 0)
+    counts = summary.get("co_occurrence_counts", [])
+    per_mention = pairs / mentions if mentions else 0.0
+    lines = [
+        f"  co-occurrence: {pairs} CO_OCCURS_WITH over {mentions} mentions "
+        f"({per_mention:.2f} per mention) -- WATCH THIS RATIO, it is quadratic "
+        "in the widest sentence",
+    ]
+    widest = summary.get("widest_sentence")
+    if widest is None:
+        lines.append("    no sentence in this chapter names two entities")
+    else:
+        lines.append(
+            f"    widest sentence: {widest.entities} entities "
+            f"({widest.entities * (widest.entities - 1)} edges) "
+            + ", ".join(widest.names)
+        )
+        lines.append(f"      {widest.passage!r}")
+    lines.append(
+        f"    top {TOP_MENTIONS} by co-occurring pairs "
+        "(JUNK IS NOT FILTERED -- read this list):"
+    )
+    lines.extend(f"    {count:4d}  {name}" for name, count in counts[:TOP_MENTIONS])
+    if len(counts) > TOP_MENTIONS:
+        lines.append(f"    ... and {len(counts) - TOP_MENTIONS} more entities with fewer")
+    return "\n".join(lines)
+
+
 def format_report(report: FilterReport) -> str:
     """Every drop count, printed whether or not it is zero.
 
@@ -325,6 +369,18 @@ def run_artifact(
             "mentions": replaced.get("mentions", 0),
             "scanned_entities": replaced.get("scanned_entities", 0),
             "mention_counts": replaced.get("mention_counts", []),
+            # Which entities the book names in the same SENTENCE. Recorded here
+            # rather than only printed, because the figure that matters is how
+            # it moves across chapters: the total is quadratic in the widest
+            # sentence, so a boundary rule coming loose in chapter 12 shows up
+            # as a ratio, and a terminal has scrolled away by then.
+            "co_occurrences": replaced.get("co_occurrences", 0),
+            "co_occurrence_counts": replaced.get("co_occurrence_counts", []),
+            "widest_sentence": (
+                None
+                if replaced.get("widest_sentence") is None
+                else asdict(replaced["widest_sentence"])
+            ),
             # What the entities of this chapter are called, and how often the
             # book reached for a name other than the canonical one.
             "aliases": replaced.get("aliases", 0),
@@ -541,6 +597,7 @@ def main() -> None:
         )
     print(f"  wrote {summary['nodes']} nodes and {summary['edges']} edges to {args.chapter}")
     print(format_mentions(summary))
+    print(format_co_occurrence(summary))
 
     args.runs_dir.mkdir(parents=True, exist_ok=True)
     out_path = args.runs_dir / f"{args.chapter}.json"
