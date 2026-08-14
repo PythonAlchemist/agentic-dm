@@ -166,6 +166,103 @@ class TestTheMatchingRule:
         assert mention_pattern("   ") is None
 
 
+class TestEmphasisIsABoundary:
+    """Markdown emphasis delimits a name; it does not become part of it.
+
+    `_` is a word character to Python's `\\w`, so the lookarounds that make
+    matching whole-word also made the book's own italics opaque: `_Tome of
+    Strahd_` is how this book sets an item name, and the artifact the whole
+    campaign turns on had ZERO mentions because of it.
+
+    Every test below fixes WHICH CHARACTERS COUNT AS A BOUNDARY. None of them
+    relaxes HOW STRICT the boundary is, and the second half of this class
+    exists to make that failure mode loud: swap the lookarounds for `\\b`, or
+    drop them, and those tests fail.
+    """
+
+    def test_an_emphasised_multi_word_name_is_still_the_name(self):
+        """The defect, exactly. `_Tome of Strahd_` is the book's own setting."""
+        assert mention_pattern("Tome of Strahd").search("he reads the _Tome of Strahd_ aloud")
+
+    def test_an_emphasised_single_word_name_is_still_the_name(self):
+        assert mention_pattern("Sunsword").search("the _Sunsword_ blazes")
+
+    def test_the_match_is_the_name_and_not_its_delimiters(self):
+        """Offsets index the section's own text, so a span that swallowed the
+        underscores would put them in the evidence and in `offset`."""
+        match = mention_pattern("Sunsword").search("the _Sunsword_ blazes")
+        assert match.group() == "Sunsword"
+        assert match.span() == (5, 13)
+
+    def test_emphasis_on_one_side_only_is_still_a_boundary(self):
+        """Bold-inside-italic and the book's `_**Name.** _` run-in headings put
+        a delimiter on one side and ordinary punctuation on the other."""
+        assert mention_pattern("Ismark").search("_Ismark, _ he said")
+        assert mention_pattern("Ismark").search("said _Ismark_")
+
+    def test_stars_are_a_boundary_too(self):
+        """PINNED, NOT FIXED: `*` was never a `\\w` character, so bold and
+        star-italic already matched and this test passed before the change.
+        It is here because the fix redefines the boundary class, and a class
+        that forgot `*` would silently break the emphasis the book uses most."""
+        assert mention_pattern("Sunsword").search("the *Sunsword* blazes")
+        assert mention_pattern("Sunsword").search("the **Sunsword** blazes")
+        assert mention_pattern("Tome of Strahd").search("the _**Tome of Strahd**_")
+
+    def test_emphasis_does_not_relax_the_case_rule(self):
+        """PINNED. `Light` is a real LORE entity; italicised prose is still
+        prose, and `_light_` is not a proper noun. Fails if the fix reaches for
+        `re.IGNORECASE` instead of for the character class."""
+        assert not mention_pattern("Light").search("a shaft of _light_ thrusts")
+
+    def test_emphasis_does_not_relax_whole_word_at_the_end(self):
+        """PINNED. Fails if the fix drops the trailing lookaround rather than
+        redefining it: `Strah` must not find `Strahd`, emphasised or not."""
+        assert not mention_pattern("Strah").search("_Strahd_ waits above")
+        assert not mention_pattern("Ismar").search("_Ismark_ waits below")
+
+    def test_emphasis_does_not_relax_whole_word_at_the_start(self):
+        """PINNED. Fails if the fix drops the leading lookaround."""
+        assert not mention_pattern("Doru").search("_Kodoru_ stood in the doorway")
+
+    def test_emphasis_does_not_make_a_plural_the_singular(self):
+        """PINNED. The one liberty is the delimiter, not the suffix."""
+        assert not mention_pattern("Trapdoor").search("two _trapdoors_ here")
+
+    def test_the_scan_finds_an_emphasised_name_and_quotes_the_italics(self):
+        """End to end, in the shape the corpus actually has it: the sentence
+        `data/ddb/cos/introduction.md` writes, and the mention it never made.
+
+        The evidence quotes the section verbatim, delimiters included, because
+        the offsets index the section's own text and not a stripped copy."""
+        body = "Strahd's own words are recorded in the _Tome of Strahd_."
+        spine = spine_of([sec("Adventure Overview", 3, body)])
+        mentions = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:tome-of-strahd", "Tome of Strahd")],
+            CHAPTER,
+        )
+        assert [m.entity_id for m in mentions] == ["cos:tome-of-strahd"]
+        assert mentions[0].occurrences == 1
+        assert mentions[0].offset == body.index("Tome of Strahd")
+        assert "_Tome of Strahd_" in mentions[0].evidence
+        assert mentions[0].uses == (AliasUse(name="Tome of Strahd", occurrences=1),)
+
+    def test_the_scan_counts_an_emphasised_and_a_plain_naming_once_each(self):
+        """PARTLY PINNED: the plain naming already counted, the emphasised one
+        did not, so this asserts the arithmetic the fix changes -- one
+        occurrence becomes two, and the mention is still one node."""
+        body = "The _Tome of Strahd_ lies here. Ireena has read the Tome of Strahd."
+        spine = spine_of([sec("Adventure Overview", 3, body)])
+        mentions = scan_mentions(
+            spine.sections,
+            [EntityNames("cos:tome-of-strahd", "Tome of Strahd")],
+            CHAPTER,
+        )
+        assert len(mentions) == 1
+        assert mentions[0].occurrences == 2
+
+
 class TestTheScan:
     def test_an_entity_named_in_a_section_gets_a_mention(self):
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays in the chapel.")])
