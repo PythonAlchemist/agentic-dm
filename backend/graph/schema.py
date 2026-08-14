@@ -204,6 +204,29 @@ AUTHORED_LOCATION_SUBTYPES: frozenset[LocationSubtype] = (
     frozenset(LocationSubtype) - DERIVED_LOCATION_SUBTYPES
 )
 
+# The one item label: an ADDITIONAL label on the handful of ITEMs the campaign
+# turns on. `MATCH (n:Artifact)` answers "where are the artifacts", which a DM
+# asks constantly and which a flat :ITEM -- Sunsword beside oil lamp and
+# tinderbox -- cannot answer at all.
+#
+# NOT A RUNG, and the distinction is load-bearing. A LocationSubtype is a
+# position on a ladder, so writing one clears the others; this is orthogonal to
+# that ladder and to any item label that might come later, so nothing
+# supersedes it and it supersedes nothing -- least of all the :ITEM it narrows.
+#
+# HAND-AUTHORED, in `canon/seeds/location-subtypes.yaml` beside the location
+# rungs. No convention in the text marks an artifact the way a suffixed key
+# marks a room, so there is nothing to derive it from and nothing infers it
+# from a name. An item with no authored entry stays plain :ITEM: there is no
+# `:mundane`, because mundane is the ABSENCE of significance and the honest
+# encoding of an absence is no label.
+#
+# A bare string rather than a one-member enum, and cased like `:Entity` and
+# `:Chapter` rather than like an extracted type, because it is neither a
+# taxonomy nor something the extractor proposes. A second item label is a
+# design decision, not an entry to append here.
+ARTIFACT_LABEL = "Artifact"
+
 # A directional gloss for every relationship type offered to the extraction prompt
 # (i.e. every type in a layer vocabulary -- see `layer_vocabulary`). A bare type
 # name like OWNS does not say which endpoint is the owner; the gloss does. Types

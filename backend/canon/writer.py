@@ -19,7 +19,7 @@ refuses rather than reaching for DETACH DELETE.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Container, Mapping
 from dataclasses import dataclass, field, replace
 
 from neo4j.exceptions import Neo4jError
@@ -31,6 +31,7 @@ from backend.canon.models import CandidateEdge, CandidateNode
 from backend.canon.sections import KEYED_HEADING
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
+    ARTIFACT_LABEL,
     CANON_ENTITY_TYPES,
     GRAPH_SCHEMA,
     LAYER_MAP,
@@ -86,6 +87,11 @@ LOCATION_SUBTYPE_LABELS: frozenset[str] = frozenset(s.value for s in LocationSub
 #: a position in the LOCATION hierarchy, so an ITEM keyed as `E5d. Trapdoor`
 #: gets none -- an item is not on that ladder.
 LOCATION_LABEL = EntityType.LOCATION.value
+
+#: The label an entity must already carry for `:Artifact` to mean anything, the
+#: way `LOCATION_LABEL` gates a rung. `:Artifact` narrows `:ITEM`, so a place or
+#: a person that happens to share an authored name is not on that shelf.
+ITEM_LABEL = EntityType.ITEM.value
 
 logger = logging.getLogger(__name__)
 
@@ -207,6 +213,12 @@ class WriteNode:
     #: is. Empty by default and never defaulted to a value: an unclassified
     #: place must be visibly unclassified.
     location_subtype: str = ""
+    #: Whether the authored seed names this item one of the campaign's
+    #: artifacts. A BOOL rather than a second `location_subtype`-shaped scalar:
+    #: there is exactly one item label, so there is no sibling for it to be
+    #: chosen against and nothing to record but membership. False by default,
+    #: and never defaulted true: an item nobody authored is a plain item.
+    is_artifact: bool = False
 
     @property
     def labels(self) -> tuple[str, ...]:
@@ -238,6 +250,30 @@ class WriteNode:
         if LOCATION_LABEL not in self.labels:
             return ""
         return self.location_subtype if self.location_subtype in LOCATION_SUBTYPE_LABELS else ""
+
+    @property
+    def artifact_label(self) -> str:
+        """`:Artifact`, or `""` for the items that are just items.
+
+        Gated on the node actually being an ITEM, the way `subtype_label` is
+        gated on LOCATION. The node passed in already carries its unioned types,
+        so a disputed `:ITEM:LORE` qualifies on the half of the disagreement
+        that is an item.
+
+        A THIRD property rather than a third case in either of the other two,
+        because it is written a third way. A type label is only ever ADDED; a
+        rung REPLACES the rung a node was wearing; this is added and never
+        replaced, because it is not on the rung ladder and has no sibling to
+        supersede it.
+
+        No allowlist filter, unlike `labels` and `subtype_label`. Those two
+        interpolate text that ultimately came from an artifact or a hand-edited
+        YAML, so each is filtered through a frozenset of the ontology's own
+        names. Here the label text is this module's constant and the seed
+        contributes only the NAME that selects a node -- nothing a YAML can say
+        reaches Cypher.
+        """
+        return ARTIFACT_LABEL if self.is_artifact and ITEM_LABEL in self.labels else ""
 
     @property
     def properties(self) -> dict:
@@ -828,6 +864,7 @@ def plan_write(
     *,
     chapter_place: str | None = None,
     subtypes: Mapping[str, LocationSubtype] | None = None,
+    artifacts: Container[str] | None = None,
 ) -> tuple[list[WriteNode], list[WriteEdge], FilterReport]:
     """Decide exactly what to write, and count every candidate that is dropped.
 
@@ -850,6 +887,12 @@ def plan_write(
     rung, read from a seed by the caller the way the gazetteer is. It WINS over
     the derived rung: the village is a chapter's own place, which derives SITE,
     and a human has said SETTLEMENT. A key does not overrule a human.
+
+    `artifacts` is the slugs of the items that wear `:Artifact`, out of the same
+    seed and handed in the same way. Wholly authored, with no derived half at
+    all: no convention in the text marks an artifact the way a suffixed key
+    marks a room. An item absent from it stays plain `:ITEM`, the same
+    no-default rule the rungs follow.
 
     Filters, in this order:
 
@@ -1014,10 +1057,12 @@ def plan_write(
     else:
         chapter_place_ids = set()
 
-    # Types first, rung second, in two passes: `_subtype_of` reads `labels`, and
-    # a node still carrying one sample's type would answer "not a location" for
-    # a place four other samples typed LOCATION.
+    # Types first, the authored labels second, in two passes: `_subtype_of` and
+    # `artifact_label` both read `labels`, and a node still carrying one
+    # sample's type would answer "not a location" for a place four other samples
+    # typed LOCATION, or "not an item" for a disputed `:ITEM:LORE`.
     subtypes = subtypes or {}
+    artifacts = artifacts if artifacts is not None else frozenset()
     by_id = {
         node_id: replace(written, entity_types=tuple(sorted(set(types_seen[node_id]))))
         for node_id, written in by_id.items()
@@ -1028,6 +1073,12 @@ def plan_write(
             location_subtype=_subtype_of(
                 written, keyed, key_by_id, chapter_place_ids, subtypes
             ),
+            # The seed's own matching rule: the slug of the WHOLE name, never a
+            # substring. `Holy Symbol` and `Holy Symbol of Ravenkind` are two
+            # different objects in this book, and the ITEM gate lives in
+            # `artifact_label` so a non-item authored by name is filtered where
+            # the label is decided rather than here.
+            is_artifact=slugify(written.name) in artifacts,
         )
         for node_id, written in by_id.items()
     }
@@ -1244,6 +1295,16 @@ def _write_node(tx, node: WriteNode) -> None:
     this docstring cited `Church` keyed in chapter 3 and mentioned in chapter 4,
     and `mint_id` makes that two different nodes. The guard is right; that
     reason for it was not.
+
+    `:Artifact` IS ONLY EVER ADDED, and that is deliberately a third behaviour
+    rather than a second copy of either. It is not a rung -- nothing is its
+    sibling, so there is nothing for it to supersede and nothing that supersedes
+    it -- and the rung REMOVE above is scoped to `LOCATION_SUBTYPE_LABELS`,
+    which contains neither this label nor the `:ITEM` it narrows. A node that a
+    disputed type makes both an item and a place therefore keeps `:Artifact`
+    through every rung its place-half is rewritten with. Un-authoring one is a
+    `--replace`, not a REMOVE emitted from the absence of a seed entry: the
+    absence would also be there for a caller that simply passed no seed.
     """
     labels = "".join(f":{label}" for label in node.labels)
     clauses = []
@@ -1255,6 +1316,8 @@ def _write_node(tx, node: WriteNode) -> None:
         )
         clauses.append(f"REMOVE e{superseded}")
         clauses.append(f"SET e:{node.subtype_label}")
+    if node.artifact_label:
+        clauses.append(f"SET e:{node.artifact_label}")
     clauses.append("SET e += $props")
     tx.run(
         f"MERGE (e:Entity {{id:$id}}) {' '.join(clauses)}",

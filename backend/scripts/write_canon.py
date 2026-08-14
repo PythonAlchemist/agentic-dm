@@ -25,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode
-from backend.canon.seed_loader import LOCATION_SUBTYPE_SEED, load_location_subtypes
+from backend.canon.seed_loader import (
+    LOCATION_SUBTYPE_SEED,
+    load_artifacts,
+    load_location_subtypes,
+)
 from backend.canon.structure import place_from_chapter_title
 from backend.canon.writer import (
     CampaignDataAttached,
@@ -252,7 +256,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--location-subtypes",
         type=Path,
         default=LOCATION_SUBTYPE_SEED,
-        help="Hand-authored REGION/SETTLEMENT/WILD seed. SITE and AREA are derived.",
+        help=(
+            "Hand-authored label seed: REGION/SETTLEMENT/WILD, and the items that "
+            "wear :Artifact. SITE and AREA are derived and are not in it."
+        ),
     )
     parser.add_argument(
         "--runs-dir",
@@ -307,6 +314,11 @@ def main() -> None:
     subtypes = load_location_subtypes(args.location_subtypes)
     print(f"  location subtypes: {len(subtypes)} authored from {args.location_subtypes}")
 
+    # The same file, read the same way: one hand-authored seed for every label a
+    # human authors, so the rung and the item label cannot drift apart.
+    artifacts = load_artifacts(args.location_subtypes)
+    print(f"  artifacts: {len(artifacts)} authored from {args.location_subtypes}")
+
     chapter_place = chapter_place_of_run(extraction_run)
     print(f"  chapter place: {chapter_place!r} (parent of this chapter's top-level areas)")
 
@@ -317,6 +329,7 @@ def main() -> None:
         args.chapter,
         chapter_place=chapter_place,
         subtypes=subtypes,
+        artifacts=artifacts,
     )
     print(format_report(report))
 

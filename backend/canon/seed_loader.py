@@ -154,6 +154,46 @@ def load_location_subtypes(path: str | Path = LOCATION_SUBTYPE_SEED) -> dict[str
     return subtypes
 
 
+def load_artifacts(path: str | Path = LOCATION_SUBTYPE_SEED) -> frozenset[str]:
+    """The slugs of the items that wear `:Artifact`.
+
+    The same seed as the location rungs, read the same way and handed to
+    `plan_write` the same way: one hand-authored file and one mechanism, because
+    two mechanisms for two kinds of authored label is two things that drift.
+
+    Slugs, matched the way `mint_id` mints ids and the way the rungs match, so
+    the seed needs one spelling of a name rather than every apostrophe variant
+    of it. EXACT, never a substring: chapter 3's `Holy Symbol` is a wooden sun
+    nailed to a church wall, and a substring match would make it the Holy Symbol
+    of Ravenkind.
+
+    ONE refusal, unlike `validate_location_subtypes`' four, because only one
+    failure here is silent. A name that slugifies to nothing can never match
+    anything, and an item it was meant to label reads in the graph exactly like
+    an item nobody authored. A repeated name is not a problem the way a repeated
+    location is: there is one item label, so two entries cannot disagree about
+    which one an item wears, and a set absorbs the duplicate.
+
+    Returns a frozenset and touches no database, for the reason
+    `load_location_subtypes` returns a plain mapping: `plan_write` is pure, so
+    the file is read by its caller and handed in.
+    """
+    data = yaml.safe_load(Path(path).read_text()) or {}
+
+    slugs: set[str] = set()
+    problems: list[str] = []
+    for name in data.get("artifacts") or []:
+        slug = slugify(name) if name else ""
+        if not slug:
+            problems.append(f"artifact name {name!r} slugifies to nothing")
+            continue
+        slugs.add(slug)
+
+    if problems:
+        raise ValueError("invalid artifact seed:\n  " + "\n  ".join(problems))
+    return frozenset(slugs)
+
+
 def extractable_subset(data: dict, source: str = DEFAULT_SOURCE) -> dict:
     """The nodes and edges an extraction run over `source` should be graded against.
 

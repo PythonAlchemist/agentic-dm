@@ -1,4 +1,12 @@
-# Curse of Strahd -- the hand-authored half of the LOCATION hierarchy.
+# Curse of Strahd -- every label a human authors by hand.
+#
+# Two blocks, `locations` and `artifacts`, in ONE file loaded ONE way. They are
+# the same kind of claim -- a person naming something the text does not mark --
+# and splitting them across two files would be two mechanisms that drift.
+#
+# =========================== LOCATIONS ===========================
+#
+# The hand-authored half of the LOCATION hierarchy.
 #
 # Only REGION, SETTLEMENT and WILD appear here. SITE and AREA are DERIVED from
 # the book's own key convention -- an unsuffixed key like `E5` is a building, a
@@ -55,3 +63,26 @@ locations:
     subtype: WILD
   - name: Yester Hill
     subtype: WILD
+
+# =========================== ARTIFACTS ===========================
+#
+# The three items the Tarokka reading sends the party after. They wear
+# `:Artifact` BESIDE `:ITEM`, never instead of it, and `MATCH (n:Artifact)` is
+# the query a DM runs constantly -- one a flat :ITEM, with Sunsword filed beside
+# oil lamp and tinderbox, cannot answer at all.
+#
+# Not a rung and not a ladder: there is ONE item label. `:Book` and `:mundane`
+# were both considered and rejected -- nobody would ever traverse the first, and
+# the second is the absence of significance, which is honestly encoded as the
+# absence of a label. An item missing from this list stays plain `:ITEM`, the
+# same no-default rule the locations above follow.
+#
+# Names only, because an entry is a membership claim rather than a
+# classification. Matched on the SLUG of the WHOLE name and NEVER on a
+# substring: chapter 3's `Holy Symbol` is a wooden sun-shaped one nailed to a
+# church wall, and a substring match would quietly make it the Holy Symbol of
+# Ravenkind -- a wrong label no query could see.
+artifacts:
+  - Tome of Strahd
+  - Holy Symbol of Ravenkind
+  - Sunsword
