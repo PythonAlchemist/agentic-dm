@@ -11,13 +11,12 @@ import re
 import pytest
 
 from backend.canon.models import Section
+from backend.canon.passage import PASSAGE_MAX, derive_passage
 from backend.canon.spine import (
-    EVIDENCE_MAX,
     AliasUse,
     ChapterSpine,
     EntityNames,
     WriteMention,
-    evidence_span,
     fold_apostrophe,
     mention_id,
     mention_pattern,
@@ -229,12 +228,12 @@ class TestEmphasisIsABoundary:
         """PINNED. The one liberty is the delimiter, not the suffix."""
         assert not mention_pattern("Trapdoor").search("two _trapdoors_ here")
 
-    def test_the_scan_finds_an_emphasised_name_and_quotes_the_italics(self):
+    def test_the_scan_finds_an_emphasised_name_and_anchors_on_it(self):
         """End to end, in the shape the corpus actually has it: the sentence
         `data/ddb/cos/introduction.md` writes, and the mention it never made.
 
-        The evidence quotes the section verbatim, delimiters included, because
-        the offsets index the section's own text and not a stripped copy."""
+        The offset indexes the section's own text and not a stripped copy, which
+        is what lets the passage be derived from the pair later."""
         body = "Strahd's own words are recorded in the _Tome of Strahd_."
         spine = spine_of([sec("Adventure Overview", 3, body)])
         mentions = scan_mentions(
@@ -245,8 +244,10 @@ class TestEmphasisIsABoundary:
         assert [m.entity_id for m in mentions] == ["cos:tome-of-strahd"]
         assert mentions[0].occurrences == 1
         assert mentions[0].offset == body.index("Tome of Strahd")
-        assert "_Tome of Strahd_" in mentions[0].evidence
         assert mentions[0].uses == (AliasUse(name="Tome of Strahd", occurrences=1),)
+        assert derive_passage(body, mentions[0].offset) == (
+            "Strahd's own words are recorded in the Tome of Strahd."
+        )
 
     def test_the_scan_counts_an_emphasised_and_a_plain_naming_once_each(self):
         """PARTLY PINNED: the plain naming already counted, the emphasised one
@@ -307,35 +308,42 @@ class TestTheScan:
         assert mentions[0].id == mention_id("cos:donavich", f"cos:{CHAPTER}#14")
         assert mentions[0].id == f"cos:donavich@cos:{CHAPTER}#14"
 
-    def test_every_mention_carries_a_non_empty_evidence_span(self):
+    def test_a_mention_stores_no_copy_of_the_prose(self):
+        """THE DELETION. A mention is `offset` and `occurrences`; the words are
+        the section's, and storing them again put 35,383 characters into the
+        graph that were already in it -- 9,894 of them literal duplicates,
+        because a paragraph naming three entities stored itself three times."""
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays before the altar.")])
         mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
-        assert mentions[0].evidence.strip()
+        assert "evidence" not in mentions[0].properties
+        assert not hasattr(mentions[0], "evidence")
 
-    def test_the_evidence_is_a_literal_substring_of_its_section(self):
-        """A quote that is not in the section is not evidence. Asserted as an
-        exact substring so "quoting its section" is checkable rather than
-        merely intended -- which is also why nothing here inserts an ellipsis."""
-        body = "The priest is broken.\n\nDonavich prays before the altar, weeping.\n"
-        spine = spine_of([sec("E5f. Chapel", 14, body)])
+    def test_the_facts_about_the_mention_survive_the_deletion(self):
+        """`occurrences` and `offset` are NOT copies -- they are what the scan
+        learned, and `offset` is what the passage is derived from."""
+        spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays. Donavich weeps.")])
         mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
-        assert mentions[0].evidence in body
+        assert mentions[0].properties["occurrences"] == 2
+        assert mentions[0].properties["offset"] == 0
 
-    def test_the_evidence_quotes_the_paragraph_the_match_is_in(self):
+    def test_the_offset_and_the_section_together_still_give_a_passage(self):
+        """The replacement, end to end: nothing is stored, and a reader still
+        gets the sentence."""
         body = "A far paragraph about nobody.\n\nDonavich prays before the altar.\n"
         spine = spine_of([sec("E5f. Chapel", 14, body)])
         mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
-        assert mentions[0].evidence == "Donavich prays before the altar."
+        assert derive_passage(body, mentions[0].offset) == "Donavich prays before the altar."
 
-    def test_the_evidence_still_contains_the_name_when_the_paragraph_is_huge(self):
-        """A window, not a truncation from the left: an evidence span that cut
-        the very name it is evidence for would be worse than none."""
+    def test_the_derived_passage_holds_the_name_when_the_paragraph_is_huge(self):
+        """A window, not a truncation from the left: a passage that cut the very
+        name it is evidence for would be worse than none."""
         body = "filler word " * 400 + "Donavich prays. " + "more filler " * 400
         spine = spine_of([sec("E5f. Chapel", 14, body)])
         mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
-        assert "Donavich" in mentions[0].evidence
-        assert mentions[0].evidence in body
-        assert len(mentions[0].evidence) <= EVIDENCE_MAX
+        passage = derive_passage(body, mentions[0].offset)
+        assert "Donavich" in passage
+        assert passage in body
+        assert len(passage) <= PASSAGE_MAX
 
     def test_a_straight_apostrophe_in_a_name_finds_the_books_curly_one(self):
         """The end-to-end form of the folding: an ASCII name out of the
@@ -349,10 +357,10 @@ class TestTheScan:
         )
         assert len(mentions) == 1
 
-    def test_the_evidence_quotes_the_book_not_the_folded_text(self):
+    def test_the_passage_quotes_the_book_not_the_folded_text(self):
         """Folding U+2019 is a one-for-one character substitution, so match
-        offsets index the original exactly and the quote keeps the book's own
-        typography."""
+        offsets index the original exactly and the derived passage keeps the
+        book's own typography."""
         body = "You step into Bildrath’s Mercantile."
         spine = spine_of([sec("E1. Bildrath’s Mercantile", 4, body)])
         mentions = scan_mentions(
@@ -360,7 +368,7 @@ class TestTheScan:
             [EntityNames("cos:bildraths-mercantile", "Bildrath's Mercantile")],
             CHAPTER,
         )
-        assert "’" in mentions[0].evidence
+        assert "’" in derive_passage(body, mentions[0].offset)
 
     def test_the_offset_points_at_the_first_occurrence(self):
         """FIRST, with a second one present to prove it. A section that names
@@ -584,14 +592,15 @@ class TestScanningUnderAnAlias:
         )
         assert [m.entity_id for m in found] == ["cos:strahd"]
 
-    def test_the_evidence_quotes_the_section_the_alias_matched(self):
-        spine = spine_of([sec("E5f. Chapel", 14, "Nobody here. Strahd is watching.")])
+    def test_the_passage_quotes_the_sentence_the_alias_matched(self):
+        body = "Nobody here. Strahd is watching."
+        spine = spine_of([sec("E5f. Chapel", 14, body)])
         mention = scan_mentions(
             spine.sections,
             [EntityNames("cos:strahd", "Strahd von Zarovich", aliases=("Strahd",))],
             CHAPTER,
         )[0]
-        assert "Strahd" in mention.evidence
+        assert derive_passage(body, mention.offset) == "Strahd is watching."
 
     def test_the_offset_points_at_the_alias_not_the_canonical_name(self):
         body = "Nobody here. Strahd is watching."
@@ -603,7 +612,7 @@ class TestScanningUnderAnAlias:
         )[0]
         assert body[mention.offset:].startswith("Strahd")
 
-    def test_the_evidence_quotes_the_first_appearance_whichever_form_it_used(self):
+    def test_the_offset_points_at_the_first_appearance_whichever_form_it_used(self):
         """The alias comes first and the full name second, and the LONGER span
         is resolved first internally -- so a mention that reported the last span
         it happened to keep would quote the wrong half of the section."""
@@ -651,10 +660,6 @@ class TestHelpers:
         sid = section_id(CHAPTER, 14)
         assert mention_id("cos:donavich", sid).endswith(sid)
 
-    @pytest.mark.parametrize("start", [0, 5, 40])
-    def test_evidence_never_comes_back_empty(self, start):
-        text = "a" * 60
-        assert evidence_span(text, start, start + 1)
 
 
 class TestTheRealChapterThree:
@@ -739,10 +744,10 @@ def test_a_mention_is_comparable_by_value():
     the writer, both of which need value equality rather than identity."""
     a = WriteMention(
         id="x", entity_id="e", section_id="s", chapter_slug=CHAPTER,
-        evidence="q", occurrences=1, offset=0,
+        occurrences=1, offset=0,
     )
     b = WriteMention(
         id="x", entity_id="e", section_id="s", chapter_slug=CHAPTER,
-        evidence="q", occurrences=1, offset=0,
+        occurrences=1, offset=0,
     )
     assert a == b

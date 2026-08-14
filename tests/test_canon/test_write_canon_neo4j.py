@@ -18,6 +18,7 @@ import pytest
 from backend.canon.aliases import WriteAlias
 from backend.canon.assembler import slugify
 from backend.canon.models import Section
+from backend.canon.passage import derive_passage
 from backend.canon.spine import ChapterSpine, plan_spine, section_id
 from backend.canon.writer import (
     CANON_PLANE,
@@ -963,37 +964,62 @@ class TestTheSpineInTheGraph:
 
 
 class TestMentionsInTheGraph:
-    def test_a_mention_joins_its_entity_to_its_section_with_evidence(self, graph):
+    def test_a_mention_joins_its_entity_to_its_section_and_points_into_it(self, graph):
         eva = node("Madam Eva", entity_type="NPC")
+        body = f"Nobody is here. {named('Madam Eva')} deals the cards."
         write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
-            sections=[prose(0, "Section 0", f"{named('Madam Eva')} deals the cards.")],
+            sections=[prose(0, "Section 0", body)],
         ))
 
         row = graph.run(
             """
             MATCH (e:Entity {id:$id})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
-            RETURN m.evidence AS evidence, m.occurrences AS occurrences,
-                   m.chapter_slug AS chapter, m.plane AS plane, s.id AS section
+            RETURN properties(m) AS props, m.offset AS offset, m.occurrences AS occurrences,
+                   m.chapter_slug AS chapter, m.plane AS plane,
+                   s.id AS section, s.text AS text
             """,
             {"id": eva.id},
         ).single()
-        assert row["evidence"] == f"{named('Madam Eva')} deals the cards."
+        assert "evidence" not in row["props"]
         assert row["occurrences"] == 1
         assert row["chapter"] == CHAPTER_A
         assert row["plane"] == CANON_PLANE
         assert row["section"] == section_id(CHAPTER_A, 0)
+        # The offset indexes the SECTION's own text, which is the whole basis of
+        # deriving the passage rather than storing it.
+        assert row["text"][row["offset"]:].startswith(named("Madam Eva"))
+        assert derive_passage(row["text"], row["offset"]) == (
+            f"{named('Madam Eva')} deals the cards."
+        )
 
-    def test_every_mention_carries_a_non_empty_evidence_span(self, graph):
-        """Success criterion 4. Asserted over the graph rather than the plan,
-        because an empty string survives a MERGE without complaint."""
+    def test_every_mention_in_the_graph_yields_a_passage(self, graph):
+        """Success criterion 4, restated for a derived passage. Asserted over
+        the graph rather than the plan, because a mention whose offset had come
+        apart from its section would still MERGE without complaint."""
         write(graph, CHAPTER_A, [node("Church"), node("Undercroft")], [])
-        empty = graph.run(
-            "MATCH (m:Mention {chapter_slug:$slug}) "
-            "WHERE m.evidence IS NULL OR trim(m.evidence) = '' RETURN count(m) AS c",
+        rows = graph.run(
+            """
+            MATCH (m:Mention {chapter_slug:$slug})-[:IN_SECTION]->(s:Section)
+            RETURN m.offset AS offset, s.text AS text
+            """,
+            {"slug": CHAPTER_A},
+        ).data()
+        assert count_mentions(graph, CHAPTER_A) > 0
+        assert len(rows) == count_mentions(graph, CHAPTER_A)
+        assert all(derive_passage(r["text"], r["offset"]).strip() for r in rows)
+
+    def test_no_mention_in_the_graph_stores_a_copy_of_the_prose(self, graph):
+        """THE DELETION, over the whole chapter. A MERGE that left the old
+        property in place on some nodes and not others would pass any check
+        that looked at one."""
+        write(graph, CHAPTER_A, [node("Church"), node("Undercroft")], [])
+        stored = graph.run(
+            "MATCH (m:Mention {chapter_slug:$slug}) WHERE m.evidence IS NOT NULL "
+            "RETURN count(m) AS c",
             {"slug": CHAPTER_A},
         ).single()["c"]
         assert count_mentions(graph, CHAPTER_A) > 0
-        assert empty == 0
+        assert stored == 0
 
     def test_an_entity_from_an_earlier_chapter_is_mentioned_by_a_later_one(self, graph):
         """An entity is global to the book, so a later chapter naming it in its
@@ -1120,7 +1146,6 @@ class TestSilentNoOpsRaise:
             entity_id="pytest:nobody",
             section_id=section_id(CHAPTER_A, 0),
             chapter_slug=CHAPTER_A,
-            evidence="quoted from nowhere",
             occurrences=1,
             offset=0,
         )
