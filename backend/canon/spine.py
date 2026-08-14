@@ -15,6 +15,14 @@ chapter 3's twenty-two sections and had one `MENTIONED_IN` edge to show for it.
 So mentions are now found by reading every section and looking for every known
 entity's name in it. Deterministic, free, and it cannot hallucinate.
 
+**A markdown emphasis delimiter is a boundary, not a letter.** `_` is a word
+character to Python's `\\w`, which made the book's own italics opaque to the
+scan: `_Tome of Strahd_` is how this corpus sets an item name, and the artifact
+the campaign turns on had zero mentions for exactly that reason. `WORD_CHAR`
+below is `\\w` minus the underscore, so `_` and `*` delimit a name the way a
+space or a comma already did. That is a change to WHICH CHARACTERS BOUND a name
+and to nothing else -- `Ismar` still does not find `Ismark`.
+
 **Matching is whole-word and exact, and there is no fourth rule.** Case-SENSITIVE
 for a single-word name, so the LORE entity `Light` does not claim every lit
 torch; case-INSENSITIVE for a multi-word one, where the run of words is itself
@@ -69,6 +77,29 @@ from backend.canon.writer import BOOK, CANON_PLANE, mint_id
 #: so offsets into the folded text index the original exactly.
 CURLY_APOSTROPHE = "’"
 STRAIGHT_APOSTROPHE = "'"
+
+#: What counts as MORE OF THE SAME WORD on either side of a name -- the whole
+#: of the boundary rule, and the only thing the lookarounds in `mention_pattern`
+#: refuse.
+#:
+#: `[^\W_]` is `\w` MINUS the underscore: every letter and digit Unicode knows,
+#: and nothing else. `\w` itself cannot be used, because `_` is a word character
+#: to Python and an EMPHASIS DELIMITER to the book -- `_Tome of Strahd_` is how
+#: this corpus sets an item name, and under `\w` the artifact the campaign turns
+#: on scanned to zero mentions. `*` needs no mention here: it was never a `\w`
+#: character, so bold and star-italic always delimited correctly, and this class
+#: keeps them delimiting.
+#:
+#: A BOUNDARY RULE, NOT A STRICTNESS ONE. Nothing here loosens what a whole word
+#: is: `Ismar` still does not find `Ismark` and `Strah` still does not find
+#: `Strahd`, emphasised or not, because `k` and `d` are still more word. The
+#: single change is that a delimiter now delimits, exactly as a space or a comma
+#: already did.
+#:
+#: The deliberate cost: an underscore is a boundary wherever it appears, so a
+#: `snake_case` token would split into names. This corpus is the book's prose in
+#: markdown, where an underscore is always emphasis and never an identifier.
+WORD_CHAR = r"[^\W_]"
 
 #: How much of its section a mention may quote. Long enough to hold the sentence
 #: the name is in with its neighbours, short enough that several hundred mentions
@@ -324,10 +355,14 @@ def plan_spine(
 def mention_pattern(name: str) -> re.Pattern[str] | None:
     """The one matcher. Whole-word, exact, and case-folded only when multi-word.
 
-    `(?<!\\w)` / `(?!\\w)` rather than `\\b`, because a name can end in a
-    character `\\b` treats as a boundary in its own right -- `Bildrath's
-    Mercantile` and `Doru's Bedroom` are ordinary names in this book -- and the
-    lookarounds say exactly what is meant: not preceded or followed by more word.
+    Lookarounds rather than `\\b`, because a name can end in a character `\\b`
+    treats as a boundary in its own right -- `Bildrath's Mercantile` and `Doru's
+    Bedroom` are ordinary names in this book -- and they say exactly what is
+    meant: not preceded or followed by more word.
+
+    What "more word" means is `WORD_CHAR`, which is `\\w` without the
+    underscore. See it for why: markdown emphasis has to delimit a name rather
+    than glue itself onto one.
 
     CASE-SENSITIVE FOR ONE WORD. `Light` is a real LORE entity in this book, and
     a case-insensitive match would give it a mention in every section containing
@@ -348,7 +383,7 @@ def mention_pattern(name: str) -> re.Pattern[str] | None:
     if not folded:
         return None
     flags = 0 if len(folded.split()) == 1 else re.IGNORECASE
-    return re.compile(rf"(?<!\w){re.escape(folded)}(?!\w)", flags)
+    return re.compile(rf"(?<!{WORD_CHAR}){re.escape(folded)}(?!{WORD_CHAR})", flags)
 
 
 def evidence_span(text: str, start: int, end: int) -> str:
