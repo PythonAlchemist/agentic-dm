@@ -118,7 +118,7 @@ class TestWhatLandsOnTheNode:
         assert "entity_type" not in nodes[0].properties
 
     def test_the_chapter_is_not_a_property_either(self):
-        """A globally unique node has no one chapter -- it has MENTIONED_IN edges."""
+        """A globally unique node has no one chapter -- it has `:Mention` nodes."""
         nodes, _, _ = plan_write(
             [node("Ismark", "NPC", section_heading="E1. Mansion", section_index=2)],
             [],
@@ -130,17 +130,18 @@ class TestWhatLandsOnTheNode:
         assert "section_heading" not in props
         assert "section_index" not in props
 
-    def test_the_appearance_carries_the_section(self):
+    def test_the_description_is_gone(self):
+        """Single-valued and last-write-wins: an entity described across
+        twenty-five chapters kept whichever extraction ran most recently. The
+        evidence spans on its mentions say the same thing per section, and can
+        say WHEN. Deleted rather than deprecated, so nothing keeps reading it."""
         nodes, _, _ = plan_write(
-            [node("Ismark", "NPC", section_heading="E1. Mansion", section_index=2)],
+            [node("Ismark", "NPC", description="The burgomaster's son.")],
             [],
             gazetteer("Ismark"),
             SLUG,
         )
-        assert nodes[0].appearance == {
-            "section_heading": "E1. Mansion",
-            "section_index": 2,
-        }
+        assert "description" not in nodes[0].properties
 
 
 class TestKeyedIds:
@@ -250,38 +251,17 @@ class TestKeyedIds:
 
 
 class TestKeyedProvenance:
-    """`section_heading` must name the section the book KEYS a room under.
+    """Canon must carry the name the book KEYS a room under.
 
-    First-candidate-wins alone records whichever section first mentioned it, so
-    a reader looking up the Chapel is sent to the Hall.
+    The section provenance this rank used to also decide is gone from the node
+    -- an entity appears in as many sections as name it, and each of those is a
+    `:Mention` -- so what is left for it to settle is the SPELLING. That still
+    matters: first-candidate-wins put a lowercase `burgomaster's mansion` in the
+    graph because a prose mention beat the `E4.` heading, and the name is what
+    the scan then looks for in every section of the book.
     """
 
-    def test_the_keying_section_wins_over_an_earlier_mention(self):
-        nodes, _, _ = plan_write(
-            [
-                node("Chapel", section_heading="E5a. Hall", section_index=3),
-                node("Chapel", section_heading="E5f. Chapel", section_index=8),
-            ],
-            [],
-            gazetteer(),
-            SLUG,
-        )
-        assert [n.section_heading for n in nodes] == ["E5f. Chapel"]
-        assert [n.section_index for n in nodes] == [8]
-
-    def test_the_keying_section_still_wins_when_it_comes_first(self):
-        nodes, _, _ = plan_write(
-            [
-                node("Chapel", section_heading="E5f. Chapel", section_index=8),
-                node("Chapel", section_heading="E5a. Hall", section_index=3),
-            ],
-            [],
-            gazetteer(),
-            SLUG,
-        )
-        assert [n.section_heading for n in nodes] == ["E5f. Chapel"]
-
-    def test_the_heading_spelling_wins_over_a_prose_mention(self):
+    def test_the_heading_spelling_wins_over_an_earlier_prose_mention(self):
         """The lowercase `burgomaster's mansion` in the graph came from prose
         beating the `E4.` heading. Canon should carry the book's own casing."""
         nodes, _, _ = plan_write(
@@ -302,7 +282,28 @@ class TestKeyedProvenance:
             SLUG,
         )
         assert [n.name for n in nodes] == ["Burgomaster's Mansion"]
-        assert [n.section_heading for n in nodes] == ["E4. Burgomaster's Mansion"]
+
+    def test_the_heading_spelling_still_wins_when_the_prose_comes_second(self):
+        """Order must not decide it: the same two candidates the other way
+        round, and the book's spelling still wins."""
+        nodes, _, _ = plan_write(
+            [
+                node(
+                    "Burgomaster's Mansion",
+                    section_heading="E4. Burgomaster's Mansion",
+                    section_index=6,
+                ),
+                node(
+                    "burgomaster's mansion",
+                    section_heading="Approaching the Village",
+                    section_index=1,
+                ),
+            ],
+            [],
+            gazetteer(),
+            SLUG,
+        )
+        assert [n.name for n in nodes] == ["Burgomaster's Mansion"]
 
     def test_an_apostrophe_variant_joins_the_room_rather_than_minting_one(self):
         """Found in the graph, not in a fixture.
@@ -339,17 +340,18 @@ class TestKeyedProvenance:
         assert nodes[0].name == "Bildrath’s Mercantile"
 
     def test_an_unkeyed_entity_keeps_first_candidate_wins(self):
-        """Nothing keys an NPC, so the earliest mention stays the provenance."""
+        """Nothing keys an NPC, so no candidate outranks another and the first
+        spelling stands -- rather than the last one silently overwriting it."""
         nodes, _, _ = plan_write(
             [
                 node("Ismark", "NPC", section_heading="(preamble)", section_index=0),
-                node("Ismark", "NPC", section_heading="E2. Blood of the Vine", section_index=4),
+                node("ISMARK", "NPC", section_heading="E2. Blood of the Vine", section_index=4),
             ],
             [],
             gazetteer("Ismark"),
             SLUG,
         )
-        assert [n.section_heading for n in nodes] == ["(preamble)"]
+        assert [n.name for n in nodes] == ["Ismark"]
 
 
 class TestSelfLoops:
@@ -731,8 +733,6 @@ class TestDeduplication:
         )
         assert len(nodes) == 1
         assert report.duplicate_nodes == 1
-        # First occurrence wins, so provenance is the earliest section.
-        assert nodes[0].section_index == 0
 
     def test_one_relationship_per_source_type_target(self):
         _, edges, report = plan_write(
@@ -749,7 +749,9 @@ class TestDeduplication:
 
 
 class TestWrittenProperties:
-    def test_every_node_is_stamped_canon_and_carries_its_provenance(self):
+    def test_a_node_carries_its_name_plane_votes_and_status_and_NOTHING_else(self):
+        """The whole property set, asserted by equality rather than by
+        membership: a property that creeps back has to fail here."""
         nodes, _, _ = plan_write(
             [
                 node(
@@ -769,14 +771,13 @@ class TestWrittenProperties:
             "name": "Ismark Kolyanovich",
             "plane": CANON_PLANE,
             "votes": 5,
-            "description": "The burgomaster's son.",
             # An unkeyed NPC with no accepted edge attached: nothing
             # deterministic vouches for it.
             "status": "proposed",
         }
-        # The type is a LABEL and the chapter is an EDGE; neither is a property.
+        # The type is a LABEL, and where the entity appears is a set of
+        # `:Mention` nodes. Neither is a property, and neither is `description`.
         assert nodes[0].labels == ("NPC",)
-        assert nodes[0].appearance == {"section_heading": "(preamble)", "section_index": 0}
 
     def test_a_node_without_a_description_omits_the_property(self):
         nodes, _, _ = plan_write([node("Church")], [], gazetteer("Church"), SLUG)
@@ -857,7 +858,7 @@ class TestChapterSlugIsAuthoritative:
         )
         nodes, _, _ = plan_write([candidate], [], gazetteer("Church"), SLUG)
         # A keyed place is scoped to a chapter, and it is the caller's slug in
-        # the id -- and the caller's chapter that the appearance will point at.
+        # the id -- and the caller's chapter whose spine will describe it.
         assert nodes[0].id == f"cos:{SLUG}:e5-church"
         assert nodes[0].chapter_slug == SLUG
 

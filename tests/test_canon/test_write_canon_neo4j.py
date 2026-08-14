@@ -16,6 +16,8 @@ from dataclasses import replace
 import pytest
 
 from backend.canon.assembler import slugify
+from backend.canon.models import Section
+from backend.canon.spine import ChapterSpine, plan_spine, section_id
 from backend.canon.writer import (
     CANON_PLANE,
     CampaignDataAttached,
@@ -23,6 +25,7 @@ from backend.canon.writer import (
     WriteEdge,
     WriteNode,
     count_canon_nodes,
+    count_mentions,
     ensure_schema,
     write_chapter,
 )
@@ -35,18 +38,39 @@ pytestmark = pytest.mark.neo4j
 CHAPTER_A = "pytest-chapter-a"
 CHAPTER_B = "pytest-chapter-b"
 TEST_ID_PREFIX = "pytest:"
+TEST_BOOK = "pytest-book"
+
+#: A keyed test place mints `cos:<chapter>:<key>-<slug>` through `mint_id`, which
+#: hardcodes the book -- so the `pytest:` prefix cannot reach those and cleanup
+#: has to name the chapter-scoped shape too.
+KEYED_ID_PREFIXES = [f"cos:{CHAPTER_A}:", f"cos:{CHAPTER_B}:"]
 
 
 def _clean(session) -> None:
     """Ids are GLOBAL now, so a test node named `Church` would MERGE onto the
     real book's Church and this cleanup would then delete it. Every test node
     therefore carries the `pytest:` book prefix instead of `cos:`, and cleanup
-    reaches nothing else."""
+    reaches nothing else.
+
+    The spine is cleaned by CHAPTER, which is the only scope that identifies a
+    section or a mention -- both are chapter-owned by construction, and both are
+    slugged `pytest-` here.
+    """
     session.run(
         "MATCH (n:Entity) WHERE n.id STARTS WITH $prefix DETACH DELETE n",
         {"prefix": TEST_ID_PREFIX},
     )
+    for prefix in KEYED_ID_PREFIXES:
+        session.run(
+            "MATCH (n:Entity) WHERE n.id STARTS WITH $prefix DETACH DELETE n",
+            {"prefix": prefix},
+        )
+    session.run("MATCH (m:Mention) WHERE m.chapter_slug IN $slugs DETACH DELETE m",
+                {"slugs": SLUGS})
+    session.run("MATCH (s:Section) WHERE s.chapter_slug IN $slugs DETACH DELETE s",
+                {"slugs": SLUGS})
     session.run("MATCH (c:Chapter) WHERE c.slug IN $slugs DETACH DELETE c", {"slugs": SLUGS})
+    session.run("MATCH (b:Book {slug:$slug}) DETACH DELETE b", {"slug": TEST_BOOK})
 
 
 SLUGS = [CHAPTER_A, CHAPTER_B]
@@ -62,11 +86,31 @@ def graph():
         _clean(session)
 
 
+#: Prefixed onto EVERY TOKEN of every test entity's name, and every token is
+#: needed. The mention scan matches on NAME across the whole canon plane, so a
+#: test node called `Church` is found by the real book's `E5. Church` sitting in
+#: the same local database, and `count_canon_nodes` answers 2 for a chapter that
+#: wrote one node. A suffix is not enough either: matching is whole-WORD, so the
+#: real `Church` still matches inside `Church of Pytest`, and the real `Tatyana`
+#: still matches inside `Ireena Tatyana`. Gluing the marker to the front of each
+#: token puts a word character immediately before every real name, which the
+#: matcher's `(?<!\\w)` refuses.
+#:
+#: The id prefix protects the graph from the tests; this protects the tests from
+#: the graph.
+NAME_MARKER = "Zz"
+
+
+def named(name: str) -> str:
+    """The name a test entity actually wears. See `NAME_MARKER`."""
+    return " ".join(f"{NAME_MARKER}{token}" for token in name.split())
+
+
 def ident(name: str, key: str = "", chapter_slug: str = CHAPTER_A) -> str:
     """`mint_id`'s shape under the `pytest:` book -- see `_clean`."""
     if key:
-        return f"{TEST_ID_PREFIX}{chapter_slug}:{key.lower()}-{slugify(name)}"
-    return f"{TEST_ID_PREFIX}{slugify(name)}"
+        return f"{TEST_ID_PREFIX}{chapter_slug}:{key.lower()}-{slugify(named(name))}"
+    return f"{TEST_ID_PREFIX}{slugify(named(name))}"
 
 
 def node(
@@ -77,13 +121,69 @@ def node(
 ) -> WriteNode:
     return WriteNode(
         id=ident(name, key, chapter_slug),
-        name=name,
+        name=named(name),
         entity_types=(entity_type,),
         chapter_slug=chapter_slug,
-        section_heading="E5. Church",
-        section_index=3,
         votes=5,
-        description=f"{name} description",
+    )
+
+
+def spine(
+    *nodes: WriteNode,
+    chapter_slug: str = CHAPTER_A,
+    chapter_index: int = 0,
+    sections: list[Section] | None = None,
+    location_ids: set[str] | None = None,
+) -> ChapterSpine:
+    """A spine with one prose section per node, whose text names that node.
+
+    So every node written by a test earns a real `:Mention` from a real scan
+    rather than from a fixture asserting one -- which is what `count_canon_nodes`
+    and the replace path now read. Headings are deliberately UNKEYED (`Section
+    0`, not `E1. Church`), so nothing here accidentally derives a `DESCRIBES`;
+    the tests that want one build their sections by hand.
+    """
+    if sections is None:
+        sections = [
+            Section(
+                chapter_slug=chapter_slug,
+                chapter_title="A Test Chapter",
+                heading=f"Section {index}",
+                index=index,
+                markdown=f"This section is about {written.name} and nothing else.",
+                depth=1,
+                parent_index=-1,
+            )
+            for index, written in enumerate(nodes)
+        ]
+    return plan_spine(
+        book_slug=TEST_BOOK,
+        book_title="A Test Book",
+        chapter_slug=chapter_slug,
+        chapter_title="A Test Chapter",
+        chapter_index=chapter_index,
+        sections=sections,
+        location_ids=location_ids or set(),
+    )
+
+
+def write(
+    session,
+    chapter_slug: str,
+    nodes: list[WriteNode],
+    edges: list[WriteEdge],
+    *,
+    replace: bool = False,
+    chapter_spine: ChapterSpine | None = None,
+) -> dict:
+    """`write_chapter` with a spine that names every node it is given."""
+    return write_chapter(
+        session,
+        chapter_slug,
+        nodes,
+        edges,
+        chapter_spine or spine(*nodes, chapter_slug=chapter_slug),
+        replace=replace,
     )
 
 
@@ -108,7 +208,7 @@ def link(
 class TestHappyPath:
     def test_nodes_and_edges_land_stamped_canon(self, graph):
         church, undercroft = node("Church"), node("Undercroft")
-        write_chapter(graph, CHAPTER_A, [church, undercroft], [link(undercroft, church)])
+        write(graph, CHAPTER_A, [church, undercroft], [link(undercroft, church)])
 
         record = graph.run("MATCH (n:Entity {id:$id}) RETURN n", {"id": church.id}).single()
         assert dict(record["n"]) == {"id": church.id, **church.properties}
@@ -139,7 +239,7 @@ class TestHappyPath:
             chapter_slug=CHAPTER_A,
             endpoint_resolved="constraint",
         )
-        write_chapter(graph, CHAPTER_A, [ireena, tatyana], [resolved, link(tatyana, ireena)])
+        write(graph, CHAPTER_A, [ireena, tatyana], [resolved, link(tatyana, ireena)])
 
         rows = graph.run(
             """
@@ -174,7 +274,7 @@ class TestStatusInTheGraph:
             chapter_slug=CHAPTER_A,
             evidence="Ireena menaces the church.",
         )
-        write_chapter(graph, CHAPTER_A, [church, undercroft, ireena], [derived, proposed])
+        write(graph, CHAPTER_A, [church, undercroft, ireena], [derived, proposed])
 
         rows = graph.run(
             """
@@ -190,16 +290,17 @@ class TestStatusInTheGraph:
 
     def test_node_status_lands_too(self, graph):
         accepted = replace(node("Church"), status="accepted")
-        write_chapter(graph, CHAPTER_A, [accepted, node("Gertruda", entity_type="NPC")], [])
+        write(graph, CHAPTER_A, [accepted, node("Gertruda", entity_type="NPC")], [])
 
         rows = graph.run(
-            "MATCH (n:Entity)-[:MENTIONED_IN]->(:Chapter {slug:$slug}) "
-            "RETURN n.name AS name, n.status AS status ORDER BY name",
+            "MATCH (:Chapter {slug:$slug})-[:HAS_SECTION]->(:Section)"
+            "<-[:IN_SECTION]-(:Mention)-[:REFERS_TO]->(n:Entity) "
+            "RETURN DISTINCT n.name AS name, n.status AS status ORDER BY name",
             {"slug": CHAPTER_A},
         ).data()
         assert rows == [
-            {"name": "Church", "status": "accepted"},
-            {"name": "Gertruda", "status": "proposed"},
+            {"name": named("Church"), "status": "accepted"},
+            {"name": named("Gertruda"), "status": "proposed"},
         ]
 
     def test_the_review_queue_reads_the_proposed_edges_and_skips_the_accepted(self, graph):
@@ -214,7 +315,7 @@ class TestStatusInTheGraph:
             evidence="Ireena menaces the church.",
             conflict="IDENTITY_OF",
         )
-        write_chapter(
+        write(
             graph, CHAPTER_A, [church, undercroft, ireena], [link(undercroft, church), proposed]
         )
 
@@ -245,7 +346,7 @@ class TestAtomicity:
         edges = [link(undercroft, church), link(church, missing)]
 
         with pytest.raises(ValueError, match="edge endpoint missing"):
-            write_chapter(graph, CHAPTER_A, [church, undercroft], edges)
+            write(graph, CHAPTER_A, [church, undercroft], edges)
 
         assert count_canon_nodes(graph, CHAPTER_A) == 0
         assert (
@@ -264,11 +365,11 @@ class TestAtomicity:
         that the loop's predicate would read as unwritten and a human as done.
         """
         church, undercroft = node("Church"), node("Undercroft")
-        write_chapter(graph, CHAPTER_A, [church, undercroft], [link(undercroft, church)])
+        write(graph, CHAPTER_A, [church, undercroft], [link(undercroft, church)])
 
         crypt = node("Crypt")
         with pytest.raises(ValueError, match="edge endpoint missing"):
-            write_chapter(
+            write(
                 graph, CHAPTER_A, [church], [link(church, crypt)], replace=True
             )
 
@@ -285,10 +386,10 @@ class TestAtomicity:
 class TestRewriteRefusal:
     def test_writing_a_chapter_that_already_has_nodes_refuses(self, graph):
         church = node("Church")
-        write_chapter(graph, CHAPTER_A, [church], [])
+        write(graph, CHAPTER_A, [church], [])
 
         with pytest.raises(ChapterAlreadyWritten) as caught:
-            write_chapter(graph, CHAPTER_A, [node("Undercroft")], [])
+            write(graph, CHAPTER_A, [node("Undercroft")], [])
 
         assert caught.value.chapter_slug == CHAPTER_A
         assert caught.value.nodes == 1
@@ -300,7 +401,7 @@ class TestRewriteRefusal:
 
     def test_an_empty_chapter_is_not_a_written_one(self, graph):
         """Nothing to refuse: the refusal is about existing nodes, not the slug."""
-        write_chapter(graph, CHAPTER_A, [node("Church")], [])
+        write(graph, CHAPTER_A, [node("Church")], [])
         assert count_canon_nodes(graph, CHAPTER_A) == 1
 
 
@@ -309,15 +410,15 @@ class TestReplace:
         a_church = node("Church", CHAPTER_A)
         b_chapel = node("Chapel", CHAPTER_B)
         b_undercroft = node("Undercroft", CHAPTER_B)
-        write_chapter(graph, CHAPTER_A, [a_church], [])
-        write_chapter(
+        write(graph, CHAPTER_A, [a_church], [])
+        write(
             graph,
             CHAPTER_B,
             [b_chapel, b_undercroft],
             [link(b_undercroft, b_chapel, chapter_slug=CHAPTER_B)],
         )
 
-        summary = write_chapter(graph, CHAPTER_A, [node("Crypt", CHAPTER_A)], [], replace=True)
+        summary = write(graph, CHAPTER_A, [node("Crypt", CHAPTER_A)], [], replace=True)
 
         assert summary["deleted_nodes"] == 1
         assert count_canon_nodes(graph, CHAPTER_A) == 1
@@ -337,9 +438,9 @@ class TestReplace:
 
     def test_replace_deletes_this_chapters_canon_edges(self, graph):
         church, undercroft = node("Church"), node("Undercroft")
-        write_chapter(graph, CHAPTER_A, [church, undercroft], [link(undercroft, church)])
+        write(graph, CHAPTER_A, [church, undercroft], [link(undercroft, church)])
 
-        summary = write_chapter(graph, CHAPTER_A, [church], [], replace=True)
+        summary = write(graph, CHAPTER_A, [church], [], replace=True)
 
         assert summary["deleted_edges"] == 1
         assert (
@@ -361,7 +462,7 @@ class TestReplace:
         chapter_slug as the canon it sits beside.
         """
         canon = node("Church")
-        write_chapter(graph, CHAPTER_A, [canon], [])
+        write(graph, CHAPTER_A, [canon], [])
         graph.run(
             """
             CREATE (a:Entity {id:$a, name:'party notes', plane:'campaign', chapter_slug:$slug})
@@ -375,7 +476,7 @@ class TestReplace:
             },
         )
 
-        write_chapter(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
+        write(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
 
         assert (
             graph.run(
@@ -403,7 +504,7 @@ class TestReplace:
         delete anything outside plane='canon'" true.
         """
         church = node("Church")
-        write_chapter(graph, CHAPTER_A, [church], [])
+        write(graph, CHAPTER_A, [church], [])
         graph.run(
             """
             MATCH (canon:Entity {id:$canon_id})
@@ -418,7 +519,7 @@ class TestReplace:
         )
 
         with pytest.raises(CampaignDataAttached):
-            write_chapter(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
+            write(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
 
         assert count_canon_nodes(graph, CHAPTER_A) == 1
         assert (
@@ -439,7 +540,7 @@ class TestTypeIsALabel:
 
     def test_the_type_is_a_label(self, graph):
         eva = node("Madam Eva", entity_type="NPC")
-        write_chapter(graph, CHAPTER_A, [eva], [])
+        write(graph, CHAPTER_A, [eva], [])
 
         assert graph.run(
             "MATCH (n:NPC {id:$id}) RETURN count(n) AS c", {"id": eva.id}
@@ -447,7 +548,7 @@ class TestTypeIsALabel:
 
     def test_the_type_is_not_also_a_property(self, graph):
         eva = node("Madam Eva", entity_type="NPC")
-        write_chapter(graph, CHAPTER_A, [eva], [])
+        write(graph, CHAPTER_A, [eva], [])
 
         assert graph.run(
             "MATCH (n:Entity {id:$id}) RETURN n.entity_type AS t", {"id": eva.id}
@@ -455,7 +556,7 @@ class TestTypeIsALabel:
 
     def test_a_disputed_type_is_one_node_wearing_both_labels(self, graph):
         barovia = replace(node("Barovia"), entity_types=("LOCATION", "SETTING"))
-        write_chapter(graph, CHAPTER_A, [barovia], [])
+        write(graph, CHAPTER_A, [barovia], [])
 
         rows = graph.run(
             "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": barovia.id}
@@ -465,7 +566,7 @@ class TestTypeIsALabel:
 
     def test_entity_still_finds_everything(self, graph):
         """The `:Entity` label is kept so existing whole-graph queries survive."""
-        write_chapter(graph, CHAPTER_A, [node("Madam Eva", entity_type="NPC")], [])
+        write(graph, CHAPTER_A, [node("Madam Eva", entity_type="NPC")], [])
         assert count_canon_nodes(graph, CHAPTER_A) == 1
 
 
@@ -481,7 +582,7 @@ class TestLocationSubtypeIsALabel:
 
     def test_the_subtype_lands_beside_location(self, graph):
         chapel = self.area()
-        write_chapter(graph, CHAPTER_A, [chapel], [])
+        write(graph, CHAPTER_A, [chapel], [])
 
         labels = graph.run(
             "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": chapel.id}
@@ -492,7 +593,7 @@ class TestLocationSubtypeIsALabel:
         """No default: a place with no derivable and no authored subtype must be
         visibly unclassified rather than quietly filed somewhere."""
         castle = node("Castle Ravenloft")
-        write_chapter(graph, CHAPTER_A, [castle], [])
+        write(graph, CHAPTER_A, [castle], [])
 
         labels = graph.run(
             "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": castle.id}
@@ -513,8 +614,8 @@ class TestLocationSubtypeIsALabel:
         every other chapter naming it keeps alive.
         """
         first = self.area("Vallaki", "SETTLEMENT")
-        write_chapter(graph, CHAPTER_A, [first], [])
-        write_chapter(
+        write(graph, CHAPTER_A, [first], [])
+        write(
             graph,
             CHAPTER_B,
             [replace(first, chapter_slug=CHAPTER_B, location_subtype="REGION")],
@@ -530,8 +631,8 @@ class TestLocationSubtypeIsALabel:
         """Stated as its own assertion because the one above passes on a node
         wearing `:REGION:SETTLEMENT` if the reader only checks membership."""
         first = self.area("Vallaki", "SETTLEMENT")
-        write_chapter(graph, CHAPTER_A, [first], [])
-        write_chapter(
+        write(graph, CHAPTER_A, [first], [])
+        write(
             graph,
             CHAPTER_B,
             [replace(first, chapter_slug=CHAPTER_B, location_subtype="REGION")],
@@ -552,8 +653,8 @@ class TestLocationSubtypeIsALabel:
         same id. Whichever lands second must not be the one that decides.
         """
         about = self.area("Vallaki", "SITE")
-        write_chapter(graph, CHAPTER_A, [about], [])
-        write_chapter(graph, CHAPTER_B, [node("Vallaki", CHAPTER_B)], [])
+        write(graph, CHAPTER_A, [about], [])
+        write(graph, CHAPTER_B, [node("Vallaki", CHAPTER_B)], [])
 
         labels = graph.run(
             "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": about.id}
@@ -561,7 +662,7 @@ class TestLocationSubtypeIsALabel:
         assert sorted(labels) == ["Entity", "LOCATION", "SITE"]
 
     def test_every_place_is_still_one_word_away(self, graph):
-        write_chapter(
+        write(
             graph,
             CHAPTER_A,
             [self.area(), self.area("Church", "SITE"), node("Castle Ravenloft")],
@@ -596,7 +697,7 @@ class TestArtifactIsALabel:
 
     def test_the_label_lands_beside_item(self, graph):
         sunsword = self.item()
-        write_chapter(graph, CHAPTER_A, [sunsword], [])
+        write(graph, CHAPTER_A, [sunsword], [])
 
         assert self.labels_of(graph, sunsword.id) == ["Artifact", "Entity", "ITEM"]
 
@@ -604,7 +705,7 @@ class TestArtifactIsALabel:
         """No default. "Mundane" is the absence of significance, and the honest
         encoding of an absence is no label."""
         lamp = self.item("oil lamp", is_artifact=False)
-        write_chapter(graph, CHAPTER_A, [lamp], [])
+        write(graph, CHAPTER_A, [lamp], [])
 
         assert self.labels_of(graph, lamp.id) == ["Entity", "ITEM"]
 
@@ -622,7 +723,7 @@ class TestArtifactIsALabel:
             entity_types=("ITEM", "LOCATION"),
             location_subtype="AREA",
         )
-        write_chapter(graph, CHAPTER_A, [disputed], [])
+        write(graph, CHAPTER_A, [disputed], [])
 
         assert self.labels_of(graph, disputed.id) == [
             "AREA",
@@ -647,8 +748,8 @@ class TestArtifactIsALabel:
         back.
         """
         first = self.item("Sunsword")
-        write_chapter(graph, CHAPTER_A, [first], [])
-        write_chapter(
+        write(graph, CHAPTER_A, [first], [])
+        write(
             graph,
             CHAPTER_B,
             [
@@ -673,7 +774,7 @@ class TestArtifactIsALabel:
 
     def test_every_item_is_still_one_word_away(self, graph):
         """The narrowing must not cost the broad query the whole point of it."""
-        write_chapter(
+        write(
             graph, CHAPTER_A, [self.item(), self.item("oil lamp", is_artifact=False)], []
         )
 
@@ -686,7 +787,7 @@ class TestArtifactIsALabel:
     def test_the_artifacts_are_one_word_away_too(self, graph):
         """The point of the label: `MATCH (n:Artifact)` is the question a DM
         asks constantly, and a flat :ITEM could not answer it."""
-        write_chapter(
+        write(
             graph, CHAPTER_A, [self.item(), self.item("oil lamp", is_artifact=False)], []
         )
 
@@ -695,29 +796,29 @@ class TestArtifactIsALabel:
             "RETURN n.name AS name",
             {"plane": CANON_PLANE, "prefix": TEST_ID_PREFIX},
         ).value("name")
-        assert found == ["Sunsword"]
+        assert found == [named("Sunsword")]
 
 
 class TestGlobalEntities:
     def test_one_npc_named_by_two_chapters_is_one_node(self, graph):
         a = node("Madam Eva", CHAPTER_A, "NPC")
         b = node("Madam Eva", CHAPTER_B, "NPC")
-        write_chapter(graph, CHAPTER_A, [a], [])
-        write_chapter(graph, CHAPTER_B, [b], [])
+        write(graph, CHAPTER_A, [a], [])
+        write(graph, CHAPTER_B, [b], [])
 
         assert a.id == b.id
         assert graph.run(
             "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": a.id}
         ).single()["c"] == 1
 
-    def test_a_second_chapter_adds_an_edge_rather_than_a_node(self, graph):
-        write_chapter(graph, CHAPTER_A, [node("Madam Eva", CHAPTER_A, "NPC")], [])
-        write_chapter(graph, CHAPTER_B, [node("Madam Eva", CHAPTER_B, "NPC")], [])
+    def test_a_second_chapter_adds_a_mention_rather_than_a_node(self, graph):
+        write(graph, CHAPTER_A, [node("Madam Eva", CHAPTER_A, "NPC")], [])
+        write(graph, CHAPTER_B, [node("Madam Eva", CHAPTER_B, "NPC")], [])
 
         slugs = graph.run(
             """
-            MATCH (n:Entity {id:$id})-[:MENTIONED_IN]->(c:Chapter)
-            RETURN c.slug AS slug ORDER BY slug
+            MATCH (m:Mention)-[:REFERS_TO]->(:Entity {id:$id})
+            RETURN m.chapter_slug AS slug ORDER BY slug
             """,
             {"id": ident("Madam Eva")},
         ).value()
@@ -728,34 +829,311 @@ class TestGlobalEntities:
         one room, and merging them by name would delete an edge."""
         a = node("Empty Cell", CHAPTER_A, key="K61a")
         b = node("Empty Cell", CHAPTER_B, key="K61a")
-        write_chapter(graph, CHAPTER_A, [a], [])
-        write_chapter(graph, CHAPTER_B, [b], [])
+        write(graph, CHAPTER_A, [a], [])
+        write(graph, CHAPTER_B, [b], [])
 
         assert a.id != b.id
         assert graph.run(
-            "MATCH (n:Entity) WHERE n.id STARTS WITH $p AND n.name = 'Empty Cell' "
+            "MATCH (n:Entity) WHERE n.id STARTS WITH $p AND n.name = $name "
             "RETURN count(n) AS c",
-            {"p": TEST_ID_PREFIX},
+            {"p": TEST_ID_PREFIX, "name": named("Empty Cell")},
         ).single()["c"] == 2
 
-    def test_the_appearance_carries_the_section_it_was_read_in(self, graph):
-        write_chapter(graph, CHAPTER_A, [node("Madam Eva", entity_type="NPC")], [])
-
-        props = graph.run(
-            "MATCH (:Entity {id:$id})-[m:MENTIONED_IN]->(:Chapter {slug:$slug}) "
-            "RETURN properties(m) AS p",
-            {"id": ident("Madam Eva"), "slug": CHAPTER_A},
-        ).single()["p"]
-        assert props == {"section_heading": "E5. Church", "section_index": 3}
-
     def test_replacing_one_chapter_keeps_a_node_another_chapter_still_names(self, graph):
-        write_chapter(graph, CHAPTER_A, [node("Madam Eva", CHAPTER_A, "NPC")], [])
-        write_chapter(graph, CHAPTER_B, [node("Madam Eva", CHAPTER_B, "NPC")], [])
+        write(graph, CHAPTER_A, [node("Madam Eva", CHAPTER_A, "NPC")], [])
+        write(graph, CHAPTER_B, [node("Madam Eva", CHAPTER_B, "NPC")], [])
 
-        write_chapter(graph, CHAPTER_B, [node("Strahd", CHAPTER_B, "NPC")], [], replace=True)
+        write(graph, CHAPTER_B, [node("Strahd", CHAPTER_B, "NPC")], [], replace=True)
 
         assert graph.run(
             "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": ident("Madam Eva")}
         ).single()["c"] == 1
         assert count_canon_nodes(graph, CHAPTER_A) == 1
         assert count_canon_nodes(graph, CHAPTER_B) == 1
+
+
+def prose(index: int, heading: str, text: str, chapter_slug: str = CHAPTER_A) -> Section:
+    return Section(
+        chapter_slug=chapter_slug,
+        chapter_title="A Test Chapter",
+        heading=heading,
+        index=index,
+        markdown=text,
+        depth=1,
+        parent_index=-1,
+    )
+
+
+class TestTheSpineInTheGraph:
+    """Book, chapter, sections -- and the order the book reveals things."""
+
+    def test_the_spine_hangs_together(self, graph):
+        write(graph, CHAPTER_A, [node("Church")], [], chapter_spine=spine(
+            node("Church"),
+            chapter_index=3,
+            sections=[prose(0, "Section 0", f"The {named('Church')} stands here."),
+                      prose(1, "Section 1", "Nothing at all.")],
+        ))
+
+        row = graph.run(
+            """
+            MATCH (b:Book {slug:$book})-[h:HAS_CHAPTER]->(c:Chapter {slug:$slug})
+                  -[hs:HAS_SECTION]->(s:Section)
+            RETURN b.title AS book, c.index AS chapter_index, h.index AS edge_index,
+                   collect(s.index) AS sections, count(hs) AS edges
+            """,
+            {"book": TEST_BOOK, "slug": CHAPTER_A},
+        ).single()
+        assert row["book"] == "A Test Book"
+        assert row["chapter_index"] == 3
+        assert row["edge_index"] == 3
+        assert sorted(row["sections"]) == [0, 1]
+
+    def test_a_section_carries_the_text_a_mention_quotes(self, graph):
+        write(graph, CHAPTER_A, [node("Church")], [], chapter_spine=spine(
+            sections=[prose(0, "Section 0", f"The {named('Church')} stands in fog.")],
+        ))
+        text = graph.run(
+            "MATCH (s:Section {id:$id}) RETURN s.text AS t",
+            {"id": section_id(CHAPTER_A, 0)},
+        ).single()["t"]
+        assert text == f"The {named('Church')} stands in fog."
+
+    def test_a_range_query_bounded_by_chapter_index_returns_strictly_fewer(self, graph):
+        """Revelation order has to be CAPTURED, not merely modelled: bounding on
+        `chapter.index` must actually narrow what is knowable."""
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            eva, chapter_index=1,
+            sections=[prose(0, "Section 0", f"{named('Madam Eva')} reads the cards.")],
+        ))
+        later = node("Madam Eva", CHAPTER_B, "NPC")
+        write(graph, CHAPTER_B, [later], [], chapter_spine=spine(
+            later, chapter_index=2, chapter_slug=CHAPTER_B,
+            sections=[prose(0, "Section 0", f"{named('Madam Eva')} again.", CHAPTER_B)],
+        ))
+
+        def known(up_to: int) -> int:
+            return graph.run(
+                """
+                MATCH (m:Mention)-[:REFERS_TO]->(:Entity {id:$id}),
+                      (m)-[:IN_SECTION]->(s:Section)<-[:HAS_SECTION]-(c:Chapter)
+                WHERE c.index <= $up_to
+                RETURN count(m) AS c
+                """,
+                {"id": eva.id, "up_to": up_to},
+            ).single()["c"]
+
+        assert known(1) == 1
+        assert known(2) == 2
+
+    def test_a_keyed_section_describes_the_place_it_names(self, graph):
+        # A keyed place's id comes from `mint_id`, which hardcodes the book, so
+        # the section can only describe it if the node wears that exact id.
+        chapel = replace(node("Chapel"), id=f"cos:{CHAPTER_A}:e5f-chapel")
+        write(graph, CHAPTER_A, [chapel], [], chapter_spine=spine(
+            sections=[prose(0, "E5f. Chapel", f"A priest prays in the {named('Chapel')}.")],
+            location_ids={chapel.id},
+        ))
+
+        described = graph.run(
+            """
+            MATCH (s:Section)-[d:DESCRIBES]->(e:Entity)
+            WHERE s.chapter_slug = $slug
+            RETURN e.id AS id, d.chapter_slug AS chapter
+            """,
+            {"slug": CHAPTER_A},
+        ).single()
+        assert described["id"] == chapel.id
+        assert described["chapter"] == CHAPTER_A
+
+
+class TestMentionsInTheGraph:
+    def test_a_mention_joins_its_entity_to_its_section_with_evidence(self, graph):
+        eva = node("Madam Eva", entity_type="NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            sections=[prose(0, "Section 0", f"{named('Madam Eva')} deals the cards.")],
+        ))
+
+        row = graph.run(
+            """
+            MATCH (e:Entity {id:$id})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
+            RETURN m.evidence AS evidence, m.occurrences AS occurrences,
+                   m.chapter_slug AS chapter, m.plane AS plane, s.id AS section
+            """,
+            {"id": eva.id},
+        ).single()
+        assert row["evidence"] == f"{named('Madam Eva')} deals the cards."
+        assert row["occurrences"] == 1
+        assert row["chapter"] == CHAPTER_A
+        assert row["plane"] == CANON_PLANE
+        assert row["section"] == section_id(CHAPTER_A, 0)
+
+    def test_every_mention_carries_a_non_empty_evidence_span(self, graph):
+        """Success criterion 4. Asserted over the graph rather than the plan,
+        because an empty string survives a MERGE without complaint."""
+        write(graph, CHAPTER_A, [node("Church"), node("Undercroft")], [])
+        empty = graph.run(
+            "MATCH (m:Mention {chapter_slug:$slug}) "
+            "WHERE m.evidence IS NULL OR trim(m.evidence) = '' RETURN count(m) AS c",
+            {"slug": CHAPTER_A},
+        ).single()["c"]
+        assert count_mentions(graph, CHAPTER_A) > 0
+        assert empty == 0
+
+    def test_an_entity_from_an_earlier_chapter_is_mentioned_by_a_later_one(self, graph):
+        """An entity is global to the book, so a later chapter naming it in its
+        text is a fact about the LATER chapter. Scanning only the chapter's own
+        plan would rebuild, one level up, the defect this replaces."""
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva], [])
+        write(graph, CHAPTER_B, [node("Church", CHAPTER_B)], [], chapter_spine=spine(
+            chapter_slug=CHAPTER_B,
+            sections=[prose(0, "Section 0",
+                            f"The {named('Church')}, where {named('Madam Eva')} never goes.",
+                            CHAPTER_B)],
+        ))
+
+        chapters = graph.run(
+            "MATCH (m:Mention)-[:REFERS_TO]->(:Entity {id:$id}) "
+            "RETURN m.chapter_slug AS slug ORDER BY slug",
+            {"id": eva.id},
+        ).value()
+        assert chapters == [CHAPTER_A, CHAPTER_B]
+
+    def test_rewriting_a_chapter_updates_its_mentions_rather_than_doubling_them(self, graph):
+        church = node("Church")
+        write(graph, CHAPTER_A, [church], [])
+        before = count_mentions(graph, CHAPTER_A)
+        write(graph, CHAPTER_A, [church], [], replace=True)
+        assert before > 0
+        assert count_mentions(graph, CHAPTER_A) == before
+
+    def test_a_replace_takes_this_chapters_mentions_and_sections_with_it(self, graph):
+        # Three sections first, then a rewrite with one. A replace that only
+        # MERGEd the new spine over the old would leave two orphaned sections
+        # holding text the chapter no longer has, and every mention in them.
+        write(graph, CHAPTER_A, [node("Church"), node("Undercroft"), node("Hall")], [])
+        write(graph, CHAPTER_B, [node("Chapel", CHAPTER_B)], [])
+        assert self._sections(graph, CHAPTER_A) == 3
+
+        write(graph, CHAPTER_A, [node("Crypt")], [], replace=True)
+
+        assert self._sections(graph, CHAPTER_A) == 1
+        assert graph.run(
+            "MATCH (m:Mention)-[:REFERS_TO]->(:Entity {id:$id}) RETURN count(m) AS c",
+            {"id": ident("Church")},
+        ).single()["c"] == 0
+        # ... and chapter B is untouched.
+        assert count_mentions(graph, CHAPTER_B) == 1
+        assert self._sections(graph, CHAPTER_B) == 1
+
+    @staticmethod
+    def _sections(graph, chapter_slug: str) -> int:
+        return graph.run(
+            "MATCH (s:Section {chapter_slug:$slug}) RETURN count(s) AS c",
+            {"slug": chapter_slug},
+        ).single()["c"]
+
+    def test_a_node_the_text_never_names_is_still_this_chapters(self, graph):
+        """The union's second arm, and it is load-bearing.
+
+        Chapter 3 writes `Ismark Kolyanovich`, whose full name the chapter's
+        prose never spells -- it says "Ismark". `MENTIONED_IN` covered him by
+        construction and mentions do not, so the ontology edges this chapter
+        asserted are the other half of what a chapter owns. Without that arm he
+        is invisible to the loop's predicate and survives his own `--replace`.
+        """
+        named_node, unnamed = node("Church"), node("Undercroft")
+        write(
+            graph,
+            CHAPTER_A,
+            [named_node, unnamed],
+            [link(unnamed, named_node)],
+            # A spine that names only ONE of the two nodes.
+            chapter_spine=spine(named_node),
+        )
+
+        assert count_mentions(graph, CHAPTER_A) == 1
+        assert count_canon_nodes(graph, CHAPTER_A) == 2
+
+        write(graph, CHAPTER_A, [named_node], [], replace=True)
+        assert graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": unnamed.id}
+        ).single()["c"] == 0
+
+    def test_the_mention_scan_shares_the_chapters_one_transaction(self, graph):
+        """The atomicity pin, extended to the spine.
+
+        The write raises on an edge whose endpoint no node creates -- AFTER the
+        nodes, the sections and the mentions have all been written inside the
+        transaction. A writer that committed as it went would leave a chapter
+        full of sections and mentions behind, and the loop's predicate reads
+        exactly those, so the chapter would look DONE.
+        """
+        church, undercroft = node("Church"), node("Undercroft")
+        missing = node("Crypt")  # deliberately NOT written
+
+        with pytest.raises(ValueError, match="edge endpoint missing"):
+            write(graph, CHAPTER_A, [church, undercroft], [link(church, missing)])
+
+        assert count_mentions(graph, CHAPTER_A) == 0
+        assert graph.run(
+            "MATCH (s:Section {chapter_slug:$slug}) RETURN count(s) AS c",
+            {"slug": CHAPTER_A},
+        ).single()["c"] == 0
+        assert graph.run(
+            "MATCH (b:Book {slug:$slug}) RETURN count(b) AS c", {"slug": TEST_BOOK},
+        ).single()["c"] == 0
+        assert count_canon_nodes(graph, CHAPTER_A) == 0
+
+
+class TestSilentNoOpsRaise:
+    """A `MATCH ... MERGE` that matches nothing writes nothing and says nothing.
+
+    That is exactly how a chapter acquires fewer mentions than it scanned, or
+    fewer places than it described, with no error anywhere. Both writers count
+    what they wrote and raise on zero, so the whole chapter rolls back instead.
+    """
+
+    def test_a_mention_of_an_entity_that_is_not_there_raises(self, graph):
+        from backend.canon.spine import WriteMention
+        from backend.canon.writer import _write_mention
+
+        write(graph, CHAPTER_A, [node("Church")], [])
+        orphan = WriteMention(
+            id="pytest:nobody@" + section_id(CHAPTER_A, 0),
+            entity_id="pytest:nobody",
+            section_id=section_id(CHAPTER_A, 0),
+            chapter_slug=CHAPTER_A,
+            evidence="quoted from nowhere",
+            occurrences=1,
+            offset=0,
+        )
+        with pytest.raises(ValueError, match="mention endpoint missing"):
+            graph.execute_write(_write_mention, orphan)
+
+    def test_a_section_describing_a_place_that_is_not_there_raises(self, graph):
+        """A MERGE on the target instead of a MATCH would invent a bare place
+        node that no extraction ever proposed."""
+        ghost = f"cos:{CHAPTER_A}:e5f-ghost"
+        with pytest.raises(ValueError, match="DESCRIBES endpoint missing"):
+            write(graph, CHAPTER_A, [node("Church")], [], chapter_spine=spine(
+                sections=[prose(0, "E5f. Ghost", "Nothing is here.")],
+                location_ids={ghost},
+            ))
+        assert graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN count(n) AS c", {"id": ghost}
+        ).single()["c"] == 0
+
+
+class TestDescriptionIsGone:
+    def test_no_canon_node_carries_a_description(self, graph):
+        """Deleted from the ontology, not merely stopped being written: a
+        property that is absent on new writes but present on old ones is the
+        last-write-wins defect wearing a hat."""
+        write(graph, CHAPTER_A, [node("Church")], [])
+        props = graph.run(
+            "MATCH (n:Entity {id:$id}) RETURN properties(n) AS p", {"id": ident("Church")}
+        ).single()["p"]
+        assert "description" not in props
