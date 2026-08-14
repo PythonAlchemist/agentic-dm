@@ -239,3 +239,57 @@ class TestCombatManagement:
 
         result = tools.apply_damage("Someone", 10)
         assert "error" in result
+
+
+class TestCanonLookupWiring:
+    """The three canon questions, delegated and not reimplemented.
+
+    A stub reader, deliberately: what is under test is that `DMTools` hands the
+    question straight through and hands the answer straight back. Whether the
+    Cypher is right is `tests/test_canon/test_lookup.py`'s job, against a live
+    graph the real writer filled.
+    """
+
+    class _StubCanon:
+        def __init__(self):
+            self.calls: list[tuple[str, str]] = []
+
+        def _record(self, tool, arg):
+            self.calls.append((tool, arg))
+            return {"tool": tool, "accepted": [], "proposed": []}
+
+        def where_is(self, name):
+            return self._record("where_is", name)
+
+        def whats_here(self, place):
+            return self._record("whats_here", place)
+
+        def lookup(self, name):
+            return self._record("lookup", name)
+
+    @pytest.fixture
+    def tools(self):
+        return DMTools(canon=self._StubCanon())
+
+    def test_where_is_delegates(self, tools):
+        assert tools.where_is("Ismark")["tool"] == "where_is"
+        assert tools.canon.calls == [("where_is", "Ismark")]
+
+    def test_whats_here_delegates(self, tools):
+        assert tools.whats_here("Church")["tool"] == "whats_here"
+        assert tools.canon.calls == [("whats_here", "Church")]
+
+    def test_lookup_canon_delegates(self, tools):
+        assert tools.lookup_canon("Strahd")["tool"] == "lookup"
+        assert tools.canon.calls == [("lookup", "Strahd")]
+
+    def test_the_two_trust_levels_survive_delegation(self, tools):
+        """A convenience wrapper is exactly where a flat merge would creep in."""
+        result = tools.lookup_canon("Strahd")
+        assert "accepted" in result and "proposed" in result
+
+    def test_constructing_dmtools_opens_no_connection(self):
+        """Dice and combat must not need Neo4j running."""
+        tools = DMTools()
+        assert tools.canon is not None
+        assert tools.combat_state is None

@@ -6,6 +6,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from backend.canon.lookup import CanonLookup
 from backend.graph.schema import EntityType
 
 
@@ -142,9 +143,59 @@ class DMTools:
                      "Nemeia", "Orianna", "Therai", "Zariel"],
     }
 
-    def __init__(self):
-        """Initialize DM tools."""
+    def __init__(self, canon: CanonLookup | None = None):
+        """Initialize DM tools.
+
+        Args:
+            canon: Read path into the canon knowledge graph. Constructed by
+                default; it opens no connection until a question is asked, so a
+                DMTools used only for dice and combat never touches Neo4j.
+        """
         self.combat_state: Optional[CombatState] = None
+        self.canon = canon or CanonLookup()
+
+    def where_is(self, name: str) -> dict:
+        """Look up where the book places an entity, and where to read about it.
+
+        Args:
+            name: Entity name. Resolved through the graph's `:Alias` nodes,
+                which is exact, case-insensitive and apostrophe-folded and
+                nothing more -- a misspelling resolves to nothing.
+
+        Returns:
+            Dict with `accepted` and `proposed` placements KEPT APART, plus
+            `passages` -- the chapters and section headings where the book
+            discusses it. Never merge the two lists: `proposed` is model output
+            measured at 30-50% wrong. An empty answer carries `miss_reason`.
+        """
+        return self.canon.where_is(name)
+
+    def whats_here(self, place: str) -> dict:
+        """Look up what the book puts in or under a place.
+
+        Args:
+            place: Place name, resolved the same way as `where_is`.
+
+        Returns:
+            Dict with `accepted` and `proposed` occupants kept apart, plus
+            `sections` -- the passage describing the place and what else it
+            mentions -- and a `miss_reason` on an empty answer.
+        """
+        return self.canon.whats_here(place)
+
+    def lookup_canon(self, name: str) -> dict:
+        """Look an entity up: labels, rung, mentions with evidence, and edges.
+
+        Args:
+            name: Entity name, resolved the same way as `where_is`.
+
+        Returns:
+            Dict with the entity's labels and hierarchy rung (`None` when it
+            carries none, which means unclassified rather than unknown), its
+            `mentions` with the sentence the book wrote, and its `accepted` and
+            `proposed` edges kept apart.
+        """
+        return self.canon.lookup(name)
 
     def roll_dice(self, expression: str) -> DiceResult:
         """Roll dice using standard notation.
