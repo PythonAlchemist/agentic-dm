@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.canon.cooccurrence import WidestSentence
 from backend.canon.models import CandidateNode
 from backend.canon.structure import place_from_chapter_title
 from backend.canon.writer import FilterReport, WriteEdge, WriteNode
@@ -18,6 +19,7 @@ from backend.scripts.write_canon import (
     DEFAULT_RUNS_DIR,
     build_parser,
     chapter_place_of_run,
+    format_co_occurrence,
     format_report,
     parse_artifact,
     run_artifact,
@@ -215,6 +217,83 @@ class TestRunArtifact:
 
     def test_the_artifact_is_json_serialisable(self):
         json.dumps(self.build())
+
+    def test_the_co_occurrence_census_travels_with_the_run(self):
+        """Printed AND recorded: the ratio's movement across chapters is the
+        signal, and a terminal has scrolled away by chapter 12."""
+        written = self.build(
+            replaced={
+                "deleted_nodes": 0,
+                "deleted_edges": 0,
+                "co_occurrences": 6,
+                "co_occurrence_counts": [("Strahd", 2)],
+                "widest_sentence": WidestSentence(
+                    entities=3, passage="Strahd rules Barovia.", names=("Strahd",)
+                ),
+            }
+        )["write"]
+        assert written["co_occurrences"] == 6
+        assert written["co_occurrence_counts"] == [("Strahd", 2)]
+        assert written["widest_sentence"] == {
+            "entities": 3,
+            "passage": "Strahd rules Barovia.",
+            "names": ("Strahd",),
+        }
+
+    def test_a_widest_sentence_of_none_stays_none_and_serialises(self):
+        """A chapter no sentence of which names two entities is a real outcome,
+        and `asdict(None)` would raise on it."""
+        written = self.build(
+            replaced={"deleted_nodes": 0, "deleted_edges": 0, "widest_sentence": None}
+        )["write"]
+        assert written["widest_sentence"] is None
+        json.dumps(written)
+
+
+class TestFormatCoOccurrence:
+    """The census the design asks to be watched, printed on every write."""
+
+    def summary(self, **overrides) -> dict:
+        return {
+            "mentions": 100,
+            "co_occurrences": 65,
+            "co_occurrence_counts": [("Strahd von Zarovich", 10), ("vampire", 8)],
+            "widest_sentence": WidestSentence(
+                entities=3,
+                passage="Adventurers find themselves in Barovia, ruled by Strahd.",
+                names=("Barovia", "Strahd von Zarovich", "vampire"),
+            ),
+            **overrides,
+        }
+
+    def test_the_ratio_to_mentions_is_printed(self):
+        """The number that says whether the sentence rule has come loose."""
+        assert "0.65 per mention" in format_co_occurrence(self.summary())
+
+    def test_the_widest_sentence_is_printed_with_its_edge_cost(self):
+        printed = format_co_occurrence(self.summary())
+        assert "widest sentence: 3 entities (6 edges)" in printed
+        assert "Adventurers find themselves in Barovia" in printed
+
+    def test_a_chapter_that_pairs_nothing_says_so_rather_than_printing_nothing(self):
+        printed = format_co_occurrence(
+            self.summary(co_occurrences=0, co_occurrence_counts=[], widest_sentence=None)
+        )
+        assert "no sentence in this chapter names two entities" in printed
+        assert "0.00 per mention" in printed
+
+    def test_a_chapter_with_no_mentions_does_not_divide_by_zero(self):
+        printed = format_co_occurrence(
+            self.summary(mentions=0, co_occurrences=0, widest_sentence=None)
+        )
+        assert "0.00 per mention" in printed
+
+    def test_the_ranking_is_printed_so_a_common_noun_announces_itself(self):
+        """`vampire` and `light` are known junk. If either heads this list that
+        is a finding about those nodes, and it has to be visible to be found."""
+        printed = format_co_occurrence(self.summary())
+        assert "JUNK IS NOT FILTERED" in printed
+        assert "vampire" in printed
 
 
 class TestFormatReport:

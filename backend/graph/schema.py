@@ -229,6 +229,7 @@ ARTIFACT_LABEL = "Artifact"
 #   (:Section)-[:DESCRIBES]->(:Entity:LOCATION)
 #   (:Entity)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(:Section)
 #   (:Entity)<-[:ALIAS_OF]-(:Alias)<-[:USES_ALIAS]-(:Mention)
+#   (:Mention)-[:CO_OCCURS_WITH]->(:Entity)
 #
 # BARE STRINGS, not `RelationshipType` members, for the reason `ARTIFACT_LABEL`
 # is one. That enum is the vocabulary of relationships BETWEEN ENTITIES: it is
@@ -266,6 +267,19 @@ USES_ALIAS = "USES_ALIAS"
 DESCRIBES = "DESCRIBES"
 REFERS_TO = "REFERS_TO"
 IN_SECTION = "IN_SECTION"
+#: Another entity the mention's own SENTENCE also names. Arithmetic over offsets
+#: the scan already found -- see `backend/canon/cooccurrence.py` -- so it belongs
+#: beside these and not in `RelationshipType`, and it carries no `status`: the
+#: `accepted`/`proposed` split exists because a model GUESSED a typed
+#: relationship, and there is nothing here for a reviewer to accept.
+#:
+#: NOT A RELATIONSHIP BETWEEN THE TWO ENTITIES, and the shape says so. That
+#: Strahd and Barovia share a sentence is a fact; that it means `THREATENS` is a
+#: judgment this project has failed to automate four times over. The far end is
+#: an `:Entity` rather than a `:Mention` because an entity is global to the book
+#: and has no one place, while the near end keeps the section and the offset that
+#: make the claim checkable against the prose.
+CO_OCCURS_WITH = "CO_OCCURS_WITH"
 
 # A directional gloss for every relationship type offered to the extraction prompt
 # (i.e. every type in a layer vocabulary -- see `layer_vocabulary`). A bare type
