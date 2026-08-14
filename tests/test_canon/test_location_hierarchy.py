@@ -296,9 +296,45 @@ class TestHandAuthoredSubtypes:
 
         assert nodes[0].location_subtype == LocationSubtype.SETTLEMENT.value
 
-    def test_an_authored_entry_beats_the_key(self):
-        """The village is a chapter's own place, which derives SITE -- and a
-        human has said it is a settlement. A key does not overrule a human."""
+    def test_an_authored_entry_beats_a_top_level_key(self):
+        """A settlement the book gives its OWN heading. `N1. Vallaki` derives
+        SITE from an unsuffixed key, and a human has said SETTLEMENT; a key does
+        not overrule a human, and a town labelled a building is wrong in a way
+        no query can see.
+
+        Keyed on purpose: the chapter's own place has no key at all, so
+        asserting precedence there tests nothing -- there is no key competing.
+        """
+        nodes, _, _ = self.plan(
+            node("Vallaki", section_heading="N1. Vallaki", section_index=1),
+            subtypes={"vallaki": LocationSubtype.SETTLEMENT},
+        )
+
+        assert nodes[0].location_subtype == LocationSubtype.SETTLEMENT.value
+
+    def test_an_authored_entry_beats_a_suffixed_key_too(self):
+        """The other half of the same rule. A key that would derive AREA loses
+        to an authored rung exactly as one that would derive SITE does --
+        otherwise precedence holds on one branch and not the other."""
+        nodes, _, _ = self.plan(
+            node("Vallaki", section_heading="N1a. Vallaki", section_index=1),
+            subtypes={"vallaki": LocationSubtype.SETTLEMENT},
+        )
+
+        assert nodes[0].location_subtype == LocationSubtype.SETTLEMENT.value
+
+    def test_a_keyed_place_with_no_entry_still_derives(self):
+        """The converse, so the two tests above cannot both pass by the seed
+        being consulted for every place regardless."""
+        nodes, _, _ = self.plan(
+            node("Vallaki", section_heading="N1. Vallaki", section_index=1),
+            subtypes={"krezk": LocationSubtype.SETTLEMENT},
+        )
+
+        assert nodes[0].location_subtype == LocationSubtype.SITE.value
+
+    def test_an_authored_entry_beats_the_chapter_place_rung(self):
+        """The third source in the precedence chain, which has no key either."""
         nodes, _, _ = plan_write(
             [node("Church", section_heading="E5. Church", section_index=1)],
             [],
@@ -317,6 +353,92 @@ class TestHandAuthoredSubtypes:
         )
 
         assert nodes[0].location_subtype == ""
+
+
+class TestMatchingIsExact:
+    """Nothing here matches loosely, and these tests exist to keep it that way.
+
+    Both lookups are exact today, and nothing stopped the next edit from
+    relaxing one. A loose match is not a smaller version of a correct match --
+    it is a wrong answer that looks like a right one, and both of the mutations
+    below produce a graph that is confidently, silently wrong.
+    """
+
+    def test_a_name_sharing_only_a_suffix_resolves_to_nothing(self):
+        """The mutation: a containment fallback in `_endpoint_ids`.
+
+        `The Village of Barovia` would bind to the `Village of Barovia`
+        candidate and reattach all seven chapter-level CONTAINS to a node that
+        is a passing mention rather than the chapter's own place -- which is
+        the exact defect minting the place node exists to avoid, arrived at by
+        a different route. The edge must dangle instead.
+        """
+        _, edges, report = plan_write(
+            [
+                node("Church", section_heading="E5. Church", section_index=1),
+                node("Village of Barovia", section_index=1),
+            ],
+            [edge(VILLAGE, "Church", **DERIVED)],
+            gazetteer("Village of Barovia"),
+            SLUG,
+        )
+
+        assert report.dangling_edges == 1
+        assert edges == []
+
+    def test_a_name_containing_another_resolves_to_nothing(self):
+        """The same guard from the other side: an endpoint naming the longer
+        string must not be answered by a node holding the shorter one."""
+        _, edges, report = plan_write(
+            [node("Church", section_heading="E5. Church", section_index=1)],
+            [edge("Church", "Church Graveyard", **DERIVED)],
+            gazetteer(),
+            SLUG,
+        )
+
+        assert report.dangling_edges == 1
+        assert edges == []
+
+    def test_an_authored_entry_does_not_match_a_name_containing_it(self):
+        """The mutation: a substring fallback in `_subtype_of`'s seed lookup.
+
+        `barovia` would match `village-of-barovia` and the village would become
+        a REGION -- a settlement relabelled as the land it sits in, from a rule
+        that is right about the valley and wrong about the village.
+        """
+        nodes, _, _ = plan_write(
+            [node("Village of Barovia", section_index=1)],
+            [],
+            gazetteer("Village of Barovia"),
+            SLUG,
+            subtypes={"barovia": LocationSubtype.REGION},
+        )
+
+        assert nodes[0].location_subtype == ""
+
+    def test_an_authored_entry_does_not_match_a_name_it_contains(self):
+        nodes, _, _ = plan_write(
+            [node("Barovia", section_index=1)],
+            [],
+            gazetteer("Barovia"),
+            SLUG,
+            subtypes={"village-of-barovia": LocationSubtype.SETTLEMENT},
+        )
+
+        assert nodes[0].location_subtype == ""
+
+    def test_the_exact_authored_entry_still_matches(self):
+        """The converse, so the four above cannot pass by the seed never being
+        consulted at all."""
+        nodes, _, _ = plan_write(
+            [node("Barovia", section_index=1)],
+            [],
+            gazetteer("Barovia"),
+            SLUG,
+            subtypes={"barovia": LocationSubtype.REGION},
+        )
+
+        assert nodes[0].location_subtype == LocationSubtype.REGION.value
 
 
 class TestSubtypeLabel:

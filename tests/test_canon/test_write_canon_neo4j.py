@@ -500,28 +500,63 @@ class TestLocationSubtypeIsALabel:
         assert sorted(labels) == ["Entity", "LOCATION"]
 
     def test_a_place_wears_exactly_one_rung(self, graph):
-        """A room promoted to a building must not end up both. `SET` unions, so
-        the write has to clear the rungs it is replacing."""
-        chapel = self.area()
-        write_chapter(graph, CHAPTER_A, [chapel], [])
+        """A place reclassified must not end up wearing both rungs. `SET`
+        unions, so the write has to clear the rungs it is replacing.
+
+        Two CHAPTERS, not a `--replace` of one. A replace deletes the node and
+        writes it fresh, so the old labels go with the node and the REMOVE is
+        never exercised -- the version of this test that did that passed with
+        the REMOVE clause deleted, which is a test that cannot fail.
+
+        The scenario is real: an unkeyed place is one global node, and editing
+        its authored rung (`Vallaki` REGION to SETTLEMENT) re-labels a node that
+        every other chapter naming it keeps alive.
+        """
+        first = self.area("Vallaki", "SETTLEMENT")
+        write_chapter(graph, CHAPTER_A, [first], [])
         write_chapter(
-            graph, CHAPTER_A, [self.area(subtype="SITE")], [], replace=True
+            graph,
+            CHAPTER_B,
+            [replace(first, chapter_slug=CHAPTER_B, location_subtype="REGION")],
+            [],
         )
 
         labels = graph.run(
-            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": chapel.id}
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": first.id}
         ).single()["labels"]
-        assert sorted(labels) == ["Entity", "LOCATION", "SITE"]
+        assert sorted(labels) == ["Entity", "LOCATION", "REGION"]
+
+    def test_the_superseded_rung_is_gone_not_merely_outnumbered(self, graph):
+        """Stated as its own assertion because the one above passes on a node
+        wearing `:REGION:SETTLEMENT` if the reader only checks membership."""
+        first = self.area("Vallaki", "SETTLEMENT")
+        write_chapter(graph, CHAPTER_A, [first], [])
+        write_chapter(
+            graph,
+            CHAPTER_B,
+            [replace(first, chapter_slug=CHAPTER_B, location_subtype="REGION")],
+            [],
+        )
+
+        assert graph.run(
+            "MATCH (n:SETTLEMENT {id:$id}) RETURN count(n) AS c", {"id": first.id}
+        ).single()["c"] == 0
 
     def test_a_chapter_that_says_nothing_about_the_rung_leaves_it_alone(self, graph):
-        """Chapter 4 mentioning `Church` unkeyed must not strip the SITE that
-        chapter 3's own key established. Only a write that HAS a rung clears."""
-        keyed = self.area("Church", "SITE")
-        write_chapter(graph, CHAPTER_A, [keyed], [])
-        write_chapter(graph, CHAPTER_B, [node("Church", CHAPTER_B)], [])
+        """A chapter merely MENTIONING a place must not strip the rung the
+        chapter that is ABOUT it established. Only a write that HAS a rung
+        clears, which is why the REMOVE is conditional.
+
+        `Vallaki` unkeyed is one global node. Chapter 5 is about it and writes
+        SITE; chapter 3 names it in passing, derives nothing, and writes the
+        same id. Whichever lands second must not be the one that decides.
+        """
+        about = self.area("Vallaki", "SITE")
+        write_chapter(graph, CHAPTER_A, [about], [])
+        write_chapter(graph, CHAPTER_B, [node("Vallaki", CHAPTER_B)], [])
 
         labels = graph.run(
-            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": keyed.id}
+            "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": about.id}
         ).single()["labels"]
         assert sorted(labels) == ["Entity", "LOCATION", "SITE"]
 

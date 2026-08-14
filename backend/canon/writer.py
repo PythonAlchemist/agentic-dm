@@ -1228,11 +1228,22 @@ def _write_node(tx, node: WriteNode) -> None:
     than replace, the chapter that typed it a LOCATION.
 
     A HIERARCHY RUNG REPLACES. The rungs are one ladder, so a place that was a
-    room and is now a building must not end up both -- and `SET` alone would
-    leave it wearing the pair. The REMOVE is emitted ONLY when this write
-    actually has a rung to put there: chapter 4 mentioning `Church` unkeyed
-    knows nothing about the hierarchy, and stripping the SITE that chapter 3's
-    own key established would be a chapter deleting a fact it never asserted.
+    settlement and is now a region must not end up both -- and `SET` alone would
+    leave it wearing the pair. Editing the authored seed and re-writing is how
+    that happens, on a node another chapter keeps alive through the replace.
+
+    The REMOVE is emitted ONLY when this write actually has a rung to put there,
+    and the reachable case is a chapter that MENTIONS a place versus the chapter
+    that is ABOUT it. Both reach one id, because an unkeyed place is global:
+    chapter 5 is about `Vallaki` and writes its rung, chapter 3 names it in
+    passing and derives none. Whichever lands second must not be the one that
+    decides, so a write with nothing to say about the hierarchy says nothing.
+
+    NOT the keyed case, which cannot arise: a keyed id carries its own chapter
+    and key, so two chapters can never write one keyed node. An earlier draft of
+    this docstring cited `Church` keyed in chapter 3 and mentioned in chapter 4,
+    and `mint_id` makes that two different nodes. The guard is right; that
+    reason for it was not.
     """
     labels = "".join(f":{label}" for label in node.labels)
     clauses = []
