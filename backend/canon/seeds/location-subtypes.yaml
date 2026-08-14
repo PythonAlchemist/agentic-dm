@@ -1,8 +1,9 @@
 # Curse of Strahd -- every label a human authors by hand.
 #
-# Two blocks, `locations` and `artifacts`, in ONE file loaded ONE way. They are
-# the same kind of claim -- a person naming something the text does not mark --
-# and splitting them across two files would be two mechanisms that drift.
+# Three blocks, `locations`, `artifacts` and `aliases`, in ONE file loaded ONE
+# way. They are the same kind of claim -- a person naming something the text
+# does not mark -- and splitting them across three files would be three
+# mechanisms that drift.
 #
 # =========================== LOCATIONS ===========================
 #
@@ -86,3 +87,85 @@ artifacts:
   - Tome of Strahd
   - Holy Symbol of Ravenkind
   - Sunsword
+
+# ============================ ALIASES ============================
+#
+# The names the book actually writes, for entities whose canonical name it
+# rarely spells in full. Each becomes an `(:Alias)-[:ALIAS_OF]->(:Entity)`, and
+# the mention scan looks for every one of them.
+#
+# THIS IS THE FILE'S REASON FOR EXISTING, restated: the graph knew one node
+# called `Strahd von Zarovich`, that exact string occurs in ONE of chapter 3's
+# twenty-two sections, and the other seven write `Strahd`. Adding one line below
+# takes him from 1 mention to 8. Nothing infers it -- not a prefix rule, not a
+# first-token rule, not an edit distance. Every one of those would have been
+# right here and wrong elsewhere, and two of them have already cost this project
+# weeks: a token-subset match let a candidate `Ireena` credit the quest `Escort
+# Ireena to Vallaki`, which is how a ten-line regex outscored a real extractor.
+#
+# The entity's own name is ALWAYS an alias and is never listed here. Only the
+# extra spellings go in.
+#
+# Matched on the SLUG of `name` OR of any alias, the way the location rungs are,
+# so one entry covers a straight and a curly apostrophe and the seed does not
+# have to know which spelling the extractor's provenance tiebreak minted the
+# node under.
+#
+# THE BAR FOR AN ENTRY: the book writes this spelling, and the spelling names
+# this thing and no other. `Mary` fails it -- the foreword's Mary is Mary
+# Shelley, and the alias would have credited Mad Mary with the invention of
+# Frankenstein. That is the failure mode the whole no-inference rule guards
+# against, and it is one line away in every direction.
+
+aliases:
+  # --- People ---
+  # 8 of chapter 3's 22 sections. The measurement this design was built on.
+  - name: Strahd von Zarovich
+    aliases:
+      - Strahd
+  # The chapter's prose never spells his patronymic; his NPC block does.
+  # "Ismark the Lesser" is the book's own epithet, in the tavern section.
+  - name: Ismark Kolyanovich
+    aliases:
+      - Ismark
+      - Ismark the Lesser
+  - name: Ireena Kolyana
+    aliases:
+      - Ireena
+
+  # --- Places ---
+  # The settlement, not the valley. `Barovia` alone is the REGION and stays
+  # deliberately absent from here: the two are different places that share a
+  # word, and an alias would merge them.
+  - name: The Village of Barovia
+    aliases:
+      - Village of Barovia
+  - name: Krezk
+    aliases:
+      - Village of Krezk
+  # The book names the tavern twice and differently on purpose: the sign
+  # outside is defaced so that an "n" is scratched over the "f", and chapter 3
+  # calls it "the Blood on the Vine tavern" in the same breath as the heading
+  # "E2. Blood of the Vine Tavern".
+  - name: Blood of the Vine Tavern
+    aliases:
+      - Blood on the Vine Tavern
+      - Blood on the Vine
+
+  # --- Typography ---
+  # The book sets its possessives with U+2019 and the extractor emits an ASCII
+  # quote, so a keyed room is minted under whichever one won the provenance
+  # tiebreak. Both spellings are recorded so that `USES_ALIAS` can say which one
+  # a section actually set -- the scan folds the two together and so would find
+  # these anyway, which is exactly why the SURFACE FORM has to be written down
+  # rather than inferred from the match.
+  - name: Bildrath's Mercantile
+    aliases: ["Bildrath’s Mercantile"]
+  - name: Burgomaster's Mansion
+    aliases: ["Burgomaster’s Mansion"]
+  - name: Mad Mary's Townhouse
+    aliases: ["Mad Mary’s Townhouse"]
+  - name: Donavich's Bedroom
+    aliases: ["Donavich’s Bedroom"]
+  - name: Doru's Bedroom
+    aliases: ["Doru’s Bedroom"]
