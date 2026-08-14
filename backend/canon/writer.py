@@ -21,6 +21,7 @@ refuses rather than reaching for DETACH DELETE.
 import logging
 from collections.abc import Container, Mapping
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from neo4j.exceptions import Neo4jError
 
@@ -33,13 +34,22 @@ from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
     ARTIFACT_LABEL,
     CANON_ENTITY_TYPES,
+    DESCRIBES,
     GRAPH_SCHEMA,
+    HAS_CHAPTER,
+    HAS_SECTION,
+    IN_SECTION,
     LAYER_MAP,
+    REFERS_TO,
     RELATIONSHIP_DOMAIN_RANGE,
     EntityType,
     LocationSubtype,
     RelationshipType,
 )
+
+if TYPE_CHECKING:  # `spine` imports `mint_id` and `BOOK` from here, so the
+    # runtime dependency runs one way only -- spine -> writer.
+    from backend.canon.spine import ChapterSpine, WriteMention
 
 #: Nodes and edges written here are the book's own canon, shared by every
 #: campaign. The resolver filters on this property; an unstamped node is
@@ -67,10 +77,6 @@ CONFLICTED = "conflicted"
 #: Every id is prefixed with the book. Entities merge across the chapters of one
 #: book -- see `mint_id` -- but never across books.
 BOOK = "cos"
-
-#: Provenance edge: entity -> the :Chapter it is written about in. Named through
-#: the enum rather than as a literal so the graph's vocabulary stays in one file.
-MENTIONED_IN = RelationshipType.MENTIONED_IN.value
 
 #: The labels a canon node may carry beside `:Entity`, derived from the ontology
 #: rather than restated. A label CANNOT be parameterized in Cypher, so it is
@@ -194,13 +200,11 @@ class WriteNode:
     #: disagree -- `Barovia` is a LOCATION to one and a SETTING to another --
     #: and there is nothing to choose between them. Both become labels.
     entity_types: tuple[str, ...]
-    #: The chapter this write is for. Provenance for the MENTIONED_IN edge, NOT
-    #: a property of the entity: a globally unique node has no one chapter.
+    #: The chapter whose write this is. Bookkeeping for the write, NOT a property
+    #: of the entity: a globally unique node has no one chapter, and where it
+    #: APPEARS is now a set of `:Mention` nodes rather than anything here.
     chapter_slug: str
-    section_heading: str = ""
-    section_index: int = -1
     votes: int = 0
-    description: str = ""
     #: `ACCEPTED` when the book itself keys this place, or when some accepted
     #: edge attaches to it; `PROPOSED` otherwise. Defaults to PROPOSED because
     #: acceptance has to be EARNED from evidence -- a node built by hand, or by
@@ -287,34 +291,23 @@ class WriteNode:
 
         NO `chapter_slug`, `section_heading` or `section_index` either: an
         entity the whole book shares appears in many chapters and many sections,
-        and each appearance is a MENTIONED_IN edge carrying its own.
+        and each appearance is a `:Mention` carrying its own.
+
+        NO `description`, AND ITS ABSENCE IS THE POINT. It was one sentence,
+        single-valued and last-write-wins: Strahd is described across twenty-five
+        chapters and the node kept whichever extraction ran most recently, the
+        same defect class as the shared-edge `chapter_slug` overwrite. Every
+        `:Mention` now carries an evidence span quoting the section it was found
+        in, so "what does the book say about X" is an aggregation over those --
+        harder to read than a property, and able to answer *when*. If a
+        description comes back it comes back as an aggregate of the mentions,
+        computed rather than overwritten.
         """
-        props: dict = {
+        return {
             "name": self.name,
             "plane": CANON_PLANE,
             "votes": self.votes,
             "status": self.status,
-        }
-        # Absent rather than empty: `description` is optional on a candidate,
-        # and writing "" would make a node that never had one indistinguishable
-        # from one whose description the extractor lost.
-        if self.description:
-            props["description"] = self.description
-        return props
-
-    @property
-    def appearance(self) -> dict:
-        """What lands on this node's MENTIONED_IN edge to one chapter.
-
-        No `chapter_slug` and no `plane`: the edge already points AT the chapter
-        and comes FROM a node stamped canon, so both would be the same fact in a
-        second place -- and `r.chapter_slug` would then stop meaning "an
-        ontology edge this chapter asserted", which is what the review queue and
-        the replace path read it as.
-        """
-        return {
-            "section_heading": self.section_heading,
-            "section_index": self.section_index,
         }
 
 
@@ -652,16 +645,19 @@ def _endpoint_ids(
 
 
 def _as_write_node(node: CandidateNode, node_id: str, chapter_slug: str) -> WriteNode:
-    """A candidate with its id minted and the caller's chapter slug stamped."""
+    """A candidate with its id minted and the caller's chapter slug stamped.
+
+    The candidate's `description` and its section provenance are deliberately
+    NOT carried across -- see `WriteNode.properties`. They stay in the run
+    artifact, which is the record of what the extractor said; the graph records
+    where the entity actually appears instead.
+    """
     return WriteNode(
         id=node_id,
         name=node.name,
         entity_types=(node.entity_type,),
         chapter_slug=chapter_slug,
-        section_heading=node.section_heading,
-        section_index=node.section_index,
         votes=node.votes,
-        description=node.description,
     )
 
 
@@ -995,17 +991,16 @@ def plan_write(
         if keyed.keys_own_name(node.name, node.section_index):
             ids_by_section.setdefault(node.section_index, set()).add(node_id)
 
-        # Provenance tiebreak, highest rank wins and the earliest wins a tie:
+        # Spelling tiebreak, highest rank wins and the earliest wins a tie:
         #   2  the section that keys this room, spelling it as the book does
         #   1  the section that keys this room
         #   0  anything else -- a passing mention, or an unkeyed entity
-        # First-candidate-wins alone records whichever section first MENTIONED a
-        # room rather than the one that keys it, which sends a reader of
-        # `section_heading` to the wrong part of the book -- the Chapel filed
-        # under `E5a. Hall`. Rank 2 exists because two candidates can both be
-        # keyed by their own section and disagree on typography, and canon
-        # should carry the book's spelling rather than the extractor's
-        # (`burgomaster's mansion` beat `E4. Burgomaster's Mansion`).
+        # What this decides is now the NAME and only the name: where an entity
+        # appears is a set of `:Mention` nodes rather than one section heading on
+        # the node. The name still matters more than it did, because it is what
+        # the mention scan looks for in every section of the book -- a node
+        # carrying the extractor's `burgomaster's mansion` instead of the book's
+        # `E4. Burgomaster's Mansion` finds fewer of its own appearances.
         rank = 0
         if keyed.keys_own_name(node.name, node.section_index):
             rank = 2 if keyed.spells_it_as_the_book_does(node.name, node.section_index) else 1
@@ -1180,49 +1175,104 @@ def ensure_schema(session) -> None:
             logger.warning("schema statement failed: %s -- %s", statement, exc)
 
 
-#: Every canon node this chapter names, found through its appearances rather
-#: than through a property on the node. A globally unique entity belongs to as
-#: many chapters as mention it, and MENTIONED_IN is the only record of which.
-_MENTIONED_BY_CHAPTER = f"""
-MATCH (n:Entity {{plane:$plane}})-[:{MENTIONED_IN}]->(:Chapter {{slug:$slug}})
+#: Every canon node this chapter's write is responsible for, in two arms.
+#:
+#: `MENTIONED_IN` used to answer this in one hop, and it is gone: it recorded
+#: where an entity was EXTRACTED rather than where it appears, which is the
+#: defect `:Mention` exists to repair. Its BOOKKEEPING job -- "which nodes does
+#: this chapter own" -- has to be reconstructed from records that are true about
+#: the book, and there are exactly two:
+#:
+#:   1. a `:Mention` this chapter made, i.e. the chapter's text names the entity;
+#:   2. an ontology edge this chapter asserted, i.e. `r.chapter_slug`.
+#:
+#: The union is needed, and neither arm alone is enough. Chapter 3 writes
+#: `Ismark Kolyanovich`, whose full name the chapter's prose never spells (it
+#: says "Ismark"), so arm 1 misses him and arm 2 catches him through his edges.
+#:
+#: THE UNION IS STILL NOT TOTAL, and that is a real narrowing against
+#: MENTIONED_IN, which covered every written node by construction. An entity
+#: with neither a textual appearance nor a single edge is invisible here: across
+#: the three loaded chapters that is one node (`Tome of Strahd`, written by the
+#: introduction). The consequence is bounded -- `--replace` leaves such a node
+#: behind rather than deleting it, and the following write MERGEs onto it -- and
+#: it is stated rather than papered over, because the alternative is minting a
+#: mention with no evidence, which is the fabrication this whole design refuses.
+_CHAPTER_ENTITIES = f"""
+CALL () {{
+    MATCH (:Mention {{plane:$plane, chapter_slug:$slug}})-[:{REFERS_TO}]->(e:Entity)
+    WHERE e.plane = $plane
+    RETURN e
+  UNION
+    MATCH (e:Entity {{plane:$plane}})-[r]-(:Entity)
+    WHERE r.plane = $plane AND r.chapter_slug = $slug
+    RETURN e
+}}
+WITH DISTINCT e AS n
 """
 
 
 def count_canon_nodes(session, chapter_slug: str) -> int:
-    """How many canon nodes this chapter names. The loop's own predicate."""
+    """How many canon nodes this chapter's write owns. The loop's own predicate."""
     record = session.run(
-        _MENTIONED_BY_CHAPTER + "RETURN count(n) AS c",
+        _CHAPTER_ENTITIES + "RETURN count(n) AS c",
         {"slug": chapter_slug, "plane": CANON_PLANE},
     ).single()
     return record["c"] if record else 0
 
 
+def count_mentions(session, chapter_slug: str) -> int:
+    """How many `:Mention` nodes this chapter holds."""
+    record = session.run(
+        "MATCH (m:Mention {plane:$plane, chapter_slug:$slug}) RETURN count(m) AS c",
+        {"slug": chapter_slug, "plane": CANON_PLANE},
+    ).single()
+    return record["c"] if record else 0
+
+
+#: The chapters a canon node belongs to, by the same two records
+#: `_CHAPTER_ENTITIES` unions -- a mention made in that chapter, or an ontology
+#: edge that chapter asserted. Written as pattern comprehensions rather than a
+#: second CALL so it can hang off an already-bound `n`.
+_CHAPTERS_OF_NODE = f"""
+[ (n)<-[:{REFERS_TO}]-(m:Mention) WHERE m.plane = $plane | m.chapter_slug ]
++ [ (n)-[r2]-() WHERE r2.plane = $plane | r2.chapter_slug ]
+"""
+
+
 def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
-    """Delete this chapter's canon relationships, and the nodes only it names.
+    """Delete this chapter's canon relationships, and the nodes only it owns.
 
-    Scoped by `plane` AND `chapter_slug` on both statements, so another
-    chapter's canon and every campaign's play are untouchable from here. A node
-    still carrying a relationship this scope does not cover is refused rather
-    than DETACH DELETEd -- see `CampaignDataAttached`.
+    Scoped by `plane` AND `chapter_slug` on every statement, so another chapter's
+    canon and every campaign's play are untouchable from here. A node still
+    carrying a relationship this scope does not cover is refused rather than
+    DETACH DELETEd -- see `CampaignDataAttached`.
 
-    A NODE ANOTHER CHAPTER ALSO NAMES SURVIVES, keeping only that chapter's
-    appearance. Madam Eva is one node for the whole book, and re-writing chapter
-    3 must cost the introduction nothing -- deleting her would silently truncate
-    a chapter nobody asked to touch. So the delete set is the nodes whose ONLY
-    appearance is this chapter's, and the check for attached campaign data is
+    A NODE ANOTHER CHAPTER ALSO OWNS SURVIVES, keeping only this chapter's
+    mentions. Madam Eva is one node for the whole book, and re-writing chapter 3
+    must cost the introduction nothing -- deleting her would silently truncate a
+    chapter nobody asked to touch. So the delete set is the nodes whose ONLY
+    record is this chapter's, and the check for attached campaign data is
     narrowed to exactly those: a node that is going to survive cannot take
     anything down with it.
-    """
-    doomed = _MENTIONED_BY_CHAPTER + f"""
-    WITH n, count {{ (n)-[:{MENTIONED_IN}]->(:Chapter) }} AS chapters
-    WHERE chapters = 1
+
+    THE SPINE IS DELETED WITHOUT `DETACH`, on purpose. Mentions go first because
+    they are the only things pointing into a section besides its chapter; then
+    the section's own two relationship kinds; then the sections. If anything else
+    has attached itself to a section by then, `DELETE s` raises and the whole
+    chapter rolls back -- which is the loud failure, not a silent DETACH that
+    takes an unknown edge with it.
     """
     scope = {"slug": chapter_slug, "plane": CANON_PLANE}
+    doomed = _CHAPTER_ENTITIES + f"""
+    WITH n, [s IN ({_CHAPTERS_OF_NODE}) WHERE s <> $slug] AS others
+    WHERE size(others) = 0
+    """
     attached = tx.run(
         doomed
         + f"""
         MATCH (n)-[r]-()
-        WHERE type(r) <> '{MENTIONED_IN}'
+        WHERE NOT type(r) IN ['{REFERS_TO}', '{DESCRIBES}']
           AND NOT (r.plane = $plane AND r.chapter_slug = $slug)
         RETURN count(r) AS c
         """,
@@ -1231,8 +1281,8 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
     if attached:
         raise CampaignDataAttached(chapter_slug, attached)
 
-    # The node set is read BEFORE any delete: deleting this chapter's
-    # appearances removes the very edges that identify the nodes it owns.
+    # The node set is read BEFORE any delete: deleting this chapter's mentions
+    # removes half of what identifies the nodes it owns.
     ids = tx.run(doomed + "RETURN collect(n.id) AS ids", scope).single()["ids"]
 
     # Counted, because it is compared against what the plan wrote.
@@ -1245,13 +1295,19 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
         """,
         scope,
     ).single()["c"]
-    # NOT counted: an appearance mirrors a node one-for-one, and adding it to a
-    # figure a reader compares against `written_edges` would say a replace
-    # deleted twice what it wrote.
+    # NOT counted into `edges`: a reader compares that figure against
+    # `written_edges`, and mentions are nodes rather than ontology edges.
+    tx.run(
+        "MATCH (m:Mention {plane:$plane, chapter_slug:$slug}) DETACH DELETE m",
+        scope,
+    )
     tx.run(
         f"""
-        MATCH (:Entity {{plane:$plane}})-[m:{MENTIONED_IN}]->(:Chapter {{slug:$slug}})
-        DELETE m
+        MATCH (:Chapter {{slug:$slug}})-[h:{HAS_SECTION}]->(s:Section)
+        OPTIONAL MATCH (s)-[d:{DESCRIBES}]->()
+        DELETE h, d
+        WITH DISTINCT s
+        DELETE s
         """,
         scope,
     )
@@ -1325,22 +1381,109 @@ def _write_node(tx, node: WriteNode) -> None:
     )
 
 
-def _write_appearance(tx, node: WriteNode, chapter_slug: str) -> None:
-    """Record that this chapter writes about this entity, and where.
+def _write_spine(tx, spine: "ChapterSpine") -> None:
+    """The document's own skeleton: book, chapter, sections, and their places.
 
-    Deterministic and unfalsifiable -- "Strahd is written about in chapter 3" is
-    simply true, unlike anything the extractor proposes -- and it answers the
-    question a DM actually asks, "where do I read about Ireena", in one hop.
+    Nothing here is a judgment. A chapter has the sections it has, in the order
+    it has them, and `(chapter.index, section.index)` is therefore the order the
+    book reveals things -- which is what makes "what could the party know by
+    chapter 3" a range query rather than bookkeeping.
+
+    The index is written BOTH on the `:Chapter` and on its `HAS_CHAPTER` edge, as
+    the design specifies. That is the same fact twice and would normally be a
+    defect; it is accepted here because a node property is what an ORDER BY
+    reads cheaply and the edge property is what makes the spine legible in the
+    Browser, and neither is derived from anything a model said, so there is
+    nothing for them to drift with respect to.
+
+    `DESCRIBES` is MATCHed on both endpoints rather than MERGEd into existence:
+    the target is an `:Entity` this same transaction has already written, and a
+    MERGE that quietly created a bare node instead would put a place in the graph
+    that no extraction ever proposed.
     """
     tx.run(
         f"""
-        MATCH (e:Entity {{id:$id}})
-        MERGE (c:Chapter {{slug:$slug}})
-        MERGE (e)-[m:{MENTIONED_IN}]->(c)
-        SET m += $props
+        MERGE (b:Book {{slug:$book_slug}})
+        SET b.title = $book_title, b.plane = $plane
+        MERGE (c:Chapter {{slug:$chapter_slug}})
+        SET c.title = $chapter_title, c.index = $chapter_index, c.plane = $plane
+        MERGE (b)-[h:{HAS_CHAPTER}]->(c)
+        SET h.index = $chapter_index
         """,
-        {"id": node.id, "slug": chapter_slug, "props": node.appearance},
+        {
+            "book_slug": spine.book_slug,
+            "book_title": spine.book_title,
+            "chapter_slug": spine.chapter_slug,
+            "chapter_title": spine.chapter_title,
+            "chapter_index": spine.chapter_index,
+            "plane": CANON_PLANE,
+        },
     )
+    for section in spine.sections:
+        tx.run(
+            f"""
+            MATCH (c:Chapter {{slug:$chapter_slug}})
+            MERGE (s:Section {{id:$id}})
+            SET s += $props
+            MERGE (c)-[h:{HAS_SECTION}]->(s)
+            SET h.index = $index
+            """,
+            {
+                "chapter_slug": spine.chapter_slug,
+                "id": section.id,
+                "props": section.properties,
+                "index": section.index,
+            },
+        )
+    for section_id, location_id in spine.describes:
+        written = tx.run(
+            f"""
+            MATCH (s:Section {{id:$section_id}}), (e:Entity {{id:$location_id}})
+            MERGE (s)-[d:{DESCRIBES}]->(e)
+            SET d += $props
+            RETURN count(d) AS c
+            """,
+            {
+                "section_id": section_id,
+                "location_id": location_id,
+                "props": {"plane": CANON_PLANE, "chapter_slug": spine.chapter_slug},
+            },
+        ).single()["c"]
+        if not written:
+            raise ValueError(f"DESCRIBES endpoint missing: {section_id} -> {location_id}")
+
+
+def _write_mention(tx, mention: "WriteMention") -> None:
+    """One (entity, section) pair, with the words that say so.
+
+    MERGEd on the composite id, so re-scanning a chapter updates its mentions
+    rather than doubling them.
+
+    Both endpoints are MATCHed and a miss RAISES, for the same reason
+    `_write_edge` does: a `MATCH ... MERGE` that matches nothing writes nothing
+    and reports no error, which is exactly how a chapter acquires fewer mentions
+    than it scanned with nothing appearing to fail.
+    """
+    written = tx.run(
+        f"""
+        MATCH (e:Entity {{id:$entity_id}}), (s:Section {{id:$section_id}})
+        MERGE (m:Mention {{id:$id}})
+        SET m += $props
+        MERGE (m)-[:{REFERS_TO}]->(e)
+        MERGE (m)-[:{IN_SECTION}]->(s)
+        RETURN count(m) AS c
+        """,
+        {
+            "id": mention.id,
+            "entity_id": mention.entity_id,
+            "section_id": mention.section_id,
+            "props": mention.properties,
+        },
+    ).single()["c"]
+    if not written:
+        raise ValueError(
+            f"mention endpoint missing: {mention.entity_id} in {mention.section_id}"
+        )
 
 
 def _write_edge(tx, edge: WriteEdge) -> None:
@@ -1370,7 +1513,33 @@ def _write_edge(tx, edge: WriteEdge) -> None:
         )
 
 
-def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
+def _known_entities(tx) -> list[tuple[str, str]]:
+    """`(id, name)` for every canon entity the graph holds, this chapter's included.
+
+    Read INSIDE the write transaction, after this chapter's nodes have landed, so
+    the scan sees both the entities this chapter minted and every entity an
+    earlier chapter did. An entity is global to the book: chapter 3 naming Castle
+    Ravenloft is a fact about chapter 3 whichever chapter minted the castle, and
+    scanning only the chapter's own plan would rebuild, one level up, the very
+    defect this replaces.
+
+    The converse does not hold and is a stated limitation: writing chapter 4 does
+    not re-scan chapter 3's sections, so an entity chapter 4 introduces gets no
+    chapter-3 mention until chapter 3 is written again. Re-writing costs nothing
+    -- the extraction artifacts are on disk and no model is called -- so the fix
+    is a re-migration rather than a cross-chapter write that would break the
+    one-transaction-per-chapter rule.
+    """
+    return [
+        (record["id"], record["name"])
+        for record in tx.run(
+            "MATCH (e:Entity {plane:$plane}) RETURN e.id AS id, e.name AS name",
+            {"plane": CANON_PLANE},
+        )
+    ]
+
+
+def _write_tx(tx, chapter_slug: str, nodes, edges, spine, replace: bool) -> dict:
     """The whole chapter, in one transaction. Commit or roll back.
 
     The existing-chapter check lives INSIDE the transaction on purpose: read it
@@ -1378,9 +1547,21 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
     which is the truncation hazard wearing a different hat. `--replace` deletes
     in here too, for the same reason -- a delete that commits before a failed
     write empties a chapter and leaves it looking done.
+
+    THE MENTION SCAN RUNS IN HERE, and that is the same rule rather than an
+    exception to it. It needs the entity set as it will be after this write, so
+    it cannot run before the nodes land; and its output is what the loop's
+    predicate and the replace path both read, so a chapter whose nodes committed
+    without its mentions would look half-unwritten. The scan itself is pure --
+    `spine.scan_mentions`, deterministic, no model, no cost -- and every rule it
+    applies is pinned without a database.
     """
+    # Imported here rather than at module scope: `spine` imports `mint_id` and
+    # `BOOK` from this module, so a top-level import would close the cycle.
+    from backend.canon.spine import scan_mentions
+
     existing = tx.run(
-        _MENTIONED_BY_CHAPTER + "RETURN count(n) AS c",
+        _CHAPTER_ENTITIES + "RETURN count(n) AS c",
         {"slug": chapter_slug, "plane": CANON_PLANE},
     ).single()["c"]
 
@@ -1392,20 +1573,40 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, replace: bool) -> dict:
 
     for node in nodes:
         _write_node(tx, node)
-    # After the nodes and inside the same transaction: the appearance is what
-    # the loop's predicate and the replace path both read, so a chapter whose
-    # nodes committed without them would look unwritten and be unreplaceable.
-    for node in nodes:
-        _write_appearance(tx, node, chapter_slug)
+    _write_spine(tx, spine)
     for edge in edges:
         _write_edge(tx, edge)
+
+    entities = _known_entities(tx)
+    mentions = scan_mentions(spine.sections, entities, chapter_slug)
+    for mention in mentions:
+        _write_mention(tx, mention)
 
     return {
         "nodes": len(nodes),
         "edges": len(edges),
+        "sections": len(spine.sections),
+        "describes": len(spine.describes),
+        "mentions": len(mentions),
+        "scanned_entities": len(entities),
+        # The census the design asks for, computed where the mentions are so a
+        # caller cannot report a different set from the one that was written.
+        "mention_counts": _mention_census(mentions, entities),
         "deleted_nodes": deleted_nodes,
         "deleted_edges": deleted_edges,
     }
+
+
+def _mention_census(mentions, entities: list[tuple[str, str]]) -> list[tuple[str, int]]:
+    """`(name, mentions)` for this chapter, most-mentioned first.
+
+    Printed on every write BECAUSE junk is not filtered out of the scan. A
+    `Trapdoor` entity matching forty sections is invisible in a node count and
+    unmissable here, which is the entire argument for leaving it in.
+    """
+    from backend.canon.spine import mention_counts
+
+    return mention_counts(mentions, dict(entities))
 
 
 def write_chapter(
@@ -1413,13 +1614,20 @@ def write_chapter(
     chapter_slug: str,
     nodes: list[WriteNode],
     edges: list[WriteEdge],
+    spine: "ChapterSpine",
     *,
     replace: bool = False,
 ) -> dict:
-    """Write one chapter's canon in a single transaction.
+    """Write one chapter's canon and its spine in a single transaction.
 
     `session.execute_write` commits when the unit of work returns and rolls back
     when it raises, so a failure anywhere -- a missing endpoint, a constraint,
     Neo4j restarting mid-write -- leaves the chapter exactly as it was.
+
+    `spine` is REQUIRED rather than optional. It is where the mentions live, and
+    the mentions are how the loop's predicate finds the chapter at all: a write
+    that skipped the spine would commit nodes into a chapter that then reads as
+    unwritten, which is precisely the half-committed state this whole module is
+    built to make impossible.
     """
-    return session.execute_write(_write_tx, chapter_slug, nodes, edges, replace)
+    return session.execute_write(_write_tx, chapter_slug, nodes, edges, spine, replace)

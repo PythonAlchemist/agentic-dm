@@ -24,14 +24,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.gazetteer import load_gazetteer
-from backend.canon.models import CandidateEdge, CandidateNode
+from backend.canon.models import CandidateEdge, CandidateNode, Chapter, Section
+from backend.canon.sections import split_chapter
 from backend.canon.seed_loader import (
     LOCATION_SUBTYPE_SEED,
     load_artifacts,
     load_location_subtypes,
 )
+from backend.canon.spine import ChapterSpine, plan_spine
 from backend.canon.structure import place_from_chapter_title
 from backend.canon.writer import (
+    BOOK,
+    LOCATION_LABEL,
     CampaignDataAttached,
     ChapterAlreadyWritten,
     FilterReport,
@@ -49,6 +53,27 @@ DEFAULT_GAZETTEER = Path("data/gazetteer/curse-of-strahd.json")
 #: Where the verifier looks for the run artifact. `data/` is gitignored, and
 #: stays that way -- the corpus this is derived from is copyrighted.
 DEFAULT_RUNS_DIR = Path("data/canon/runs")
+
+#: The book the spine hangs off. One book per corpus directory today; the slug
+#: matches `writer.BOOK`, which is what every entity id is already prefixed with.
+BOOK_TITLE = "Curse of Strahd"
+
+#: The splitter the SPINE uses, which is not necessarily the one the EXTRACTION
+#: used. `depth` reads the document's own heading levels and knows nothing about
+#: Curse of Strahd; `key` exists for the retired vision transcription, whose
+#: heading levels were noise, and as the A/B baseline. The spine is the BOOK's
+#: structure rather than a record of how one extraction run was chunked, so it
+#: takes the general splitter -- and chapter 3, whose paid extraction happened to
+#: run under `key`, is 22 sections here against that run's 18. The consequence is
+#: that a candidate's `section_index` does NOT index the spine, which costs
+#: nothing: mentions come from re-reading the sections, not from where a
+#: candidate was emitted, and that is the entire point of the change.
+DEFAULT_SPLITTER = "depth"
+
+#: How many of the top entities by mention count to print. Junk is deliberately
+#: not filtered out of the scan -- a bare noun matching forty sections is
+#: invisible in a node census and unmissable in this list.
+TOP_MENTIONS = 20
 
 #: How many of each drop kind to print. The COUNTS are always complete; this
 #: caps only the examples, which exist so a reader can see what a filter is
@@ -93,6 +118,79 @@ def chapter_place_of_run(extraction_run: dict) -> str | None:
     """
     title = extraction_run.get("chapter") or ""
     return place_from_chapter_title(title)
+
+
+def load_spine_sections(
+    chapter_slug: str, corpus: str, splitter: str
+) -> tuple[Chapter, int, list[Section]]:
+    """The chapter as the book wrote it, its index, and its sections.
+
+    Read from the CORPUS rather than from the extraction artifact, because the
+    artifact holds candidates and the spine is about the document. The chapter's
+    index is its position in the manifest, which is the book's own order --
+    `(chapter.index, section.index)` is then the order the book reveals things,
+    and progression becomes a range query rather than bookkeeping.
+
+    Imported inside the function: `extract_canon` pulls in the whole extraction
+    stack, and this script exists precisely so that writing costs nothing.
+    """
+    from backend.scripts.extract_canon import load_chapters
+
+    chapters = load_chapters(corpus)
+    for index, chapter in enumerate(chapters):
+        if chapter.slug == chapter_slug:
+            return chapter, index, split_chapter(chapter, splitter=splitter).sections
+    raise ValueError(
+        f"no chapter {chapter_slug!r} in the {corpus} corpus. Available: "
+        + ", ".join(c.slug for c in chapters)
+    )
+
+
+def build_spine(
+    *,
+    chapter_slug: str,
+    chapter: Chapter,
+    chapter_index: int,
+    sections: list[Section],
+    nodes: list[WriteNode],
+) -> ChapterSpine:
+    """The spine for this chapter, with `DESCRIBES` resolved against the plan.
+
+    The location ids come from the WRITE PLAN rather than from the graph, so a
+    section can only describe a place this very transaction is creating. A
+    keyed heading naming something that is not a location -- `E5d. Trapdoor`,
+    which the extractor typed an ITEM -- correctly describes nothing.
+    """
+    return plan_spine(
+        book_slug=BOOK,
+        book_title=BOOK_TITLE,
+        chapter_slug=chapter_slug,
+        chapter_title=chapter.title,
+        chapter_index=chapter_index,
+        sections=sections,
+        location_ids={n.id for n in nodes if LOCATION_LABEL in n.labels},
+    )
+
+
+def format_mentions(summary: dict) -> str:
+    """The mention census, printed on every write.
+
+    Complete counts, capped examples -- the same rule the drop report follows.
+    Nothing filters junk out of the scan, so this list is where an absurd
+    entity announces itself.
+    """
+    counts = summary.get("mention_counts", [])
+    lines = [
+        f"  spine: {summary['sections']} sections, "
+        f"{summary['describes']} of them describing a place",
+        f"  mentions: {summary['mentions']} across "
+        f"{len(counts)} of {summary['scanned_entities']} known entities",
+        f"  top {TOP_MENTIONS} by mention count (JUNK IS NOT FILTERED -- read this list):",
+    ]
+    lines.extend(f"    {count:4d}  {name}" for name, count in counts[:TOP_MENTIONS])
+    if len(counts) > TOP_MENTIONS:
+        lines.append(f"    ... and {len(counts) - TOP_MENTIONS} more entities with fewer")
+    return "\n".join(lines)
 
 
 def format_report(report: FilterReport) -> str:
@@ -215,6 +313,15 @@ def run_artifact(
             ),
             "deleted_nodes": replaced.get("deleted_nodes", 0),
             "deleted_edges": replaced.get("deleted_edges", 0),
+            # The spine and the scan. `mention_counts` is COMPLETE here, not
+            # capped the way the terminal output is: a terminal scrolls away and
+            # this is the record a reader comes back to when an entity turns out
+            # to be junk.
+            "sections": replaced.get("sections", 0),
+            "describes": replaced.get("describes", 0),
+            "mentions": replaced.get("mentions", 0),
+            "scanned_entities": replaced.get("scanned_entities", 0),
+            "mention_counts": replaced.get("mention_counts", []),
             "ambiguous_names": report.ambiguous_names,
             # The edges on which the verifier's constraint check proves nothing.
             "resolved_endpoints": report.resolved_endpoints,
@@ -266,6 +373,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_RUNS_DIR,
         help="Where to write <slug>.json, the run artifact the verifier reads",
+    )
+    parser.add_argument(
+        "--corpus",
+        default="ddb",
+        help="Where to read the chapter's own text for the spine",
+    )
+    parser.add_argument(
+        "--splitter",
+        default=DEFAULT_SPLITTER,
+        choices=("depth", "key"),
+        help=(
+            "How to cut the chapter into :Section nodes. Defaults to the "
+            "document-general splitter, NOT whichever one the extraction ran under "
+            "-- see DEFAULT_SPLITTER."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -347,15 +469,36 @@ def main() -> None:
         print("  refusing to write: no node survived the filters", file=sys.stderr)
         sys.exit(1)
 
+    chapter, chapter_index, sections = load_spine_sections(
+        args.chapter, args.corpus, args.splitter
+    )
+    spine = build_spine(
+        chapter_slug=args.chapter,
+        chapter=chapter,
+        chapter_index=chapter_index,
+        sections=sections,
+        nodes=write_nodes,
+    )
+    print(
+        f"  spine: chapter {chapter_index} of the {args.corpus} corpus, "
+        f"{len(spine.sections)} sections [{args.splitter} splitter], "
+        f"{len(spine.describes)} describing a place"
+    )
+
     if args.dry_run:
-        print("  --dry-run: nothing written")
+        print("  --dry-run: nothing written (the mention scan runs inside the write)")
         return
 
     with neo4j_session() as session:
         ensure_schema(session)
         try:
             summary = write_chapter(
-                session, args.chapter, write_nodes, write_edges, replace=args.replace
+                session,
+                args.chapter,
+                write_nodes,
+                write_edges,
+                spine,
+                replace=args.replace,
             )
         except ChapterAlreadyWritten as exc:
             print(f"  {exc}", file=sys.stderr)
@@ -370,6 +513,7 @@ def main() -> None:
             f"and {summary['deleted_edges']} edges"
         )
     print(f"  wrote {summary['nodes']} nodes and {summary['edges']} edges to {args.chapter}")
+    print(format_mentions(summary))
 
     args.runs_dir.mkdir(parents=True, exist_ok=True)
     out_path = args.runs_dir / f"{args.chapter}.json"

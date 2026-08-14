@@ -104,7 +104,6 @@ class RelationshipType(str, Enum):
 
     # Reference
     INSTANCE_OF = "INSTANCE_OF"
-    MENTIONED_IN = "MENTIONED_IN"  # Canon entity -> :Chapter it appears in
 
     # Player/Campaign
     PLAYS_AS = "PLAYS_AS"  # Player -> PC
@@ -158,9 +157,6 @@ LAYER_MAP: dict[RelationshipType, Layer | None] = {
     RelationshipType.OBJECTIVE_AT: Layer.NARRATIVE,
     # Structural: plane-linking, character sheet, runtime, campaign history
     RelationshipType.INSTANCE_OF: None,
-    # Provenance, not a surface: it says WHERE a canon entity is written about,
-    # which is deterministic and unfalsifiable, and says nothing about the world.
-    RelationshipType.MENTIONED_IN: None,
     RelationshipType.BELONGS_TO: None,
     RelationshipType.PLAYS_AS: None,
     RelationshipType.ATTENDED: None,
@@ -226,6 +222,38 @@ AUTHORED_LOCATION_SUBTYPES: frozenset[LocationSubtype] = (
 # taxonomy nor something the extractor proposes. A second item label is a
 # design decision, not an entry to append here.
 ARTIFACT_LABEL = "Artifact"
+
+# The narrative spine, and the mention triangle hanging off it.
+#
+#   (:Book)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section)
+#   (:Section)-[:DESCRIBES]->(:Entity:LOCATION)
+#   (:Entity)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(:Section)
+#
+# BARE STRINGS, not `RelationshipType` members, for the reason `ARTIFACT_LABEL`
+# is one. That enum is the vocabulary of relationships BETWEEN ENTITIES: it is
+# what `LAYER_MAP` partitions into surfaces, what `RELATIONSHIP_DOMAIN_RANGE`
+# type-checks, and what `layer_vocabulary` offers the extraction prompt. None of
+# these joins two entities, none is proposed by a model, and none can be wrong
+# in the way an extracted edge can -- a chapter has the sections it has. Putting
+# them in the enum would mean adding five `None` entries to LAYER_MAP saying
+# "not a surface" about things that were never candidates for being one.
+#
+# `MENTIONED_IN` used to be in that enum, mapped to None, for exactly this
+# reason -- and it is what these replace. It recorded where an entity was
+# EXTRACTED rather than where it appears, and carried no evidence for either.
+BOOK_LABEL = "Book"
+CHAPTER_LABEL = "Chapter"
+SECTION_LABEL = "Section"
+MENTION_LABEL = "Mention"
+
+HAS_CHAPTER = "HAS_CHAPTER"
+HAS_SECTION = "HAS_SECTION"
+#: A keyed section IS the place it names. Range is :LOCATION and nothing else --
+#: `E5d. Trapdoor` is keyed and is an item, and a section is not a room because
+#: of the shape of its heading.
+DESCRIBES = "DESCRIBES"
+REFERS_TO = "REFERS_TO"
+IN_SECTION = "IN_SECTION"
 
 # A directional gloss for every relationship type offered to the extraction prompt
 # (i.e. every type in a layer vocabulary -- see `layer_vocabulary`). A bare type
@@ -539,10 +567,17 @@ class Relationship(BaseModel):
 GRAPH_SCHEMA = {
     "constraints": [
         "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
-        # A chapter is identified by its slug and nothing else, and every canon
-        # entity MERGEs its MENTIONED_IN edge against it -- a second node for one
-        # slug would split a chapter's appearances in two.
+        # A chapter is identified by its slug and nothing else, and the spine
+        # MERGEs its sections against it -- a second node for one slug would
+        # split a chapter's sections in two.
         "CREATE CONSTRAINT chapter_slug IF NOT EXISTS FOR (c:Chapter) REQUIRE c.slug IS UNIQUE",
+        "CREATE CONSTRAINT book_slug IF NOT EXISTS FOR (b:Book) REQUIRE b.slug IS UNIQUE",
+        # `cos:<chapter>#<index>`. Keyed on the index, not the heading: a chapter
+        # can hold four sections headed "Treasure".
+        "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
+        # `<entity>@<section>`. The pair IS the identity, so a re-scan MERGEs
+        # onto the same mention rather than doubling it.
+        "CREATE CONSTRAINT mention_id IF NOT EXISTS FOR (m:Mention) REQUIRE m.id IS UNIQUE",
     ],
     "indexes": [
         "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
@@ -554,5 +589,10 @@ GRAPH_SCHEMA = {
         # Canon/campaign resolver indexes
         "CREATE INDEX entity_plane IF NOT EXISTS FOR (e:Entity) ON (e.plane)",
         "CREATE INDEX entity_canon_id IF NOT EXISTS FOR (e:Entity) ON (e.canon_id)",
+        # The spine. Mentions will outnumber entities by an order of magnitude,
+        # and the replace path scopes every delete on `chapter_slug`, so an
+        # unindexed one would make re-writing a chapter a scan of the book.
+        "CREATE INDEX mention_chapter IF NOT EXISTS FOR (m:Mention) ON (m.chapter_slug)",
+        "CREATE INDEX section_chapter IF NOT EXISTS FOR (s:Section) ON (s.chapter_slug)",
     ],
 }
