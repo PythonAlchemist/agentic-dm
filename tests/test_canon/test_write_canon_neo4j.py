@@ -576,6 +576,128 @@ class TestLocationSubtypeIsALabel:
         assert found == 3
 
 
+class TestArtifactIsALabel:
+    """`:Artifact` beside `:ITEM`, and never instead of it.
+
+    `:ITEM` is what makes "every object in the book" a one-word query and stays
+    on every one of them. `:Artifact` narrows it to the three the Tarokka
+    reading sends the party after.
+    """
+
+    def item(self, name: str = "Sunsword", is_artifact: bool = True, **kwargs) -> WriteNode:
+        return replace(node(name, entity_type="ITEM"), is_artifact=is_artifact, **kwargs)
+
+    def labels_of(self, graph, node_id: str) -> list[str]:
+        return sorted(
+            graph.run(
+                "MATCH (n:Entity {id:$id}) RETURN labels(n) AS labels", {"id": node_id}
+            ).single()["labels"]
+        )
+
+    def test_the_label_lands_beside_item(self, graph):
+        sunsword = self.item()
+        write_chapter(graph, CHAPTER_A, [sunsword], [])
+
+        assert self.labels_of(graph, sunsword.id) == ["Artifact", "Entity", "ITEM"]
+
+    def test_an_unauthored_item_stays_plain(self, graph):
+        """No default. "Mundane" is the absence of significance, and the honest
+        encoding of an absence is no label."""
+        lamp = self.item("oil lamp", is_artifact=False)
+        write_chapter(graph, CHAPTER_A, [lamp], [])
+
+        assert self.labels_of(graph, lamp.id) == ["Entity", "ITEM"]
+
+    def test_the_rung_remove_does_not_reach_it(self, graph):
+        """THE TRAP. A place wears exactly one rung, so writing one REMOVEs
+        every other rung. `:Artifact` is not on that ladder and must survive it,
+        and so must the `:ITEM` it narrows.
+
+        The scenario is a disputed type, which is routine here: two samples read
+        one candidate as an object and as a place, the node wears both, and the
+        rung it derives is written over labels that have nothing to do with it.
+        """
+        disputed = replace(
+            self.item("Sunsword"),
+            entity_types=("ITEM", "LOCATION"),
+            location_subtype="AREA",
+        )
+        write_chapter(graph, CHAPTER_A, [disputed], [])
+
+        assert self.labels_of(graph, disputed.id) == [
+            "AREA",
+            "Artifact",
+            "Entity",
+            "ITEM",
+            "LOCATION",
+        ]
+
+    def test_a_rung_write_that_says_nothing_about_items_does_not_strip_it(self, graph):
+        """THE TRAP, in the only form that can actually spring it.
+
+        The test above passes even against a REMOVE that sweeps `:Artifact`,
+        because the SET that puts the label back runs in the same statement --
+        measured, by widening the REMOVE and watching it still pass. That is a
+        test that cannot fail, and this project has shipped ten of them.
+
+        So: the second write types the node only LOCATION, which gates
+        `artifact_label` off and emits no SET at all, and its rung REMOVE runs
+        alone against labels the FIRST write left behind. A REMOVE scoped to
+        anything wider than the rungs takes `:Artifact` here and nothing puts it
+        back.
+        """
+        first = self.item("Sunsword")
+        write_chapter(graph, CHAPTER_A, [first], [])
+        write_chapter(
+            graph,
+            CHAPTER_B,
+            [
+                replace(
+                    first,
+                    chapter_slug=CHAPTER_B,
+                    entity_types=("LOCATION",),
+                    is_artifact=False,
+                    location_subtype="AREA",
+                )
+            ],
+            [],
+        )
+
+        assert self.labels_of(graph, first.id) == [
+            "AREA",
+            "Artifact",
+            "Entity",
+            "ITEM",
+            "LOCATION",
+        ]
+
+    def test_every_item_is_still_one_word_away(self, graph):
+        """The narrowing must not cost the broad query the whole point of it."""
+        write_chapter(
+            graph, CHAPTER_A, [self.item(), self.item("oil lamp", is_artifact=False)], []
+        )
+
+        found = graph.run(
+            "MATCH (n:ITEM {plane:$plane}) WHERE n.id STARTS WITH $prefix RETURN count(n) AS c",
+            {"plane": CANON_PLANE, "prefix": TEST_ID_PREFIX},
+        ).single()["c"]
+        assert found == 2
+
+    def test_the_artifacts_are_one_word_away_too(self, graph):
+        """The point of the label: `MATCH (n:Artifact)` is the question a DM
+        asks constantly, and a flat :ITEM could not answer it."""
+        write_chapter(
+            graph, CHAPTER_A, [self.item(), self.item("oil lamp", is_artifact=False)], []
+        )
+
+        found = graph.run(
+            "MATCH (n:Artifact {plane:$plane}) WHERE n.id STARTS WITH $prefix "
+            "RETURN n.name AS name",
+            {"plane": CANON_PLANE, "prefix": TEST_ID_PREFIX},
+        ).value("name")
+        assert found == ["Sunsword"]
+
+
 class TestGlobalEntities:
     def test_one_npc_named_by_two_chapters_is_one_node(self, graph):
         a = node("Madam Eva", CHAPTER_A, "NPC")
