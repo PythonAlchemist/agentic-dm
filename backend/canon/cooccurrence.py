@@ -24,11 +24,16 @@ and each failure was expensive. So there is no relationship type in here, no
 weight, no score, and nothing that could be mistaken for one. This is the raw
 material; the judgment is somebody else's, later, or nobody's.
 
-**IT BELONGS WITH `MENTIONED_IN` AND `DESCRIBES`, NOT IN THE TRUST SPLIT.** The
-`accepted`/`proposed` partition exists because a model guessed a typed
-relationship and roughly a third of those guesses were wrong. This is arithmetic
-over offsets the scan already found: the same text produces the same edges every
-time, and there is nothing for a reviewer to accept. So no `status`.
+**IT BELONGS WITH `REFERS_TO`, `IN_SECTION` AND `DESCRIBES`, NOT IN THE TRUST
+SPLIT.** The `accepted`/`proposed` partition exists because a model guessed a
+typed relationship and roughly a third of those guesses were wrong. This is
+arithmetic over offsets the scan already found: the same text produces the same
+edges every time, and there is nothing for a reviewer to accept. So no `status`.
+
+(The design named `MENTIONED_IN` as the company this keeps. That edge no longer
+exists -- `:Mention` is what replaced it, for recording where an entity was
+EXTRACTED rather than where it appears -- so the peers are named above as the
+graph actually holds them. Same side, edges that are still here.)
 
 **THE COUNT IS THE THING TO WATCH.** A sentence naming n entities produces
 n(n-1) pairs, so a rule that swallowed a paragraph would square the graph. On
