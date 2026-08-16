@@ -9,7 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.12.3",
     "pydantic-settings>=2.6.0",
-    "python-dotenv>=1.2.1",
+    "python-dotenv>=1.2.2",
     # LLM & Embeddings
     "openai>=2.6.1",
     "tiktoken>=0.8.0",
