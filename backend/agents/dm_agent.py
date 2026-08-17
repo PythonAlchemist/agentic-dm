@@ -1,5 +1,6 @@
 """DM Agent for running games and assisting DMs."""
 
+import logging
 from typing import Optional
 
 from openai import AsyncOpenAI
@@ -7,9 +8,13 @@ from pydantic import BaseModel, Field
 
 from backend.core.config import settings
 from backend.rag import HybridRAGPipeline, QueryType
+from backend.agents import canon_context
 from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
 from backend.agents.conversation import ConversationManager, MessageRole
 from backend.agents.prompts import SYSTEM_PROMPT
+from backend.canon.retrieval import CanonRetriever, Retrieval
+
+logger = logging.getLogger(__name__)
 
 
 class DMResponse(BaseModel):
@@ -29,12 +34,15 @@ class DMAgent:
         self,
         campaign_id: Optional[str] = None,
         campaign_context: Optional[dict] = None,
+        canon: Optional[CanonRetriever] = None,
     ):
         """Initialize the DM Agent.
 
         Args:
             campaign_id: Optional campaign to load context from.
             campaign_context: Optional campaign context fields to inject into system prompt.
+            canon: Read path into the canon graph. Injectable so a test can
+                exercise the grounding without a live Neo4j.
         """
         self.campaign_id = campaign_id
         self.campaign_context = campaign_context
@@ -44,6 +52,7 @@ class DMAgent:
         self.model = settings.openai_model
         self.rag_pipeline = HybridRAGPipeline()
         self.tools = DMTools()
+        self.canon = canon or CanonRetriever()
         self.conversation = ConversationManager()
 
         # Set system prompt
@@ -82,12 +91,14 @@ class DMAgent:
         self,
         user_input: str,
         use_rag: bool = True,
+        use_canon: bool = True,
     ) -> DMResponse:
         """Process a user message.
 
         Args:
             user_input: User's input text.
             use_rag: Whether to use RAG for context.
+            use_canon: Whether to ground the answer in the canon graph.
 
         Returns:
             DMResponse with the agent's response.
@@ -102,6 +113,13 @@ class DMAgent:
             self.conversation.add_assistant_message(response.message)
             return response
 
+        # Retrieve canon BEFORE the RAG pipeline, and unconditionally when
+        # enabled. It is deterministic and costs no API call, so there is
+        # nothing to gate it on -- and a heuristic deciding when a question is
+        # "about the book" would fail exactly on the questions a DM most needs
+        # grounded. A question naming nothing simply retrieves little.
+        retrieval = self._retrieve_canon(user_input) if use_canon else None
+
         # Use RAG pipeline for context
         rag_response = None
         if use_rag:
@@ -111,7 +129,7 @@ class DMAgent:
             )
 
         # Generate response
-        response = await self._generate_response(user_input, rag_response)
+        response = await self._generate_response(user_input, rag_response, retrieval)
 
         # Add to history
         self.conversation.add_assistant_message(
@@ -243,22 +261,54 @@ class DMAgent:
 
         return DMResponse(message="Command processed.")
 
+    def _retrieve_canon(self, user_input: str) -> Retrieval:
+        """Canon for this question. An EMPTY retrieval if the graph is unreachable.
+
+        Empty rather than None, and the difference is the whole point of the
+        `except`. A DM mid-session should get a degraded answer rather than a
+        stack trace -- but "degraded" must mean the model is TOLD the canon
+        covers nothing, which is what an empty retrieval renders to. Returning
+        None would omit the block entirely, and a model with no canon block and
+        no instruction about one answers from its own memory of the published
+        adventure. That is the failure this whole path exists to prevent, and it
+        would appear exactly when the database is down: silently, and only in
+        production.
+        """
+        try:
+            return self.canon.retrieve(user_input)
+        except Exception:  # noqa: BLE001 - degraded answer beats a crash mid-session
+            logger.warning("canon retrieval failed; answering without it", exc_info=True)
+            return Retrieval(question=user_input)
+
     async def _generate_response(
         self,
         user_input: str,
         rag_response=None,
+        retrieval=None,
     ) -> DMResponse:
         """Generate a response using the LLM.
 
         Args:
             user_input: User's input.
             rag_response: Optional RAG response with context.
+            retrieval: Optional canon retrieval to ground the answer in.
 
         Returns:
             DMResponse with generated content.
         """
         # Build context for the prompt
         context = self.conversation.get_context(include_system=True)
+
+        # The canon block carries the PASSAGES THEMSELVES, not a list of what
+        # was consulted. Inserted after the system prompt and before the
+        # conversation, so the model reads the book's words before the question
+        # rather than after its own previous answers.
+        canon_sources: list[dict] = []
+        if retrieval is not None:
+            context.insert(
+                1, {"role": "system", "content": canon_context.render(retrieval)}
+            )
+            canon_sources = canon_context.sources(retrieval)
 
         # Add RAG context if available
         if rag_response and rag_response.context_used:
@@ -287,10 +337,11 @@ class DMAgent:
         if rag_response:
             suggestions = self._generate_suggestions(rag_response.query_type)
 
+        # Canon citations FIRST: they are the ones a DM can open the book to.
         return DMResponse(
             message=message,
             query_type=rag_response.query_type if rag_response else None,
-            sources=rag_response.sources if rag_response else [],
+            sources=canon_sources + (rag_response.sources if rag_response else []),
             suggestions=suggestions,
         )
 
