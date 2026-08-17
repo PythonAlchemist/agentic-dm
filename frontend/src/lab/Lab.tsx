@@ -12,6 +12,7 @@ const FALLBACK_DEPTH: Depth = {
   max_edges: 12,
   include_proposed: true,
   history_turns: 6,
+  passage_width: 'section',
 }
 
 export function Lab() {

@@ -44,7 +44,7 @@ from backend.canon.lookup import (
     split_by_status,
     type_labels,
 )
-from backend.canon.passage import derive_passage
+from backend.canon.passage import derive_passage, derive_section
 from backend.canon.questions import content_terms, lucene_query, terms_present
 from backend.canon.spine import mention_pattern
 
@@ -88,6 +88,15 @@ LIMIT $limit
 #: reading an answer will not read twenty paragraphs, and an unbounded context
 #: hides a ranking problem by making every miss a hit.
 DEFAULT_LIMIT = 5
+
+#: How much of a section a passage carries.
+WIDTH_SENTENCE = "sentence"
+WIDTH_SECTION = "section"
+
+#: A whole-section passage is cut here. The corpus's largest section is 4,621
+#: characters and its median 842, so this bounds the worst case without touching
+#: the typical one. Truncation is reported on the passage, never silent.
+SECTION_MAX = 4000
 
 #: How a retrieval was answered. Carried on the result and reported by the
 #: evaluation harness, because a text hit and a graph hit are not the same
@@ -143,6 +152,8 @@ class Passage:
     #: other half of the ranking, carried so a surprising order can be read
     #: rather than guessed at.
     term_hits: int = 0
+    #: True when a whole-section passage hit `SECTION_MAX` and lost its tail.
+    truncated: bool = False
     #: Lucene's score, on a text-path passage only. `None` on a graph passage,
     #: and deliberately not defaulted to 0.0: a name match has no score, and a
     #: zero would read as "scored, badly".
@@ -221,8 +232,11 @@ def find_names(question: str, forms: list[str], *, fold_case: bool = False) -> l
 class CanonRetriever:
     """Retrieve grounded canon for a question. Read-only, deterministic."""
 
-    def __init__(self, limit: int = DEFAULT_LIMIT) -> None:
+    def __init__(
+        self, limit: int = DEFAULT_LIMIT, passage_width: str = WIDTH_SECTION
+    ) -> None:
         self.limit = limit
+        self.passage_width = passage_width
 
     def retrieve(self, question: str, *, limit: int | None = None) -> Retrieval:
         limit = self.limit if limit is None else limit
@@ -427,7 +441,8 @@ class CanonRetriever:
                 chapter_index=slot["chapter_index"],
                 section=slot["section"],
                 section_index=slot["section_index"],
-                text=derive_passage(slot["text"], slot["offset"]),
+                text=self._render(slot),
+                truncated=self._truncated(slot),
                 occurrences=slot["occurrences"],
                 entity_ids=tuple(sorted(set(slot["entity_ids"]))),
                 aliases=tuple(sorted(set(slot["aliases"]))),
@@ -444,6 +459,17 @@ class CanonRetriever:
             )
         )
         return passages
+
+    def _render(self, slot: dict) -> str:
+        """The passage text at the configured width."""
+        if self.passage_width == WIDTH_SECTION:
+            return derive_section(slot["text"], SECTION_MAX)[0]
+        return derive_passage(slot["text"], slot["offset"])
+
+    def _truncated(self, slot: dict) -> bool:
+        if self.passage_width != WIDTH_SECTION:
+            return False
+        return derive_section(slot["text"], SECTION_MAX)[1]
 
     @staticmethod
     def _section_id(slot: dict) -> str:

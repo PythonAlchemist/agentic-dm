@@ -65,15 +65,38 @@ class TestStructuralEdges:
         assert {e.target_name for e in contains} == {"Bildrath's Mercantile", "Church"}
         assert all(e.source_name == "Village of Barovia" for e in contains)
 
-    def test_an_npc_is_located_in_its_section_place(self):
+    def test_an_npc_named_in_a_section_is_NOT_placed_there(self):
+        """*Reversed 2026-08-17.* This used to assert the opposite.
+
+        Placing every entity extracted from a section into that section's place
+        says BEING NAMED IN A SECTION IS BEING THERE. Hand-checked against the
+        book, roughly half of chapter 3's 26 such placements were false --
+        Madam Eva put in the tavern when she is at Tser Pool, Gertruda put in
+        Mad Mary's townhouse when her ABSENCE is the scene's whole hook,
+        Donavich put in the mansion when he is at the church and merely named as
+        who receives a body.
+
+        All of them shipped `accepted`, carrying `derived from document
+        structure` -- the provenance the DM agent is told to rely on. Where an
+        entity is NAMED is not lost; `:Mention` records exactly that, and never
+        claims it means presence.
+        """
         sections = [section("E5. Church")]
         nodes = [node("Donavich", heading="E5. Church")]
         edges = structural_edges(sections, nodes, "Village of Barovia")
 
-        located = [e for e in edges if e.rel_type == "LOCATED_IN"]
-        assert len(located) == 1
-        assert located[0].source_name == "Donavich"
-        assert located[0].target_name == "Church"
+        assert [e for e in edges if e.rel_type == "LOCATED_IN"] == []
+
+    def test_the_books_own_nesting_is_still_derived(self):
+        """The baby, distinguished from the bathwater. `E5` containing `E5g` is
+        a property of the document; "named in E5" is an inference about it."""
+        sections = [section("E5. Church"), section("E5g. Undercroft", 1)]
+        edges = structural_edges(sections, [], "Village of Barovia")
+
+        assert {e.target_name for e in edges if e.rel_type == "CONTAINS"} == {
+            "Church",
+            "Undercroft",
+        }
 
     def test_a_location_node_is_not_located_in_itself(self):
         sections = [section("E5. Church")]
@@ -139,34 +162,48 @@ class TestStructuralEdges:
         assert contains.section_index == 2
         assert contains.section_heading == "E5. Church"
 
-        located = next(e for e in edges if e.rel_type == "LOCATED_IN")
-        assert located.section_index == 2
-        assert located.section_heading == "E5. Church"
-
     def test_edges_are_deduplicated(self):
-        """The same node name can appear more than once in the same section --
-        on the real chapter-3 run, three layer passes extract the same node
-        name from the same section repeatedly, and 41 raw candidates dedup to
-        19. Two DISTINCT node names (the old fixture) can never exercise this:
-        three distinct edges are trivially already unique."""
-        sections = [section("E5. Church")]
-        nodes = [
-            node("Donavich", heading="E5. Church"),
-            node("Donavich", heading="E5. Church"),
-            node("Doru", heading="E5. Church"),
-        ]
-        edges = structural_edges(sections, nodes, "Village of Barovia")
+        """Two derivations agreeing about one section must ship one edge.
 
-        located = [e for e in edges if e.rel_type == "LOCATED_IN"]
-        assert len(located) == 2, (
-            "the repeated Donavich mention must collapse to one edge -- these "
-            "duplicates share a section_index, which is what separates them "
-            "from two same-named rooms in DIFFERENT sections"
+        *Refitted 2026-08-17.* The old fixture exercised dedup through repeated
+        NODE candidates, and node-derived edges no longer exist. The mechanism
+        is unchanged and still reachable: `E5g. Undercroft` nests inside
+        `E5. Church` AND its key stem `E5` names the same section, so the depth
+        and key derivations both propose `Church CONTAINS Undercroft` for one
+        section index. The dedup key includes that index, which is what makes
+        the pair collapse while two same-named rooms in DIFFERENT sections do
+        not.
+        """
+        # Built directly rather than through `section()`, which does not carry
+        # nesting -- and nesting is what makes the DEPTH derivation fire beside
+        # the key one, which is the whole point of the fixture.
+        nested = [
+            Section(
+                chapter_slug="chapter-3-the-village-of-barovia",
+                chapter_title="Chapter 3: The Village of Barovia",
+                heading="E5. Church",
+                index=0,
+                markdown="## E5. Church\n\nBody.",
+                depth=2,
+                parent_index=-1,
+            ),
+            Section(
+                chapter_slug="chapter-3-the-village-of-barovia",
+                chapter_title="Chapter 3: The Village of Barovia",
+                heading="E5g. Undercroft",
+                index=1,
+                markdown="### E5g. Undercroft\n\nBody.",
+                depth=3,
+                parent_index=0,
+            ),
+        ]
+        edges = structural_edges(nested, [], "Village of Barovia")
+
+        undercroft = [e for e in edges if e.target_name == "Undercroft"]
+        assert len(undercroft) == 1, (
+            "depth and key both derive Church CONTAINS Undercroft for section 1; "
+            "sharing a section_index is what makes them one edge"
         )
-        assert {(e.source_name, e.target_name) for e in located} == {
-            ("Donavich", "Church"),
-            ("Doru", "Church"),
-        }
         seen = [(e.source_name, e.target_name, e.rel_type) for e in edges]
         assert len(seen) == len(set(seen))
 
@@ -311,17 +348,18 @@ class TestSectionIndexIsTheKey:
             section("Interlude", index=1),
             section("T1. Treasure", index=2),
         ]
-        nodes = [
-            node("Gold Coins", heading="T1. Treasure", section_index=0),
-            node("Silver Chalice", heading="T1. Treasure", section_index=2),
-        ]
-        edges = structural_edges(sections, nodes, "Death House")
+        edges = structural_edges(sections, [], "Death House")
 
-        located = [e for e in edges if e.rel_type == "LOCATED_IN"]
-        assert {(e.source_name, e.target_name) for e in located} == {
-            ("Gold Coins", "Treasure"),
-            ("Silver Chalice", "Treasure"),
-        }, "both nodes must be independently located, not merged into one"
+        # *Refitted 2026-08-17*: asserted through CONTAINS now that node-derived
+        # edges are gone. The property is the same one -- two identically headed
+        # sections are two sections -- and a heading-keyed dedup would collapse
+        # these into a single edge.
+        treasure = [e for e in edges if e.target_name == "Treasure"]
+        assert len(treasure) == 2, (
+            "two sections headed 'T1. Treasure' are two rooms; keying dedup on "
+            "heading text rather than section index would merge them"
+        )
+        assert {e.section_index for e in treasure} == {0, 2}
 
     def test_a_node_resolves_against_its_own_section_index_not_its_heading(self):
         """A shadowed duplicate heading must not resolve a node to the WRONG

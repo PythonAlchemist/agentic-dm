@@ -91,6 +91,29 @@ export function Controls({
           onChange={(history_turns) => onDepth({ ...depth, history_turns })}
         />
 
+        <div className="mt-3">
+          <div className="text-sm mb-1">Passage width</div>
+          <div className="flex gap-2">
+            {(['section', 'sentence'] as const).map((w) => (
+              <button
+                key={w}
+                onClick={() => onDepth({ ...depth, passage_width: w })}
+                className={`px-3 py-1 rounded text-xs border ${
+                  depth.passage_width === w
+                    ? 'border-amber-500 bg-amber-500/10'
+                    : 'border-neutral-700 hover:border-neutral-600'
+                }`}
+              >
+                {w}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">
+            A sentence is cheap and often too narrow: the tavern's owners are
+            named 3,300 characters after its first mention, in the same section.
+          </p>
+        </div>
+
         <label className="flex items-start gap-2 mt-3 text-sm cursor-pointer">
           <input
             type="checkbox"

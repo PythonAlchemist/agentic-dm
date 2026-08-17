@@ -816,9 +816,16 @@ class TestStructuralEdgesAreDerivedAfterTheVote:
 
         written = json.loads(out_path.read_text())
         derived = [e for e in written["edges"] if e["evidence"] == STRUCTURAL_EVIDENCE]
-        assert ("Rope", "LOCATED_IN", "Blood of the Vine Tavern") in [
-            (e["source_name"], e["rel_type"], e["target_name"]) for e in derived
-        ]
+        # *Refitted 2026-08-17*: asserted through the chapter's own CONTAINS.
+        # This used to look for `Rope LOCATED_IN Blood of the Vine Tavern`, a
+        # node-derived placement that no longer exists -- "named in a section"
+        # is not "present in that room". The property under test is unchanged:
+        # a derived edge bypasses the vote entirely, so no `edge_k` can reach it.
+        assert (
+            "The Village of Barovia",
+            "CONTAINS",
+            "Blood of the Vine Tavern",
+        ) in [(e["source_name"], e["rel_type"], e["target_name"]) for e in derived]
         assert {e["votes"] for e in derived} == {0}, (
             "0 means never voted on, not 'agreed by nobody'"
         )

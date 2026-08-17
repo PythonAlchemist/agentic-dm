@@ -45,6 +45,7 @@ class Depth(BaseModel):
     max_edges: int = Field(default=12, ge=0, le=50)
     include_proposed: bool = True
     history_turns: int = Field(default=6, ge=0, le=20)
+    passage_width: Literal["sentence", "section"] = "section"
 
     def to_domain(self) -> canon_context.Depth:
         return canon_context.Depth(
@@ -52,6 +53,7 @@ class Depth(BaseModel):
             max_edges=self.max_edges,
             include_proposed=self.include_proposed,
             history_turns=self.history_turns,
+            passage_width=self.passage_width,
         )
 
 
@@ -159,7 +161,11 @@ def _agent_for(session_id: str, model: str, depth: canon_context.Depth) -> DMAge
     if existing is not None and existing.model == model and existing.depth == depth:
         return existing
 
-    rebuilt = DMAgent(model=model, depth=depth, canon=CanonRetriever(limit=depth.passages))
+    rebuilt = DMAgent(
+        model=model,
+        depth=depth,
+        canon=CanonRetriever(limit=depth.passages, passage_width=depth.passage_width),
+    )
     if existing is not None:
         rebuilt.conversation = existing.conversation
     _SESSIONS[session_id] = rebuilt

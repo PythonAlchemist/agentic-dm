@@ -364,6 +364,36 @@ class TestRetrievingFromTheGraph:
         result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
         assert result.loose is False
 
+    def test_by_default_a_passage_carries_its_whole_section(self, written):
+        """Section 1 names the priest, then the undercroft, then him again.
+
+        A sentence-width passage anchored on his first mention stops before the
+        undercroft. On the real book the same shape put the answer to "who owns
+        the Blood of the Vine Tavern" 3,331 characters outside the window.
+        """
+        result = CanonRetriever().retrieve(f"Tell me about {named('Donavich')}.")
+        first = result.passages[0]
+        # `waits` is in the section's SECOND sentence, past any window anchored
+        # on the first mention -- which is what makes this discriminating.
+        assert "waits" in first.text
+        assert first.truncated is False
+
+    def test_sentence_width_narrows_to_one_sentence(self, written):
+        result = CanonRetriever(passage_width="sentence").retrieve(
+            f"Tell me about {named('Donavich')}."
+        )
+        assert "waits" not in result.passages[0].text
+
+    def test_a_heading_anchored_mention_no_longer_returns_only_the_heading(
+        self, graph
+    ):
+        """20 of 153 live mentions did exactly that -- every keyed room and
+        building, because a keyed section names its own place in its title."""
+        from backend.canon.passage import derive_passage
+
+        text = "### E2. The Tavern\n\nA fire burns low in the hearth."
+        assert derive_passage(text, 8) == "A fire burns low in the hearth."
+
     def test_a_passage_is_derived_prose_not_an_id(self, written):
         result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
         assert named("Donavich") in result.passages[0].text

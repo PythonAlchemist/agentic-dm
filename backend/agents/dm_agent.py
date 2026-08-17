@@ -66,7 +66,9 @@ class DMAgent:
         self.depth = depth or canon_context.Depth()
         self.rag_pipeline = HybridRAGPipeline()
         self.tools = DMTools()
-        self.canon = canon or CanonRetriever(limit=self.depth.passages)
+        self.canon = canon or CanonRetriever(
+            limit=self.depth.passages, passage_width=self.depth.passage_width
+        )
         self.conversation = ConversationManager()
 
         # Set system prompt

@@ -45,6 +45,17 @@ class Depth:
     passages: int = 5
     max_edges: int = 12
     include_proposed: bool = True
+    #: `section` sends each passage's whole section; `sentence` sends one
+    #: sentence around the mention.
+    #:
+    #: SECTION IS THE DEFAULT because sentence width answers a narrower question
+    #: than DMs ask. "Who owns the Blood of the Vine Tavern" is answered 3,331
+    #: characters after the tavern's first mention, in the same section, under a
+    #: sub-heading about roleplaying the other NPCs -- no sentence window
+    #: anchored on the mention reaches it, however the anchor is chosen. Sections
+    #: are cheap enough to send whole: the median is 842 characters, and five of
+    #: them run about a thousand tokens.
+    passage_width: str = "section"
     #: Prior turns of conversation sent with the question. 0 is a genuine
     #: setting, not a degenerate one: it isolates a single question from
     #: everything the model has already said about it.

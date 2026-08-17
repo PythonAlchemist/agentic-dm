@@ -205,5 +205,54 @@ def derive_passage(text: str, offset: int) -> str:
     for empty text -- a mention exists because something matched, so a passage
     that came back blank would mean the offset and the section had come apart.
     """
-    low, high = sentence_bounds(text, offset)
+    low, high = sentence_bounds(text, _past_heading(text, offset))
     return _MARKERS.sub("", text[low:high]).strip()
+
+
+#: A markdown heading line: `#` through `######`, to the end of the line.
+_HEADING_LINE = re.compile(r"^#{1,6} .*$", re.MULTILINE)
+
+
+def _past_heading(text: str, offset: int) -> int:
+    """`offset`, moved to the section's body if it landed in the heading.
+
+    A KEYED SECTION NAMES ITS OWN PLACE IN ITS TITLE, so the first -- and
+    therefore the stored -- occurrence of `Blood of the Vine Tavern` in section
+    E2 is at character 8, inside `### E2. Blood of the Vine Tavern`. A newline is
+    a hard passage boundary, so the passage came back as the heading and nothing
+    else: 32 characters, for the section a DM opened to read about the tavern.
+    Measured on the live graph, that was 20 of 153 mentions -- and not a random
+    20, but every keyed room and building in the book.
+
+    Moving to the body is the fix that needs no extra stored offset: the entity
+    is what the section is ABOUT, so its opening lines are on topic by
+    construction. An offset already in the body is returned untouched.
+    """
+    heading = _HEADING_LINE.match(text)
+    if heading is None or offset >= heading.end():
+        return offset
+    body = heading.end()
+    while body < len(text) and text[body].isspace():
+        body += 1
+    return body if body < len(text) else offset
+
+
+def derive_section(text: str, max_chars: int) -> tuple[str, bool]:
+    """The whole section, and whether it had to be cut.
+
+    WHY A WHOLE SECTION IS AN OPTION AT ALL. A sentence answers "what does the
+    book say here", and a great many real questions are not that. "Who owns the
+    Blood of the Vine Tavern" is answered 3,331 characters after the tavern's
+    first mention, in the same section, under a sub-heading about roleplaying
+    the other NPCs -- no sentence-width window anchored on the mention reaches
+    it, however the anchor is chosen. Sections are cheap enough to send whole:
+    the median is 842 characters and five of them run about a thousand tokens.
+
+    Truncation is REPORTED rather than silent, and cuts from the end so the
+    section's own opening -- the part that establishes what it is about --
+    always survives.
+    """
+    cleaned = _MARKERS.sub("", text).strip()
+    if len(cleaned) <= max_chars:
+        return cleaned, False
+    return cleaned[:max_chars].rstrip(), True

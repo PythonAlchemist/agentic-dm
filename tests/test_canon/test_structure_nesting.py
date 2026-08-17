@@ -171,31 +171,40 @@ class TestNoFabrication:
         assert ("Chapel Annexe", "Vestry") not in edges
 
 
-class TestLocatedIn:
-    def test_a_node_is_located_in_its_own_keyed_section(self):
+class TestNoLocatedInIsDerived:
+    """*Reversed 2026-08-17.* This class used to assert the opposite of every
+    test in it: that a node extracted from a section is placed in that section's
+    room, inheriting from enclosing sections where needed.
+
+    The walk it tested was correct and the CONCLUSION was not. "Named in this
+    section" is not "present in this room", and shipping it as `accepted` with
+    `derived from document structure` put roughly half of chapter 3's NPC
+    placements into the graph as fact while they were false -- Madam Eva in a
+    tavern two chapters from where she is, Gertruda in the townhouse she has
+    vanished from.
+
+    The ancestor walk itself survives, because CONTAINS still uses it.
+    """
+
+    def test_a_node_in_its_own_keyed_section_is_not_placed_there(self):
         edges = structural_edges(NESTED, [node("Donavich", section_index=2)], CHAPTER)
 
-        assert ("Donavich", "Church") in located(edges)
+        assert located(edges) == set()
 
-    def test_a_node_in_an_unkeyed_subsection_inherits_the_enclosing_place(self):
-        """The regression this design exists to avoid. Refinement can cut
-        `#### Roleplaying Ismark` out of `E2. Blood of the Vine Tavern`, and the
-        golden edge `ismark LOCATED_IN blood-of-the-vine` must survive it. The
-        sub-section names no place, so the nearest placed ancestor answers --
-        which is exactly where the prose sat before it was cut."""
+    def test_nor_does_it_inherit_a_place_from_an_unkeyed_subsection(self):
+        """`#### Roleplaying Ismark` inside `E2. Blood of the Vine Tavern` used
+        to make Ismark located in the tavern. He IS there, and the book says so
+        in a sentence -- which is an extractor's job to propose and a human's to
+        accept, not something the document's shape establishes."""
         sections = [
             section("E2. Blood of the Vine Tavern", 0, depth=3),
             section("Roleplaying Ismark", 1, depth=4, parent_index=0),
         ]
         edges = structural_edges(sections, [node("Ismark Kolyanovich", section_index=1)], CHAPTER)
 
-        assert ("Ismark Kolyanovich", "Blood of the Vine Tavern") in located(edges)
+        assert located(edges) == set()
 
-    def test_the_walk_passes_through_more_than_one_placeless_ancestor(self):
-        """Refinement can nest two placeless levels between a node and its room
-        -- `K7. Chapel` > `Treasure` > a further cut inside it -- and stopping
-        at the first ancestor would answer "nowhere" for everything below the
-        second. The walk continues until it finds a place or runs out."""
+    def test_no_depth_of_nesting_produces_a_placement(self):
         sections = [
             section("K7. Chapel", 0, depth=2),
             section("Treasure", 1, depth=3, parent_index=0),
@@ -203,18 +212,21 @@ class TestLocatedIn:
         ]
         edges = structural_edges(sections, [node("Silver Chalice", "ITEM", section_index=2)], None)
 
-        assert ("Silver Chalice", "Chapel") in located(edges)
-
-    def test_a_location_node_is_not_located_in_anything(self):
-        edges = structural_edges(NESTED, [node("Undercroft", "LOCATION", section_index=4)], CHAPTER)
-
         assert located(edges) == set()
 
-    def test_a_node_in_a_placeless_chapter_is_located_nowhere(self):
-        appendix = [section("The Abbot", 0, depth=3)]
-        edges = structural_edges(appendix, [node("The Abbot", section_index=0)], None)
+    def test_the_ancestor_walk_still_serves_containment(self):
+        """The mechanism is kept; only the inference drawn from it is gone. A
+        keyed room nested under placeless sections still finds its parent."""
+        sections = [
+            section("K7. Chapel", 0, depth=2),
+            section("Treasure", 1, depth=3, parent_index=0),
+            section("K7a. Reliquary", 2, depth=4, parent_index=1),
+        ]
+        edges = structural_edges(sections, [], None)
 
-        assert located(edges) == set()
+        assert ("Chapel", "Reliquary") in {
+            (e.source_name, e.target_name) for e in edges if e.rel_type == "CONTAINS"
+        }
 
 
 class TestKeySplitterBaselineUnchanged:
