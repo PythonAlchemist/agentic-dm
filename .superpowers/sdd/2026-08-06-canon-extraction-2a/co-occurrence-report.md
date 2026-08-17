@@ -100,7 +100,9 @@ In the graph: `(:Mention)-[:CO_OCCURS_WITH]->(:Entity)`, MERGEd on the pair, no
 properties. It carries no `status`: the `accepted`/`proposed` split exists
 because a model guessed a typed relationship and a hand read found a third of
 the guesses wrong, and there is nothing here for a reviewer to accept. It sits
-with `MENTIONED_IN` and `DESCRIBES` on the deterministic side, as a bare string
+with `REFERS_TO`, `IN_SECTION` and `DESCRIBES` on the deterministic side (the
+design said "with `MENTIONED_IN`"; that edge is gone — `:Mention` replaced it —
+so this names the peers the graph actually holds), as a bare string
 in `schema.py` rather than a `RelationshipType` member.
 
 **No relationship is inferred from it, and nothing in the module could.** There
