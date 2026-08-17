@@ -209,7 +209,10 @@ def written(graph):
     # alone -- neutering the occurrence signal entirely left the tests green,
     # which is the shape of a test that cannot fail.
     sections = [
-        _section(0, "The Church", f"{named('Donavich')} prays here."),
+        # `vestments` appears in the QUIETER section on purpose: it is what the
+        # ranking test uses to check that a question's non-name words can beat a
+        # louder section.
+        _section(0, "The Church", f"{named('Donavich')} prays here in soiled vestments."),
         _section(1, "Below", f"{named('Donavich')} listens at the {named('Undercroft')}. "
                              f"{named('Donavich')} waits."),
         _section(2, "Elsewhere", "Nothing relevant happens in this section at all."),
@@ -280,6 +283,32 @@ class TestRetrievingFromTheGraph:
         """
         result = CanonRetriever().retrieve(f"Tell me about {named('Donavich')}.")
         assert result.section_ids[0] == f"cos:{CHAPTER}#1"
+
+    def test_a_questions_own_words_can_beat_a_louder_section(self, written):
+        """The defect this ranking exists to fix.
+
+        Section 1 names the priest twice and section 0 once, so occurrences
+        alone put section 1 first -- and the previous test asserts exactly that.
+        Ask about something section 0 actually discusses and it must win, even
+        though the anchor is quieter there. On the real set this is what moved
+        "who are Strahd's undead enemies" from ninth to second.
+        """
+        result = CanonRetriever().retrieve(
+            f"What vestments does {named('Donavich')} wear?"
+        )
+        assert result.section_ids[0] == f"cos:{CHAPTER}#0"
+        assert result.passages[0].term_hits >= 1
+
+    def test_the_anchors_own_name_is_not_also_scored_as_a_term(self, written):
+        """Counting it twice -- once as occurrences, once as a matched word --
+        would re-favour the broad sections the term signal is meant to demote."""
+        result = CanonRetriever().retrieve(f"Where is {named('Donavich')}?")
+        assert result.passages
+        assert all(p.term_hits == 0 for p in result.passages)
+
+    def test_a_word_the_question_never_used_scores_nothing(self, written):
+        result = CanonRetriever().retrieve(f"Tell me about {named('Donavich')}.")
+        assert all(p.term_hits == 0 for p in result.passages)
 
     def test_a_recorded_alias_resolves_to_the_same_entity(self, written):
         result = CanonRetriever().retrieve(f"Who is {named('Father Donavich')}?")

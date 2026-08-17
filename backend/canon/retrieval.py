@@ -45,7 +45,7 @@ from backend.canon.lookup import (
     type_labels,
 )
 from backend.canon.passage import derive_passage
-from backend.canon.questions import content_terms, lucene_query
+from backend.canon.questions import content_terms, lucene_query, terms_present
 from backend.canon.spine import mention_pattern
 
 #: Every recorded surface form in the plane, longest first. Length ordering is
@@ -97,6 +97,22 @@ PATH_GRAPH = "graph"
 PATH_TEXT = "text"
 PATH_NONE = ""
 
+#: What one matched question word is worth against one naming of an anchor, when
+#: ranking the graph path's candidate sections.
+#:
+#: CHOSEN FROM A PLATEAU, NOT FITTED TO A PEAK. Swept over the 24-question set:
+#:
+#:     weight   0     1     2     3     4     5     8    12    20   terms-only
+#:     MRR     .690  .784  .787  .801  .801  .796  .796  .769  .759   .664
+#:     hits   16/18 17/18 17/18 17/18 17/18 17/18 17/18 17/18 17/18  17/18
+#:
+#: Everything from 1 to 8 lands within .02 of the best, so what matters is that
+#: the term signal is PRESENT, not what it is multiplied by -- and a constant
+#: that only works at one value would be a number fitted to eighteen questions.
+#: 3 is the middle of the flat region. `terms-only` is worse than either signal
+#: combined, which is why occurrences are not simply replaced.
+TERM_WEIGHT = 3
+
 
 @dataclass(frozen=True)
 class Anchor:
@@ -123,6 +139,10 @@ class Passage:
     occurrences: int
     entity_ids: tuple[str, ...]
     aliases: tuple[str, ...] = ()
+    #: How many of the question's non-name words this section contains. The
+    #: other half of the ranking, carried so a surprising order can be read
+    #: rather than guessed at.
+    term_hits: int = 0
     #: Lucene's score, on a text-path passage only. `None` on a graph passage,
     #: and deliberately not defaulted to 0.0: a name match has no score, and a
     #: zero would read as "scored, badly".
@@ -260,7 +280,14 @@ class CanonRetriever:
                 )
 
             ids = sorted({a.entity_id for a in anchors})
-            passages = self._passages(session, ids)
+            # The question's words MINUS the anchors' own. A question naming
+            # Strahd already counts him through his occurrences; letting
+            # `strahd` score again as a content word would count one signal
+            # twice and re-favour exactly the broad sections this is meant to
+            # demote.
+            anchor_words = {word for a in anchors for word in a.surface.lower().split()}
+            terms = [t for t in content_terms(question) if t not in anchor_words]
+            passages = self._passages(session, ids, terms)
             kept = passages[:limit]
             edges = self._rows(session, EDGES, {"ids": ids})
             accepted, proposed = split_by_status(edges)
@@ -335,7 +362,7 @@ class CanonRetriever:
             ),
         )
 
-    def _passages(self, session, ids: list[str]) -> list[Passage]:
+    def _passages(self, session, ids: list[str], terms: list[str]) -> list[Passage]:
         """One passage per SECTION, ranked.
 
         Per section rather than per mention: two anchors named in one section is
@@ -344,10 +371,29 @@ class CanonRetriever:
         occurrence counts add, which is what makes a section naming both anchors
         outrank one naming either.
 
-        RANKING, in order: how loudly the section names the anchors, then how
-        many distinct anchors it names, then the book's own order. The first two
-        are the signal; the third only breaks ties, so the ordering is total and
-        a re-run cannot reshuffle it.
+        RANKING is `occurrences + TERM_WEIGHT * matched terms`, then the number
+        of distinct anchors, then the book's own order. The last only breaks
+        ties, so the ordering is total and a re-run cannot reshuffle it.
+
+        THE TERM SIGNAL EXISTS BECAUSE OCCURRENCES ALONE ANSWER THE WRONG
+        QUESTION. Counting how loudly a section names the anchors ranks the
+        sections that talk about them MOST, which for `Strahd` and `Barovia` is
+        the introduction's overview -- while every word of the question that is
+        not a name goes unused. "Who are Strahd's undead enemies in Barovia"
+        ranked its answer NINTH, and that answer contains the words `undead` and
+        `enemies` almost verbatim.
+
+        The candidate set is untouched by this. Every eligible section is one
+        that mentions a resolved name; terms only reorder them. So the fact/guess
+        line the text fallback respects is respected here too -- a term can move
+        a passage up, never conjure one.
+
+        Note what this does NOT fix, because ranking cannot: a section the scan
+        never linked is not a candidate at any weight. "What happens at the
+        cemetery at midnight" still misses, because the book writes `cemetery`
+        in lower case there and the single-word case rule -- the rule keeping
+        the LORE entity `Light` off every lit torch -- means `Cemetery` has no
+        mention in it.
         """
         merged: dict[str, dict] = {}
         for row in self._rows(session, MENTIONS, {"ids": ids}):
@@ -385,12 +431,13 @@ class CanonRetriever:
                 occurrences=slot["occurrences"],
                 entity_ids=tuple(sorted(set(slot["entity_ids"]))),
                 aliases=tuple(sorted(set(slot["aliases"]))),
+                term_hits=terms_present(slot["text"], terms),
             )
             for slot in merged.values()
         ]
         passages.sort(
             key=lambda p: (
-                -p.occurrences,
+                -(p.occurrences + TERM_WEIGHT * p.term_hits),
                 -len(p.entity_ids),
                 p.chapter_index,
                 p.section_index,
