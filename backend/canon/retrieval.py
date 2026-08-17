@@ -84,6 +84,25 @@ ORDER BY score DESC
 LIMIT $limit
 """
 
+#: The entities a set of sections names. What the text path anchors on, having
+#: no resolved name of its own.
+#:
+#: WITHOUT THIS, THE TEXT PATH THREW AWAY THE GRAPH. Asked "who owns the
+#: tavern", it found section E2 -- exactly the right section -- and returned
+#: prose alone, so the three `OWNS` edges a human had accepted about that very
+#: room never reached the model, which then said the canon did not cover it.
+#: Retrieving a section and ignoring what the graph knows about its occupants is
+#: using the book as a text file.
+#:
+#: The fact/guess line is untouched: these edges keep their own status and are
+#: rendered under the same two headings. What is a guess here is WHICH SECTIONS
+#: to look at, and that was already labelled.
+ENTITIES_IN_SECTIONS = """
+MATCH (s:Section)<-[:IN_SECTION]-(:Mention)-[:REFERS_TO]->(e:Entity {plane:$plane})
+WHERE s.id IN $section_ids
+RETURN DISTINCT e.id AS id
+"""
+
 #: Retrieval returns at most this many passages unless told otherwise. A DM
 #: reading an answer will not read twenty paragraphs, and an unbounded context
 #: hides a ranking problem by making every miss a hit.
@@ -202,6 +221,35 @@ class Retrieval:
         return tuple(p.section_id for p in self.passages)
 
 
+def dedupe_edges(rows: list[dict]) -> list[dict]:
+    """One row per edge, whichever endpoints were asked about.
+
+    `EDGES` deliberately reads both directions, because half of what a DM wants
+    about an NPC is written with the NPC as the TARGET. When only ONE endpoint
+    is an anchor that yields one row per edge. When BOTH are -- which is now the
+    normal case, since the text path anchors on every entity a section names --
+    it yields two, and the rendered block showed six lines for the tavern's
+    three owners.
+
+    Deduplicated on the edge as the graph stores it, so the surviving row keeps
+    its own direction and `_edge_line` still writes the arrow the right way
+    round. Order is preserved: the first row seen wins, and the query is already
+    ordered.
+    """
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[dict] = []
+    for row in rows:
+        entity, other = row.get("entity"), row.get("other")
+        if row.get("direction") == "in":
+            entity, other = other, entity
+        key = (str(entity), str(row.get("relationship")), str(other))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
 def find_names(question: str, forms: list[str], *, fold_case: bool = False) -> list[str]:
     """Every recorded form the question contains, longest first, non-overlapping.
 
@@ -303,7 +351,7 @@ class CanonRetriever:
             terms = [t for t in content_terms(question) if t not in anchor_words]
             passages = self._passages(session, ids, terms)
             kept = passages[:limit]
-            edges = self._rows(session, EDGES, {"ids": ids})
+            edges = dedupe_edges(self._rows(session, EDGES, {"ids": ids}))
             accepted, proposed = split_by_status(edges)
 
             return Retrieval(
@@ -324,17 +372,25 @@ class CanonRetriever:
     def _by_text(self, session, question: str, limit: int) -> Retrieval:
         """The last resort: search the prose for what the question describes.
 
-        Reached only when the question names nothing. It returns passages with
-        NO anchors and NO edges, and says `path='text'` -- there is no entity
-        here to hang a relationship off, and inventing one from a Lucene hit is
-        precisely the inference the graph path exists to avoid.
+        Reached only when the question names nothing. It reports `path='text'`
+        and carries NO anchors, because no name resolved -- which sections to
+        read is a Lucene score's opinion, and that has to stay visible.
 
-        The passage is the section's OPENING rather than a sentence around a
-        match. A text hit has no offset to anchor on -- Lucene scores the whole
-        document -- and picking one of the matched terms to centre on would
-        imply the section is about that term when the score came from all of
-        them. The first sentences of a section are the book's own topic
-        statement, which is the honest thing to show for a whole-section hit.
+        IT DOES CARRY THE GRAPH'S EDGES, from the entities those sections name.
+        It used to carry none, on the reasoning that a text hit has no entity to
+        hang a relationship off. That was wrong in a way a real question
+        exposed: asked "who owns the tavern", it found section E2 -- exactly the
+        right section -- and returned prose alone, so three `OWNS` edges a human
+        had accepted about that very room never reached the model, which
+        answered that the canon did not cover it. Retrieving a section and
+        discarding what the graph knows about its occupants is using the book as
+        a text file.
+
+        The passage is anchored at offset 0, since Lucene scores a whole
+        document and picking one matched term to centre on would imply the
+        section is about that term. At `section` width that is the whole
+        section anyway; at `sentence` width it is the section's opening, which
+        is the book's own topic statement.
         """
         terms = content_terms(question)
         if not terms:
@@ -357,15 +413,33 @@ class CanonRetriever:
                 chapter_index=row["chapter_index"],
                 section=row["section"],
                 section_index=row["section_index"],
-                text=derive_passage(row["text"], 0),
+                # Through `_render`, so `passage_width` applies here too. It
+                # used to call `derive_passage` directly and always sent one
+                # sentence, silently ignoring the setting -- which is how a
+                # whole-section search returned 930 tokens of the wrong
+                # sentence.
+                text=self._render({"text": row["text"], "offset": 0}),
+                truncated=self._truncated({"text": row["text"]}),
                 occurrences=0,
                 entity_ids=(),
                 score=row["score"],
             )
             for row in rows
         ]
+        section_ids = [p.section_id for p in passages]
+        ids = sorted(
+            row["id"]
+            for row in self._rows(
+                session, ENTITIES_IN_SECTIONS, {"section_ids": section_ids}
+            )
+        ) if section_ids else []
+        accepted, proposed = split_by_status(
+            dedupe_edges(self._rows(session, EDGES, {"ids": ids})) if ids else []
+        )
         return Retrieval(
             question=question,
+            accepted=tuple(accepted),
+            proposed=tuple(proposed),
             passages=tuple(passages),
             path=PATH_TEXT if passages else PATH_NONE,
             terms=tuple(terms),
