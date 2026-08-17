@@ -22,6 +22,8 @@ from backend.canon.spine import (
     mention_pattern,
     plan_spine,
     scan_mentions,
+    scannable_here,
+    WriteSection,
     section_id,
 )
 from backend.canon.writer import CANON_PLANE, mint_id
@@ -800,3 +802,77 @@ def test_a_mention_is_comparable_by_value():
         occurrences=1, offset=0, entity_name="Entity",
     )
     assert a == b
+
+
+class TestAKeyedPlacesNameIsOnlyItsOwnChaptersName:
+    """413 keyed places in this book; 27 names are shared by more than one of
+    them and 71 places (17%) carry such a name -- `Kitchen` six times across
+    three chapters, `Empty Cell` five times in one.
+
+    Chapter scoping in the id is the graph already saying the NAME does not
+    identify the thing, and the scan has to respect it. It did not: chapter 1's
+    tarokka reading names "the Burgomaster's mansion in VALLAKI (chapter 5, area
+    N3s)" and the scan gave the mention to chapter 3's `E4. Burgomaster's
+    Mansion`.
+    """
+
+    def test_a_global_id_is_scannable_in_any_chapter(self):
+        assert scannable_here("cos:madam-eva", "into-the-mists") is True
+        assert scannable_here("cos:madam-eva", "castle-ravenloft") is True
+
+    def test_a_keyed_place_is_scannable_only_in_its_own_chapter(self):
+        keyed = "cos:the-village-of-barovia:e4-burgomaster-s-mansion"
+        assert scannable_here(keyed, "the-village-of-barovia") is True
+        assert scannable_here(keyed, "into-the-mists") is False
+
+    def test_an_id_of_neither_shape_is_treated_as_global(self):
+        """Test and seeded nodes. Preserves the behaviour every caller had
+        before this rule existed."""
+        assert scannable_here("pytest:nobody", "any-chapter") is True
+
+    def test_the_scan_refuses_another_chapters_keyed_place(self):
+        section = WriteSection(
+            id=section_id("into-the-mists", 0),
+            chapter_slug="into-the-mists",
+            heading="Swords",
+            index=0,
+            depth=1,
+            parent_index=-1,
+            text="The treasure is hidden in the attic of the Burgomaster's Mansion in Vallaki.",
+        )
+        elsewhere = EntityNames(
+            id="cos:the-village-of-barovia:e4-burgomaster-s-mansion",
+            name="Burgomaster's Mansion",
+        )
+        assert scan_mentions([section], [elsewhere], "into-the-mists") == []
+
+    def test_but_accepts_it_inside_its_own_chapter(self):
+        section = WriteSection(
+            id=section_id(CHAPTER, 0),
+            chapter_slug=CHAPTER,
+            heading="E4. Burgomaster's Mansion",
+            index=0,
+            depth=1,
+            parent_index=-1,
+            text="A weary-looking Burgomaster's Mansion squats behind a rusting fence.",
+        )
+        home = EntityNames(
+            id=f"cos:{CHAPTER}:e4-burgomaster-s-mansion",
+            name="Burgomaster's Mansion",
+        )
+        assert len(scan_mentions([section], [home], CHAPTER)) == 1
+
+    def test_a_global_entity_is_still_found_outside_the_chapter_that_minted_it(self):
+        """The rule this exception sits inside: chapter 1 naming Strahd is a
+        fact about chapter 1 whatever chapter minted him."""
+        section = WriteSection(
+            id=section_id("into-the-mists", 0),
+            chapter_slug="into-the-mists",
+            heading="Hooks",
+            index=0,
+            depth=1,
+            parent_index=-1,
+            text="Strahd von Zarovich watches from the castle.",
+        )
+        strahd = EntityNames(id="cos:strahd-von-zarovich", name="Strahd von Zarovich")
+        assert len(scan_mentions([section], [strahd], "into-the-mists")) == 1

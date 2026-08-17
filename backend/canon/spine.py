@@ -527,6 +527,25 @@ def attribute_spans(
     return sorted(kept)
 
 
+def scannable_here(entity_id: str, chapter_slug: str) -> bool:
+    """Whether this entity's name may be matched in this chapter's text.
+
+    Global ids (`cos:madam-eva`) are scannable everywhere -- that is what global
+    means. A chapter-scoped id (`cos:<chapter>:<key>-<name>`) is scannable only
+    inside its own chapter, because chapter scoping is the graph ALREADY SAYING
+    that the name does not identify the thing.
+
+    Keyed on the id's shape rather than on a label, because the id is what
+    `mint_id` decided and labels can be added later by a seed. An id that is
+    neither shape -- a test node, a seeded node -- is treated as global, which
+    is the behaviour every caller had before this rule existed.
+    """
+    parts = entity_id.split(":")
+    if len(parts) < 3:
+        return True
+    return parts[1] == chapter_slug
+
+
 def scan_mentions(
     sections: Iterable[WriteSection],
     entities: Iterable[EntityNames],
@@ -539,6 +558,25 @@ def scan_mentions(
     fact about chapter 3 whatever chapter minted the castle, and scanning only
     the chapter's own nodes would rebuild the defect this replaces one level up.
 
+    WITH ONE EXCEPTION, AND IT IS THE ONE THE ID SCHEME ALREADY DECLARES. A
+    CHAPTER-SCOPED entity -- a keyed place, id `cos:<chapter>:<key>-<name>` --
+    is scoped precisely because its NAME is not unique in the book. Matching it
+    outside its own chapter attributes one room's name to another room:
+
+        413 keyed places across this book
+         27 names shared by more than one of them
+         71 places (17%) carrying such a name
+        `Kitchen` x6, `Empty Cell` x5, `Servants' Quarters` x4
+
+    Chapter 1's tarokka reading says "the attic of the Burgomaster's mansion in
+    VALLAKI (chapter 5, area N3s)" and the scan attributed it to chapter 3's
+    `E4. Burgomaster's Mansion`. With only chapter 3 written that could not
+    happen; with the book written it happens to six Kitchens.
+
+    So a chapter-scoped entity is looked for in ITS OWN CHAPTER ONLY. Global
+    entities -- people, factions, items, regions -- are unaffected and still
+    scanned everywhere, which is the case the paragraph above is about.
+
     Each entity is looked for under EVERY form recorded for it, which is where
     the eight comes from and the only reason the number moves. The matcher is
     the same one, applied once per form.
@@ -550,7 +588,11 @@ def scan_mentions(
     Nothing is filtered. See the module docstring: junk mentions make junk
     entities visible, and that is the point of not having a filter here.
     """
-    ordered_entities = sorted(set(entities), key=lambda e: e.id)
+    ordered_entities = [
+        e
+        for e in sorted(set(entities), key=lambda e: e.id)
+        if scannable_here(e.id, chapter_slug)
+    ]
 
     mentions: list[WriteMention] = []
     for section in sections:
