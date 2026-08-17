@@ -45,6 +45,7 @@ from backend.canon.lookup import (
     type_labels,
 )
 from backend.canon.passage import derive_passage
+from backend.canon.questions import content_terms, lucene_query
 from backend.canon.spine import mention_pattern
 
 #: Every recorded surface form in the plane, longest first. Length ordering is
@@ -66,10 +67,35 @@ RETURN DISTINCT e.id AS id, e.name AS name, labels(e) AS labels, e.status AS nod
 ORDER BY e.id
 """
 
+#: The prose fallback, over the full-text index `GRAPH_SCHEMA` declares. Reached
+#: ONLY when nothing in the question resolves to an entity.
+#:
+#: `db.index.fulltext.queryNodes` returns a Lucene score, and that score is
+#: deliberately not merged into the graph path's ranking. A name resolved
+#: through `:Alias` is a fact about the book; a score is a guess about a
+#: question. Blending them produces one ordering in which nobody can tell which
+#: answered, and this project's whole method is being able to tell.
+SEARCH_SECTIONS = """
+CALL db.index.fulltext.queryNodes('section_text', $query) YIELD node AS s, score
+MATCH (c:Chapter {plane:$plane})-[:HAS_SECTION]->(s)
+RETURN s.id AS section_id, s.heading AS section, s.index AS section_index,
+       s.text AS text, c.slug AS chapter, c.index AS chapter_index, score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
 #: Retrieval returns at most this many passages unless told otherwise. A DM
 #: reading an answer will not read twenty paragraphs, and an unbounded context
 #: hides a ranking problem by making every miss a hit.
 DEFAULT_LIMIT = 5
+
+#: How a retrieval was answered. Carried on the result and reported by the
+#: evaluation harness, because a text hit and a graph hit are not the same
+#: quality of answer and an aggregate recall that hides which is which would
+#: make the fallback look like an improvement to the graph.
+PATH_GRAPH = "graph"
+PATH_TEXT = "text"
+PATH_NONE = ""
 
 
 @dataclass(frozen=True)
@@ -97,6 +123,16 @@ class Passage:
     occurrences: int
     entity_ids: tuple[str, ...]
     aliases: tuple[str, ...] = ()
+    #: Lucene's score, on a text-path passage only. `None` on a graph passage,
+    #: and deliberately not defaulted to 0.0: a name match has no score, and a
+    #: zero would read as "scored, badly".
+    #:
+    #: Carried because the text path CANNOT SAY IT DOES NOT KNOW. Any question
+    #: sharing one word with any section returns that section -- "what is the
+    #: capital of France?" returns the foreword, which discusses Byron in
+    #: Switzerland. The score is the only signal a caller has that an answer is
+    #: thin, so it travels rather than being consumed here.
+    score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +153,14 @@ class Retrieval:
     #: case-folded fallback was what anchored the question. Surfaced rather
     #: than swallowed: a fallback nobody can observe becomes the default.
     loose: bool = False
+    #: Which path answered: `graph` (a name resolved), `text` (the prose
+    #: fallback), or empty (nothing did). Never inferred from whether `anchors`
+    #: is empty -- a caller reading a text answer must be able to see that it
+    #: is one.
+    path: str = PATH_NONE
+    #: The terms the text fallback searched on, so a bad text answer can be read
+    #: back to the question that produced it.
+    terms: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def found(self) -> bool:
@@ -181,13 +225,7 @@ class CanonRetriever:
                 named = find_names(question, forms, fold_case=True)
                 loose = bool(named)
             if not named:
-                return Retrieval(
-                    question=question,
-                    miss_reason=(
-                        "no recorded name appears in the question -- retrieval has "
-                        "nothing to anchor on"
-                    ),
-                )
+                return self._by_text(session, question, limit)
 
             anchors: list[Anchor] = []
             ambiguous: list[str] = []
@@ -208,6 +246,10 @@ class CanonRetriever:
                     )
 
             if not anchors:
+                # A recorded spelling that names nothing is a broken graph, not
+                # a descriptive question, so this does NOT fall through to text.
+                # Papering over it would turn a repairable defect into a
+                # slightly-worse answer nobody investigates.
                 return Retrieval(
                     question=question,
                     miss_reason=(
@@ -232,10 +274,66 @@ class CanonRetriever:
                 dropped=len(passages) - len(kept),
                 ambiguous=tuple(ambiguous),
                 loose=loose,
+                path=PATH_GRAPH,
                 miss_reason="" if kept else "anchored, but no section mentions the anchors",
             )
 
     # -- internals ---------------------------------------------------------
+
+    def _by_text(self, session, question: str, limit: int) -> Retrieval:
+        """The last resort: search the prose for what the question describes.
+
+        Reached only when the question names nothing. It returns passages with
+        NO anchors and NO edges, and says `path='text'` -- there is no entity
+        here to hang a relationship off, and inventing one from a Lucene hit is
+        precisely the inference the graph path exists to avoid.
+
+        The passage is the section's OPENING rather than a sentence around a
+        match. A text hit has no offset to anchor on -- Lucene scores the whole
+        document -- and picking one of the matched terms to centre on would
+        imply the section is about that term when the score came from all of
+        them. The first sentences of a section are the book's own topic
+        statement, which is the honest thing to show for a whole-section hit.
+        """
+        terms = content_terms(question)
+        if not terms:
+            return Retrieval(
+                question=question,
+                miss_reason=(
+                    "the question names nothing and, once its question words are "
+                    "removed, says nothing to search for"
+                ),
+            )
+        rows = self._rows(
+            session,
+            SEARCH_SECTIONS,
+            {"query": lucene_query(terms), "limit": limit},
+        )
+        passages = [
+            Passage(
+                section_id=row["section_id"],
+                chapter=row["chapter"],
+                chapter_index=row["chapter_index"],
+                section=row["section"],
+                section_index=row["section_index"],
+                text=derive_passage(row["text"], 0),
+                occurrences=0,
+                entity_ids=(),
+                score=row["score"],
+            )
+            for row in rows
+        ]
+        return Retrieval(
+            question=question,
+            passages=tuple(passages),
+            path=PATH_TEXT if passages else PATH_NONE,
+            terms=tuple(terms),
+            miss_reason=(
+                ""
+                if passages
+                else f"the question names nothing, and no section matches {terms}"
+            ),
+        )
 
     def _passages(self, session, ids: list[str]) -> list[Passage]:
         """One passage per SECTION, ranked.

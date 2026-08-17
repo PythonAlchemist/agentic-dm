@@ -627,5 +627,19 @@ GRAPH_SCHEMA = {
         # Every name lookup resolves on `normalized` and nothing else, so this
         # is the index the read path lives on.
         "CREATE INDEX alias_normalized IF NOT EXISTS FOR (a:Alias) ON (a.normalized)",
+        # The prose itself, for questions that DESCRIBE instead of naming.
+        #
+        # "Who is the old woman selling pastries?" and "what do I roll for a
+        # random house?" name no entity, so the graph path has nothing to anchor
+        # on and correctly returns nothing. This index is the fallback, and it is
+        # deliberately the LAST resort rather than the first: a name resolved
+        # through `:Alias` is a fact, a Lucene score is a guess, and the two must
+        # not be blended into one ranking where nobody can tell which answered.
+        #
+        # Heading first, text second, both searched. A section's heading is the
+        # book's own summary of it and is worth far more per word than the prose,
+        # which is why `whats_here` reads it too.
+        "CREATE FULLTEXT INDEX section_text IF NOT EXISTS "
+        "FOR (s:Section) ON EACH [s.heading, s.text]",
     ],
 }

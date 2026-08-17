@@ -61,6 +61,8 @@ def score(question: dict, result: Retrieval) -> dict:
         "dropped": result.dropped,
         "ambiguous": list(result.ambiguous),
         "miss_reason": result.miss_reason,
+        "path": result.path or "-",
+        "terms": list(result.terms),
     }
 
 
@@ -76,23 +78,44 @@ def summarize(rows: list[dict]) -> dict:
         # Retrieval cannot be blamed for ranking a question it never got a
         # handle on, and cannot be credited for the ones it did get.
         "recall_overall": len(hits) / total if total else 0.0,
-        "recall_anchored": len(hits) / len(anchored) if anchored else 0.0,
+        # Hits AMONG THE ANCHORED, not all hits over the anchored count. With a
+        # text fallback answering questions that never anchored, the latter
+        # divides one population by another and reported 111%.
+        "recall_anchored": (
+            sum(1 for r in anchored if r["hit"]) / len(anchored) if anchored else 0.0
+        ),
         "mrr": sum(r["rr"] for r in rows) / total if total else 0.0,
         "no_anchor": [r["id"] for r in rows if not r["anchored"]],
         "anchored_but_missed": [r["id"] for r in rows if r["anchored"] and not r["hit"]],
+        # Reported per path, never merged. A graph hit resolved a name the book
+        # wrote; a text hit is a Lucene score agreeing with a guess. Averaging
+        # them into one recall makes the fallback look like an improvement to
+        # the graph, which is the one conclusion this harness must not support.
+        "by_path": {
+            path: {
+                "n": len(group),
+                "hits": sum(1 for r in group if r["hit"]),
+            }
+            for path in ("graph", "text", "-")
+            if (group := [r for r in rows if r["path"] == path])
+        },
     }
 
 
 def render(rows: list[dict], summary: dict, *, verbose: bool) -> str:
     out: list[str] = []
-    out.append(f"  {'id':<5} {'anchor':<7} {'hit':<5} {'rr':<5} question")
-    out.append(f"  {'-'*5} {'-'*7} {'-'*5} {'-'*5} {'-'*44}")
+    out.append(f"  {'id':<5} {'path':<6} {'hit':<5} {'rr':<5} question")
+    out.append(f"  {'-'*5} {'-'*6} {'-'*5} {'-'*5} {'-'*44}")
     for row in rows:
         out.append(
-            f"  {row['id']:<5} {'yes' if row['anchored'] else 'NO':<7} "
+            f"  {row['id']:<5} {row['path']:<6} "
             f"{'yes' if row['hit'] else 'NO':<5} {row['rr']:<5.2f} {row['question'][:44]}"
         )
 
+    out.append("")
+    for path, stat in summary["by_path"].items():
+        label = {"graph": "by name", "text": "by text", "-": "no answer"}[path]
+        out.append(f"  {label:<20} {stat['hits']}/{stat['n']}")
     out.append("")
     out.append(f"  questions            {summary['total']}")
     out.append(f"  anchored             {summary['anchored']}/{summary['total']}")
