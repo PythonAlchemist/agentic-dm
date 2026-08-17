@@ -744,10 +744,10 @@ def test_a_mention_is_comparable_by_value():
     the writer, both of which need value equality rather than identity."""
     a = WriteMention(
         id="x", entity_id="e", section_id="s", chapter_slug=CHAPTER,
-        occurrences=1, offset=0,
+        occurrences=1, offset=0, entity_name="Entity",
     )
     b = WriteMention(
         id="x", entity_id="e", section_id="s", chapter_slug=CHAPTER,
-        occurrences=1, offset=0,
+        occurrences=1, offset=0, entity_name="Entity",
     )
     assert a == b

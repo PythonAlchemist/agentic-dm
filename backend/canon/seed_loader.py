@@ -341,6 +341,12 @@ def load_seed(path: str | Path, session) -> dict:
         }
         props.setdefault("plane", "canon")
         props.setdefault("source_book", "cos")
+        # The graph-wide Browser caption. Seeded nodes are written by a path
+        # that never touches `WriteNode`, so without this the hand-authored
+        # entities -- the location rungs, the artifacts -- would be the only
+        # ones rendering as a bare id.
+        if props.get("name"):
+            props.setdefault("display_name", props["name"])
         # The type is a LABEL, as it is on every node `canon.writer` writes --
         # `MATCH (n:NPC)`, not `MATCH (n:Entity {entity_type:'NPC'})`. Coerced
         # through the enum first because a label cannot be parameterized in

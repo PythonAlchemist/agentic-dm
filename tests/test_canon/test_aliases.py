@@ -145,7 +145,13 @@ class TestPlanAliases:
 
     def test_the_normalized_property_is_the_module_rule_and_not_a_second_one(self):
         assert WriteAlias("cos:e", " Bildrath’s ").normalized == "bildrath's"
-        assert WriteAlias("cos:e", "X").properties == {"normalized": "x"}
+        assert WriteAlias("cos:e", "X").properties == {
+            "normalized": "x",
+            # The graph-wide caption. On an :Alias it restates the merge key,
+            # which is the one node kind where that is redundant -- written
+            # anyway so the Browser rule has no exceptions.
+            "display_name": "X",
+        }
 
 
 class TestTheSeed:

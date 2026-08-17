@@ -769,6 +769,11 @@ class TestWrittenProperties:
         )
         assert nodes[0].properties == {
             "name": "Ismark Kolyanovich",
+            # A deliberate duplicate of `name`, and the one property every node
+            # kind in the graph shares, so Browser can caption all of them with
+            # one rule. It cannot drift from `name`: both are the same
+            # expression.
+            "display_name": "Ismark Kolyanovich",
             "plane": CANON_PLANE,
             "votes": 5,
             # An unkeyed NPC with no accepted edge attached: nothing
