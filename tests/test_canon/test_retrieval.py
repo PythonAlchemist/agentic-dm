@@ -88,16 +88,42 @@ class TestScoring:
         one asks whether the system helped, the other whether RANKING is the
         thing to fix."""
         rows = [
-            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0},
-            {"id": "q2", "anchored": True, "hit": False, "rr": 0.0},
-            {"id": "q3", "anchored": False, "hit": False, "rr": 0.0},
-            {"id": "q4", "anchored": False, "hit": False, "rr": 0.0},
+            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0, "path": "graph"},
+            {"id": "q2", "anchored": True, "hit": False, "rr": 0.0, "path": "graph"},
+            {"id": "q3", "anchored": False, "hit": False, "rr": 0.0, "path": "-"},
+            {"id": "q4", "anchored": False, "hit": False, "rr": 0.0, "path": "-"},
         ]
         s = summarize(rows)
         assert s["recall_overall"] == pytest.approx(0.25)
         assert s["recall_anchored"] == pytest.approx(0.5)
         assert s["no_anchor"] == ["q3", "q4"]
         assert s["anchored_but_missed"] == ["q2"]
+
+    def test_a_text_hit_cannot_inflate_the_anchored_recall(self):
+        """Two populations, one divided by the other, reported 111%. A text hit
+        answers a question that never anchored, so it belongs to neither the
+        numerator nor the denominator of anchored recall."""
+        rows = [
+            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0, "path": "graph"},
+            {"id": "q2", "anchored": False, "hit": True, "rr": 1.0, "path": "text"},
+            {"id": "q3", "anchored": False, "hit": True, "rr": 1.0, "path": "text"},
+        ]
+        s = summarize(rows)
+        assert s["recall_anchored"] == pytest.approx(1.0)
+        assert s["recall_overall"] == pytest.approx(1.0)
+
+    def test_the_two_paths_are_reported_apart(self):
+        """A graph hit resolved a name the book wrote; a text hit is a Lucene
+        score agreeing with a guess. Merged, the fallback would read as an
+        improvement to the graph."""
+        rows = [
+            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0, "path": "graph"},
+            {"id": "q2", "anchored": True, "hit": False, "rr": 0.0, "path": "graph"},
+            {"id": "q3", "anchored": False, "hit": True, "rr": 1.0, "path": "text"},
+        ]
+        by_path = summarize(rows)["by_path"]
+        assert by_path["graph"] == {"n": 2, "hits": 1}
+        assert by_path["text"] == {"n": 1, "hits": 1}
 
     def test_a_hit_is_membership_not_position(self):
         from backend.canon.retrieval import Passage, Retrieval
@@ -259,11 +285,40 @@ class TestRetrievingFromTheGraph:
         result = CanonRetriever().retrieve(f"Who is {named('Father Donavich')}?")
         assert [a.entity_id for a in result.anchors] == [f"{PREFIX}donavich"]
 
-    def test_a_question_naming_nothing_says_so_rather_than_returning_junk(self, written):
+    def test_a_question_naming_nothing_is_answered_by_text_and_labelled_as_such(
+        self, written
+    ):
+        """The fallback's contract, and its cost stated honestly.
+
+        The text path CANNOT say it does not know: any question sharing one word
+        with any section returns that section. "What is the capital of France?"
+        comes back with the foreword, which discusses Byron in Switzerland. What
+        the caller is owed is not silence but LABELLING -- `path` says a Lucene
+        score answered this, `terms` says what was searched, and every passage
+        carries its score. A caller that treats a text answer as a name match is
+        then making its own mistake, not inheriting one.
+        """
         result = CanonRetriever().retrieve("What is the capital of France?")
         assert result.anchors == ()
+        assert result.path == "text"
+        assert result.terms == ("capital", "france")
+        assert all(p.score is not None for p in result.passages)
+
+    def test_a_graph_passage_carries_no_score(self, written):
+        """`None`, not `0.0`. A name match has no score, and a zero would read
+        as 'scored, badly'."""
+        result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
+        assert result.path == "graph"
+        assert all(p.score is None for p in result.passages)
+
+    def test_a_question_whose_words_are_all_scaffolding_searches_for_nothing(
+        self, written
+    ):
+        """`content_terms` can empty a question completely, and an empty Lucene
+        query is a syntax error rather than an empty result."""
+        result = CanonRetriever().retrieve("What is it?")
         assert result.passages == ()
-        assert "nothing to anchor on" in result.miss_reason
+        assert "says nothing to search for" in result.miss_reason
 
     def test_the_budget_reports_what_it_cut(self, written):
         """A silent truncation reads as 'covered everything' when it did not."""

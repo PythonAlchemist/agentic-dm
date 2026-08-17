@@ -1202,9 +1202,14 @@ def ensure_schema(session) -> None:
 #:   1. a `:Mention` this chapter made, i.e. the chapter's text names the entity;
 #:   2. an ontology edge this chapter asserted, i.e. `r.chapter_slug`.
 #:
-#: The union is needed, and neither arm alone is enough. Chapter 3 writes
-#: `Ismark Kolyanovich`, whose full name the chapter's prose never spells (it
-#: says "Ismark"), so arm 1 misses him and arm 2 catches him through his edges.
+#: The union is needed, and neither arm alone is enough: an entity a chapter
+#: asserts an edge about, but never names in prose, is invisible to arm 1.
+#:
+#: *Corrected 2026-08-17.* This used to cite `Ismark Kolyanovich` as the
+#: example, "whose full name the chapter's prose never spells". The prose does
+#: spell it -- the book sets it as `Kol<AD>yanovich` with a typesetter's soft
+#: hyphen, and the scan could not see through it. `mention_pattern` now can.
+#: The argument for the union stands; that particular evidence for it was a bug.
 #:
 #: THE UNION IS STILL NOT TOTAL, and that is a real narrowing against
 #: MENTIONED_IN, which covered every written node by construction. An entity
