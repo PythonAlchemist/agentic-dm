@@ -135,8 +135,27 @@ class TestNewlinesBoundAPassage:
         assert passage_of(text, "Amber Temple") == "| 9th | The Amber Temple | 13 |"
 
     def test_a_heading_does_not_run_into_the_prose_beneath_it(self):
+        """The newline rule itself is unchanged: a passage never spans the break.
+
+        What changed is the ANCHOR. *Corrected 2026-08-17.* This test used to
+        assert `passage_of(...) == "### E5. Church"` -- that a mention landing in
+        a heading yields the heading. The rule was right and the outcome was
+        useless: a keyed section names its own place in its title, so the first
+        (and only stored) occurrence of `Blood of the Vine Tavern` in section E2
+        is at character 8, and the passage a DM got for the tavern was
+        32 characters of heading. Measured on the live graph: 20 of 153
+        mentions, and not a random 20 -- every keyed room and building.
+
+        So an offset inside the heading now anchors on the body instead. The
+        passage still does not cross the newline; it starts on the other side of
+        it.
+        """
         text = "### E5. Church\nDonavich prays before the altar."
-        assert passage_of(text, "Church") == "### E5. Church"
+        assert passage_of(text, "Church") == "Donavich prays before the altar."
+
+    def test_an_offset_already_in_the_body_is_left_alone(self):
+        text = "### E5. Church\nDonavich prays. Doru screams below."
+        assert passage_of(text, "Doru") == "Doru screams below."
 
 
 class TestMarkdownMarkers:

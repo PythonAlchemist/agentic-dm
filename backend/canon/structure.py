@@ -63,7 +63,12 @@ class StructureResult:
     depth_derived: int
     key_derived: int
     chapter_derived: int
-    located_in: int
+    #: Kept at 0 and no longer counted from anything. The derivation it
+    #: described -- an entity named in a section is LOCATED_IN that place --
+    #: was removed 2026-08-17 as unsound. The field stays so an older run
+    #: artifact still parses, and stays ZERO so a new one cannot claim
+    #: placements nobody derived.
+    located_in: int = 0
 
 
 def _same_place(a: str, b: str) -> bool:
@@ -130,8 +135,8 @@ def derive_structure(
       the correction for `K20a` rendered as a sibling of `K20`
     - failing both, by the chapter's own place (**chapter**)
 
-    and separately, a non-location entity extracted from a section is LOCATED_IN
-    that section's place, or the nearest enclosing one.
+    and NOTHING ELSE. In particular no `LOCATED_IN` is derived from an entity
+    being named in a section -- see the note where that derivation used to be.
 
     Exactly one parent per place: a room with two parents is a fabrication
     dressed as thoroughness. The one exception is a stem parent that disagrees
@@ -225,26 +230,45 @@ def derive_structure(
                 section_index=s.index, section_heading=s.heading,
             )
 
-    for node in nodes:
-        place = by_index.get(node.section_index) or _ancestor_place(
-            node.section_index, by_index, parents
-        )
-        if not place:
-            continue
-        # A place is not located in itself, and a section's own location node
-        # names the same place the heading does.
-        if node.entity_type == "LOCATION":
-            continue
-        # The type guard alone is not enough. On the real chapter-3 run the
-        # extractor typed `Trapdoor` -- out of section `E5d. Trapdoor` -- as an
-        # ITEM, and this shipped `Trapdoor -LOCATED_IN-> Trapdoor`: a self-loop
-        # from the module that is supposed to be incapable of fabricating one.
-        if _same_place(node.name, place):
-            continue
-        add(
-            node.name, place, "LOCATED_IN", "node",
-            section_index=node.section_index, section_heading=node.section_heading,
-        )
+    # NO `LOCATED_IN` IS DERIVED HERE, AND THE ABSENCE IS THE POINT.
+    #
+    # This module used to place every non-LOCATION entity extracted from a
+    # section into that section's place. It reads like structure and it is not:
+    # it says BEING NAMED IN A SECTION IS BEING THERE, which is the same
+    # conflation `MENTIONED_IN` made when it recorded where an entity was
+    # extracted rather than where it appears -- and it was worse here, because
+    # the anchor was `node.section_index`, the section the EXTRACTOR emitted the
+    # candidate from.
+    #
+    # Hand-checked against the book, roughly half of the 26 NPC placements it
+    # produced for chapter 3 were false, and they were false in the way that
+    # matters most:
+    #
+    #   Madam Eva  -> Blood of the Vine Tavern   she is at Tser Pool, two
+    #                                            chapters away, and is merely
+    #                                            suggested as someone to visit
+    #   Gertruda   -> Mad Mary's Townhouse       she is MISSING; her absence is
+    #                                            the entire hook of that scene
+    #   Donavich   -> Burgomaster's Mansion      he is at the church, and is
+    #                                            named only as who receives the
+    #                                            burgomaster's body
+    #
+    # All of them shipped as `accepted`, carrying `derived from document
+    # structure` -- the provenance this project treats as trustworthy, tells the
+    # DM agent to rely on, and describes as the only layer a fabrication check
+    # found clean. A false edge in the distrusted bucket costs a reviewer a
+    # minute; a false edge here is stated to a DM as fact.
+    #
+    # What remains derived is the book's KEY NESTING -- `E5` contains `E5a`
+    # through `E5g` -- which is a real property of the document rather than an
+    # inference from one. Where an entity is NAMED is not lost: `:Mention`
+    # records exactly that, with an offset and a section, and never claims it
+    # means presence. Where an entity IS may be proposed by an extractor and
+    # accepted by a human, which is what the review queue is for.
+    #
+    # *Removed 2026-08-17*, after the DM agent hedged on "who owns the Blood of
+    # the Vine Tavern" -- a true `OWNS` edge with 5 of 5 votes sat in `proposed`
+    # while `Madam Eva LOCATED_IN` the same tavern sat in `accepted`.
 
     # `section_index` is part of the key for the same reason `by_index` is keyed
     # on it: name text does not identify a section, and same-named rooms are
@@ -257,7 +281,7 @@ def derive_structure(
     # split describes the edges that actually ship.
     seen: set[tuple[str, str, str, int]] = set()
     unique: list[CandidateEdge] = []
-    counts = {"depth": 0, "key": 0, "chapter": 0, "node": 0}
+    counts = {"depth": 0, "key": 0, "chapter": 0}
     for origin, edge in tagged:
         key = (edge.source_name, edge.target_name, edge.rel_type, edge.section_index)
         if key not in seen:
@@ -270,7 +294,6 @@ def derive_structure(
         depth_derived=counts["depth"],
         key_derived=counts["key"],
         chapter_derived=counts["chapter"],
-        located_in=counts["node"],
     )
 
 
