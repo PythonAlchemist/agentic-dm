@@ -148,6 +148,20 @@ def main() -> int:
             "--chapter", slug, "--replace",
         ])
         if code != 0:
+            # A chapter with nothing in it is not a failure, and telling the two
+            # apart matters for exactly the chapters gate G2 was worried about.
+            # Appendix A is backgrounds and trinket tables: 69 candidates, all
+            # correctly rejected by the gazetteer, nothing in-world left. The
+            # write path refuses to write an empty chapter -- rightly, since an
+            # empty chapter is not a written one -- and the driver must not read
+            # that refusal as a fault in the pipeline.
+            if "no node survived the filters" in output:
+                calls, usd = spend_of(slug)
+                spent += usd
+                print(f"      EMPTY  nothing in-world; skipped  (cumulative ${spent:.2f})")
+                note({"slug": slug, "stage": "write", "ok": True, "empty": True,
+                      "usd": round(usd, 4), "cumulative_usd": round(spent, 4)})
+                continue
             print(f"      WRITE FAILED\n{output[-1500:]}")
             note({"slug": slug, "stage": "write", "ok": False, "output": output[-2000:]})
             return 1
