@@ -178,6 +178,26 @@ class TestTheSeed:
         authored = load_aliases()
         assert "Mary" not in authored.get("mad-mary", ())
 
+    def test_the_short_forms_that_survived_the_corpus_check_are_recorded(self):
+        """Counted standalone across every chapter, not just the one that
+        prompted them."""
+        authored = load_aliases()
+        assert "Bildrath" in authored.get("bildrath-cantemir", ())
+        assert "Arik" in authored.get("arik-lorensk", ())
+        assert "Kolyan" in authored.get("kolyan-indirovich", ())
+
+    def test_lucian_alone_belongs_to_a_priest_in_another_town(self):
+        """15 standalone occurrences, nearly all Father Lucian Petrovich of
+        Vallaki. The alias would move a priest's whole life onto a
+        seven-year-old boy from Barovia."""
+        authored = load_aliases()
+        assert "Lucian" not in authored.get("lucian-jarov", ())
+
+    def test_blinsky_alone_is_a_brand_stamped_on_toys(self):
+        """31 standalone, mostly `Blinsky toy` -- an object, not the toymaker."""
+        authored = load_aliases()
+        assert "Blinsky" not in authored.get("gadof-blinsky", ())
+
 
 class TestSeedValidation:
     def test_an_entry_with_no_spellings_is_refused(self):

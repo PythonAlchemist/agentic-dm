@@ -93,7 +93,13 @@ _ABBREVIATIONS = frozenset(
 #: This is a rendering of the span, not an edit to it. `sentence_bounds` is
 #: untouched by it, so the span remains a literal region of the section and
 #: co-occurrence still reasons about the book's own offsets.
-_MARKERS = re.compile(r"[_*]+")
+#:
+#: U+00AD rides along for the same reason. The typesetter's soft hyphen is
+#: invisible where a line does not break, so a passage quoting
+#: `Ismark Kol<AD>yanovich` would put a stray hyphen in a DM's face in some
+#: fonts and nothing in others. Removed at RENDER time only, never from the
+#: section -- the offsets index that.
+_MARKERS = re.compile(r"[_*­]+")
 
 _WHITESPACE = re.compile(r"\s")
 

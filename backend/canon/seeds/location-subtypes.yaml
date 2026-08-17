@@ -133,6 +133,37 @@ aliases:
     aliases:
       - Ireena
 
+  # Short forms the book itself uses. Each was checked by counting its
+  # STANDALONE occurrences across the WHOLE corpus -- occurrences that are not
+  # part of the full name -- before being written here. Chapter-only checking is
+  # not enough, and three of the six candidates died on the corpus-wide pass.
+  - name: Bildrath Cantemir
+    aliases:
+      - Bildrath        # 6 standalone, every one the man
+  - name: Arik Lorensk
+    aliases:
+      - Arik            # 2 standalone, both the barkeep
+  - name: Kolyan Indirovich
+    aliases:
+      - Kolyan          # 3 standalone, all the burgomaster
+  #
+  # REJECTED, and the reasons are the bar. Each looked obvious and each is wrong:
+  #
+  #   Eva     -> Madam Eva.      0 standalone. The book always gives her the
+  #                              honorific, so the alias would name nobody here
+  #                              and wait to catch some other Eva later.
+  #   Mary    -> Mad Mary.       5 standalone, of which the foreword's are Mary
+  #                              SHELLEY and the credits' a Mary Hershey.
+  #   Lucian  -> Lucian Jarov.   15 standalone, nearly all Father Lucian
+  #                              Petrovich of Vallaki -- a different person.
+  #                              The alias would move a priest's whole life onto
+  #                              a seven-year-old boy.
+  #   Blinsky -> Gadof Blinsky.  31 standalone, mostly "Blinsky toy" -- the
+  #                              brand stamped on an object, not the toymaker.
+  #
+  # The pattern in all four: a short form is only a name when the book uses it
+  # AS one. Frequency is not evidence; checking where it lands is.
+
   # --- Places ---
   # The settlement, not the valley. `Barovia` alone is the REGION and stays
   # deliberately absent from here: the two are different places that share a

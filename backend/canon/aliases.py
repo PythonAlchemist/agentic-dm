@@ -41,11 +41,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from backend.canon.assembler import slugify
-from backend.canon.spine import fold_apostrophe
+from backend.canon.spine import fold_apostrophe, strip_soft_hyphens
 
 
 def normalize(name: str) -> str:
-    """Lowercase, trimmed, U+2019 folded to `'`. Nothing else, ever.
+    """Lowercase, trimmed, U+2019 folded to `'`, U+00AD dropped. Nothing else.
 
     Written out as three named steps rather than a chain, because the whole
     claim this module makes is that a reader can see the entire rule in one
@@ -56,9 +56,15 @@ def normalize(name: str) -> str:
     `blood-on-the-vine` collapse -- fine for minting an id, wrong for a name a
     caller typed, because it would also collapse names that differ by a colon
     or a comma. `normalized` keeps every character the book wrote except the
-    two differences that are genuinely typographic.
+    ones that are genuinely typographic.
+
+    The soft hyphen is one of those: U+00AD is a hint about where a line MAY
+    break and renders as nothing, so `Ismark Kol<AD>yanovich` and
+    `Ismark Kolyanovich` are the same name written twice. Dropping it changes
+    length, which would be unsafe on section text -- offsets index that -- and
+    is safe here, where a name is only ever compared.
     """
-    folded = fold_apostrophe(name)
+    folded = strip_soft_hyphens(fold_apostrophe(name))
     trimmed = folded.strip()
     return trimmed.lower()
 

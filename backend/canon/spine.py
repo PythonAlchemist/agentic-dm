@@ -101,9 +101,37 @@ STRAIGHT_APOSTROPHE = "'"
 #: markdown, where an underscore is always emphasis and never an identifier.
 WORD_CHAR = r"[^\W_]"
 
+#: U+00AD, the typesetter's hyphenation hint. It renders as nothing unless a
+#: line happens to break on it, so the book's own text carries it INSIDE words:
+#: `Kol<AD>yanovich`, `Van Rich<AD>ten's`, `Argyn<AD>vost`. Seven in this corpus,
+#: every one of them inside a proper noun.
+#:
+#: IT IS NEVER REMOVED FROM SECTION TEXT, and that is a hard constraint rather
+#: than a preference. A mention stores an OFFSET into `section.text`, so any
+#: edit that changes the text's LENGTH moves every offset after it and makes
+#: `derive_passage` quote the wrong span. `fold_apostrophe` is safe precisely
+#: because it is one character for one character; deleting a soft hyphen is not.
+#:
+#: So the matcher absorbs it instead -- see `mention_pattern`.
+SOFT_HYPHEN = "­"
+
+
 def fold_apostrophe(text: str) -> str:
-    """U+2019 -> `'`. Nothing else, and never a distance."""
+    """U+2019 -> `'`. Nothing else, and never a distance.
+
+    Length-preserving, and callers depend on that: `plan_mentions` folds a whole
+    section once and then indexes the ORIGINAL text with the offsets it finds.
+    """
     return text.replace(CURLY_APOSTROPHE, STRAIGHT_APOSTROPHE)
+
+
+def strip_soft_hyphens(name: str) -> str:
+    """Remove U+00AD from a NAME.
+
+    Safe here and nowhere else: a name is compared, never indexed into. Applying
+    this to section text would break every stored offset.
+    """
+    return name.replace(SOFT_HYPHEN, "")
 
 
 def section_id(chapter_slug: str, index: int) -> str:
@@ -413,11 +441,16 @@ def mention_pattern(name: str, *, fold_case: bool = False) -> re.Pattern[str] | 
     section, which is the one way this scan could produce a mention per
     character rather than per entity.
     """
-    folded = fold_apostrophe(name).strip()
+    folded = strip_soft_hyphens(fold_apostrophe(name)).strip()
     if not folded:
         return None
     flags = re.IGNORECASE if fold_case or len(folded.split()) > 1 else 0
-    return re.compile(rf"(?<!{WORD_CHAR}){re.escape(folded)}(?!{WORD_CHAR})", flags)
+    # A soft hyphen may sit between any two characters of the name AS THE BOOK
+    # SETS IT, so the pattern tolerates one anywhere inside. Absorbing it here
+    # rather than deleting it from the text is what keeps every stored offset
+    # valid -- the match still reports a span in the section's own coordinates.
+    body = rf"{SOFT_HYPHEN}*".join(re.escape(ch) for ch in folded)
+    return re.compile(rf"(?<!{WORD_CHAR}){body}(?!{WORD_CHAR})", flags)
 
 
 def _spell_rank(form: str, raw: str) -> int:
@@ -428,7 +461,9 @@ def _spell_rank(form: str, raw: str) -> int:
     must never be one:
 
     0. identical, character for character, typography and case included;
-    1. identical once U+2019 is folded -- the ASCII form of a curly possessive;
+    1. identical once U+2019 is folded and the typesetter's soft hyphen dropped
+       -- the ASCII form of a curly possessive, and a name the book happened to
+       hyphenate across a line;
     2. identical once case is also dropped, which is the only way a multi-word
        form can match text it does not equal.
 
@@ -437,9 +472,14 @@ def _spell_rank(form: str, raw: str) -> int:
     """
     if form == raw:
         return 0
-    if fold_apostrophe(form) == fold_apostrophe(raw):
+    if _plain(form) == _plain(raw):
         return 1
     return 2
+
+
+def _plain(text: str) -> str:
+    """Typography folded away: curly apostrophe, then soft hyphen."""
+    return strip_soft_hyphens(fold_apostrophe(text))
 
 
 def attribute_spans(
