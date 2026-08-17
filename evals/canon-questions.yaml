@@ -73,7 +73,7 @@ questions:
     question: "What is Donavich praying for?"
     sections: ["cos:the-village-of-barovia#14"]
     anchor_hint: "Donavich"
-    note: "That the gods show him how to save Doru without destroying him."
+    note: "A way to save Doru that stops short of destroying him."
 
   - id: q10
     question: "How do the characters open the trapdoor in the church?"
@@ -109,7 +109,7 @@ questions:
     question: "Where did Kolyan find Ireena?"
     sections: ["cos:the-village-of-barovia#14"]
     anchor_hint: "Kolyan Indirovich"
-    note: "At the edge of the Svalich Woods near the Pillarstone of Ravenloft; she is adopted."
+    note: "Adopted, not born to him: he found her as a girl by the Pillarstone, with no memory of her past."
 
   - id: q16
     question: "What do I roll to see who is living in a random village house?"
@@ -127,7 +127,7 @@ questions:
     question: "Where does Ismark want to take Ireena, and why there?"
     sections: ["cos:the-village-of-barovia#5"]
     anchor_hint: "Vallaki"
-    note: "Vallaki -- out of sight of Castle Ravenloft and, he hopes, out of Strahd's reach."
+    note: "Vallaki, which is fortified and far enough that he hopes Strahd cannot follow."
 
   - id: q19
     question: "Who is Parriwimple?"
@@ -145,13 +145,13 @@ questions:
     question: "Where are the Vistani camps?"
     sections: ["cos:the-village-of-barovia#21"]
     anchor_hint: "Vistani"
-    note: "Tser Pool to the west, and another on the outskirts of Vallaki."
+    note: "Two of them: one at Tser Pool, one just outside Vallaki."
 
   - id: q22
     question: "Who are Strahd's undead enemies in Barovia?"
     sections: ["cos:the-village-of-barovia#21"]
     anchor_hint: "Order of the Silver Dragon"
-    note: "The revenant knights of the Order of the Silver Dragon, at a ruined mansion west of Vallaki."
+    note: "Revenants of the fallen Order of the Silver Dragon, in a ruin west of Vallaki (chapter 7)."
 
   # -- deliberately unanchorable -----------------------------------------
   # These name no entity. They are here so the harness can distinguish "the
