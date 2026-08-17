@@ -651,6 +651,55 @@ class TestMentionCounts:
         ]
 
 
+SOFT = "­"
+
+
+class TestTheTypesettersSoftHyphen:
+    """U+00AD sits inside seven proper nouns in this corpus -- `Kol<AD>yanovich`,
+    `Van Rich<AD>ten's`, `Argyn<AD>vost`. It renders as nothing, so the book is
+    spelling ordinary names, and the scan has to see them."""
+
+    def test_a_name_the_book_hyphenated_is_still_found(self):
+        text = f"a man named Ismark Kol{SOFT}yanovich sat there"
+        assert mention_pattern("Ismark Kolyanovich").search(text)
+
+    def test_folding_the_text_does_not_change_its_length(self):
+        """THE CONSTRAINT EVERYTHING ELSE RESTS ON. A mention stores an offset
+        into `section.text`; any normalization that changes the text's length
+        moves every offset after it and makes the derived passage quote the
+        wrong span. So the matcher absorbs the soft hyphen and the text keeps
+        it."""
+        text = f"Ismark Kol{SOFT}yanovich and Bildrath’s"
+        assert len(fold_apostrophe(text)) == len(text)
+
+    def test_the_offset_reported_indexes_the_original_text(self):
+        text = f"The priest met Ismark Kol{SOFT}yanovich outside."
+        match = mention_pattern("Ismark Kolyanovich").search(text)
+        assert text[match.start():match.end()] == f"Ismark Kol{SOFT}yanovich"
+
+    def test_a_name_carrying_one_still_matches_text_without_it(self):
+        """The other direction: extraction may hand us the hyphenated spelling."""
+        assert mention_pattern(f"Argyn{SOFT}vost").search("the ghost of Argynvost rose")
+
+    def test_it_is_not_a_wildcard_between_words(self):
+        """`\\xad*` must not turn into 'any characters here'."""
+        assert mention_pattern("Mad Mary").search("Mad Xavier Mary") is None
+
+    def test_a_partial_word_is_still_not_a_match(self):
+        assert mention_pattern("Doru").search(f"Dor{SOFT}ugan") is None
+
+    def test_normalize_treats_the_two_spellings_as_one_name(self):
+        from backend.canon.aliases import normalize
+
+        assert normalize(f"Ismark Kol{SOFT}yanovich") == normalize("Ismark Kolyanovich")
+
+    def test_a_rendered_passage_does_not_show_it(self):
+        from backend.canon.passage import derive_passage
+
+        text = f"The priest met Ismark Kol{SOFT}yanovich outside."
+        assert SOFT not in derive_passage(text, 15)
+
+
 class TestHelpers:
     def test_fold_touches_only_the_right_single_quote(self):
         assert fold_apostrophe("Bildrath’s") == "Bildrath's"
