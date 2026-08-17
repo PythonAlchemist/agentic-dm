@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Lab</title>
+  </head>
+  <body>
+    <!-- A SECOND ENTRY POINT, not a route. The lab has its own React root and
+         shares nothing with App.tsx: no router was added, no shell was
+         restructured, and breaking the lab cannot break the campaign UI.
+         Dev: http://localhost:5173/lab.html -->
+    <div id="lab-root"></div>
+    <script type="module" src="/src/lab/main.tsx"></script>
+  </body>
+</html>

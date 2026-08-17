@@ -13,6 +13,7 @@ from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
 from backend.agents.conversation import ConversationManager, MessageRole
 from backend.agents.prompts import SYSTEM_PROMPT
 from backend.canon.retrieval import CanonRetriever, Retrieval
+from backend.core.pricing import Usage, estimate
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,16 @@ class DMResponse(BaseModel):
     tool_results: list[dict] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
+    #: Tokens the call consumed and what the rate table says that cost. Absent
+    #: on a tool command, which never reaches a model. Reported rather than
+    #: merely logged: the number that matters to somebody paying for this is the
+    #: one attached to the answer they just read.
+    usage: Optional[dict] = None
+    cost: Optional[dict] = None
+    #: What retrieval did -- which names anchored, which path answered, what the
+    #: budget cut. The dashboard shows it beside the answer so a thin answer can
+    #: be traced to thin context rather than blamed on the model.
+    retrieval: Optional[dict] = None
 
 
 class DMAgent:
@@ -35,6 +46,8 @@ class DMAgent:
         campaign_id: Optional[str] = None,
         campaign_context: Optional[dict] = None,
         canon: Optional[CanonRetriever] = None,
+        model: Optional[str] = None,
+        depth: Optional[canon_context.Depth] = None,
     ):
         """Initialize the DM Agent.
 
@@ -49,10 +62,11 @@ class DMAgent:
 
         # Initialize components
         self.openai = AsyncOpenAI(api_key=settings.openai_api_key)
-        self.model = settings.openai_model
+        self.model = model or settings.openai_model
+        self.depth = depth or canon_context.Depth()
         self.rag_pipeline = HybridRAGPipeline()
         self.tools = DMTools()
-        self.canon = canon or CanonRetriever()
+        self.canon = canon or CanonRetriever(limit=self.depth.passages)
         self.conversation = ConversationManager()
 
         # Set system prompt
@@ -304,11 +318,32 @@ class DMAgent:
         # conversation, so the model reads the book's words before the question
         # rather than after its own previous answers.
         canon_sources: list[dict] = []
+        retrieval_report: Optional[dict] = None
         if retrieval is not None:
+            shown = canon_context.apply(retrieval, self.depth)
             context.insert(
-                1, {"role": "system", "content": canon_context.render(retrieval)}
+                1,
+                {
+                    "role": "system",
+                    "content": canon_context.render(shown, max_edges=self.depth.max_edges),
+                },
             )
-            canon_sources = canon_context.sources(retrieval)
+            canon_sources = canon_context.sources(shown)
+            # Reported off the UNFILTERED retrieval on purpose: a reader needs
+            # to see that 30 proposed edges existed and were withheld, not that
+            # there were none.
+            retrieval_report = {
+                "path": retrieval.path,
+                "anchors": [f"{a.surface} → {a.name}" for a in retrieval.anchors],
+                "passages": len(shown.passages),
+                "dropped": retrieval.dropped,
+                "accepted_edges": len(retrieval.accepted),
+                "proposed_edges": len(retrieval.proposed),
+                "proposed_withheld": not self.depth.include_proposed,
+                "loose": retrieval.loose,
+                "terms": list(retrieval.terms),
+                "miss_reason": retrieval.miss_reason,
+            }
 
         # Add RAG context if available
         if rag_response and rag_response.context_used:
@@ -325,12 +360,14 @@ class DMAgent:
         # Generate response
         response = await self.openai.chat.completions.create(
             model=self.model,
-            messages=context,
+            messages=self._trim(context),
             temperature=0.5,
             max_tokens=1000,
         )
 
         message = response.choices[0].message.content
+        usage = Usage.from_response(response)
+        cost = estimate(self.model, usage)
 
         # Always generate suggestions
         suggestions = []
@@ -343,7 +380,27 @@ class DMAgent:
             query_type=rag_response.query_type if rag_response else None,
             sources=canon_sources + (rag_response.sources if rag_response else []),
             suggestions=suggestions,
+            usage={"input": usage.input_tokens, "output": usage.output_tokens,
+                   "total": usage.total},
+            cost=cost.as_dict(),
+            retrieval=retrieval_report,
         )
+
+    def _trim(self, context: list[dict]) -> list[dict]:
+        """The system messages, plus the most recent `history_turns` exchanges.
+
+        System messages are never trimmed -- they carry the canon block and the
+        instructions for reading it, and dropping either would leave the model
+        holding passages it has not been told how to treat.
+
+        Trimming from the END keeps the current question and the turns nearest
+        it. `history_turns=0` sends the question alone, which is the setting
+        that isolates one answer from everything the model has already said.
+        """
+        system = [m for m in context if m["role"] == "system"]
+        rest = [m for m in context if m["role"] != "system"]
+        keep = self.depth.history_turns * 2 + 1  # each turn is a user/assistant pair
+        return system + rest[-keep:] if keep < len(rest) else system + rest
 
     def _generate_suggestions(self, query_type: Optional[QueryType]) -> list[str]:
         """Generate contextual suggestions.

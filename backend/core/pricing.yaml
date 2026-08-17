@@ -1,0 +1,38 @@
+# Model rates, in US dollars per MILLION tokens.
+#
+# EVERY NUMBER HERE IS A CLAIM ABOUT THE OUTSIDE WORLD THAT THIS REPOSITORY
+# CANNOT CHECK. Rates change, they change without warning, and a stale rate is
+# indistinguishable from a current one once it has been multiplied by a token
+# count and shown to somebody as a dollar figure. So each model carries the date
+# its rate was last confirmed by a human, and every cost the dashboard displays
+# carries that date beside it. An estimate whose age is visible can be
+# distrusted; one without cannot.
+#
+# TO CORRECT A RATE: edit the number, set `last_verified` to today, done.
+# Nothing caches these beyond the process lifetime.
+#
+# `last_verified: null` means NOBODY HAS CHECKED. The dashboard shows the cost
+# as unverified rather than hiding it, because a model whose price is unknown is
+# still a model somebody is about to spend money on.
+
+models:
+  gpt-4o-mini:
+    label: "GPT-4o mini"
+    note: "Cheapest. The project's default everywhere else."
+    input_per_1m: 0.15
+    output_per_1m: 0.60
+    last_verified: null
+
+  gpt-4o:
+    label: "GPT-4o"
+    note: "Larger. Use to see whether a bad answer is the model or the context."
+    input_per_1m: 2.50
+    output_per_1m: 10.00
+    last_verified: null
+
+  gpt-4.1-mini:
+    label: "GPT-4.1 mini"
+    note: "Middle tier."
+    input_per_1m: 0.40
+    output_per_1m: 1.60
+    last_verified: null

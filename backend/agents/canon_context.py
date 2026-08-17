@@ -22,7 +22,46 @@ language available, with what it is worth.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
+
 from backend.canon.retrieval import PATH_TEXT, Retrieval
+
+
+@dataclass(frozen=True)
+class Depth:
+    """How much canon reaches the model.
+
+    Every field trades context against tokens, and the point of making them
+    adjustable rather than tuned once is that the trade is not the same for
+    every question -- a rules lookup needs one passage, a scene needs five.
+
+    `include_proposed` is the one that is not a size knob. Proposed edges are
+    extractor guesses, wrong about a third of the time, and excluding them asks
+    a different question: not "how much context", but "how much UNVERIFIED
+    context". Being able to turn them off and re-ask is how you find out whether
+    a bad answer came from the model or from a false edge fed to it.
+    """
+
+    passages: int = 5
+    max_edges: int = 12
+    include_proposed: bool = True
+    #: Prior turns of conversation sent with the question. 0 is a genuine
+    #: setting, not a degenerate one: it isolates a single question from
+    #: everything the model has already said about it.
+    history_turns: int = 6
+
+
+def apply(retrieval: Retrieval, depth: Depth) -> Retrieval:
+    """The retrieval as `depth` allows it to be seen.
+
+    Passage count is applied by the retriever, which knows the ranking. What is
+    applied HERE is `include_proposed`, because dropping the guesses is about
+    what the model may read, not about what the graph holds -- the retrieval
+    keeps reporting what it found either way.
+    """
+    if depth.include_proposed:
+        return retrieval
+    return replace(retrieval, proposed=())
 
 #: What the model is told about the whole block, before any of it.
 _PREAMBLE = (
