@@ -222,6 +222,7 @@ async def run(
     reject_violations: bool = False,
     corpus: str = DEFAULT_CORPUS,
     splitter: str = "depth",
+    concurrency: int = 6,
 ) -> dict:
     # Validated before the paid extraction call below: a bad --grade value
     # must fail fast, not silently score 1.00/1.00 after money is spent.
@@ -265,7 +266,7 @@ async def run(
     model = EXTRACTION_MODEL
     temperature = 0.0
     for i, seed in enumerate(seeds):
-        extractor = CandidateExtractor(seed=seed)
+        extractor = CandidateExtractor(seed=seed, concurrency=concurrency)
         s_nodes, s_edges, s_failed = await extractor.extract_units(units, layers=layers)
         sample_failures.append(s_failed)
         model, temperature = extractor.model, extractor.temperature
@@ -600,6 +601,14 @@ def build_parser() -> argparse.ArgumentParser:
     # corpus effect from a splitter effect.
     parser.add_argument("--splitter", choices=SPLITTERS, default="depth",
                         help="How to cut chapters into sections (default depth)")
+    # Measured: 841 units x 3 layers x 5 samples is 12,615 calls, and at the
+    # historical 6 that is 21 hours for the book. At 40 it is about 3. Every
+    # earlier measurement in this project ran at 6, so 6 stays the default and
+    # a faster run is an explicit choice. Raising it raises 429 risk, which
+    # `CandidateExtractor.max_retries` absorbs -- and must, because a call that
+    # runs out of retries drops its whole SAMPLE from the vote.
+    parser.add_argument("--concurrency", type=int, default=6,
+                        help="In-flight extraction calls (default 6)")
     # Free: no model, no network, no money. Exists because the area depth is
     # derived per chapter, so evidence from one chapter is not evidence about
     # the book.
@@ -638,6 +647,7 @@ def main() -> None:
                 samples=args.samples, node_k=args.node_k, edge_k=args.edge_k,
                 reject_violations=args.reject_violations,
                 corpus=args.corpus, splitter=args.splitter,
+                concurrency=args.concurrency,
             )
         )
     except ValueError as exc:

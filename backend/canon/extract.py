@@ -128,8 +128,18 @@ class CandidateExtractor:
         concurrency: int = 6,
         temperature: float = 0.0,
         seed: int = EXTRACTION_SEED,
+        max_retries: int = 6,
     ):
-        self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
+        # `max_retries` is the SDK's own backoff, raised from its default of 2.
+        # It matters MORE the higher `concurrency` goes, and it matters here in
+        # a way it would not elsewhere: a call that exhausts its retries returns
+        # `failed=True`, a sample with any failure is dropped from the vote
+        # entirely, and the verifier then refuses the chapter for `run.failed`.
+        # So one transient 429 at concurrency 40 throws away a chapter's whole
+        # extraction -- paid for, and re-run from the start.
+        self.client = client or AsyncOpenAI(
+            api_key=settings.openai_api_key, max_retries=max_retries
+        )
         self.model = model or EXTRACTION_MODEL
         self.temperature = temperature
         # Multi-sample consensus draws sample i with EXTRACTION_SEED + i. Five
