@@ -165,6 +165,10 @@ class WriteSection:
             "chapter_slug": self.chapter_slug,
             "plane": CANON_PLANE,
             "heading": self.heading,
+            # The graph-wide caption property. See `WriteNode.properties` for
+            # why every node kind carries one; here it is the heading, because
+            # a section IS its heading to a reader.
+            "display_name": self.heading,
             "index": self.index,
             "depth": self.depth,
             "parent_index": self.parent_index,
@@ -246,6 +250,12 @@ class WriteMention:
     occurrences: int
     #: Character offset of the FIRST occurrence, into the section's own text.
     offset: int
+    #: The name of the entity this mention refers to, carried for one purpose:
+    #: `display_name`. REQUIRED rather than defaulted to `""`, because a
+    #: defaulted caption is the silent-zero shape this module exists to remove
+    #: -- it would render as a blank circle and look like a styling problem
+    #: rather than a missing plumb.
+    entity_name: str
     #: Which surface forms did the naming, most-used first. Empty is impossible
     #: for a scanned mention -- something matched, or there would be no mention.
     uses: tuple[AliasUse, ...] = ()
@@ -258,12 +268,20 @@ class WriteMention:
         replace path scopes deletes on exactly that pair, and a mention that did
         not declare its chapter could not be replaced with the chapter that made
         it.
+
+        `display_name` is the ENTITY's name, not the section's. A mention hangs
+        off a section that is captioned already, so the question its own circle
+        has to answer is *who appears here* -- and `occurrences` rides along so
+        a glance distinguishes a passing reference from the section that is
+        really about someone.
         """
+        loud = f" x{self.occurrences}" if self.occurrences > 1 else ""
         return {
             "plane": CANON_PLANE,
             "chapter_slug": self.chapter_slug,
             "occurrences": self.occurrences,
             "offset": self.offset,
+            "display_name": f"{self.entity_name}{loud}",
         }
 
 
@@ -500,6 +518,7 @@ def scan_mentions(
                     chapter_slug=chapter_slug,
                     occurrences=len(spans),
                     offset=start,
+                    entity_name=entity.name,
                     # Most-used first, ties by name: a stable order, and the
                     # form the section leans on reads first.
                     uses=tuple(

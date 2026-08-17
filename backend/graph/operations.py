@@ -65,6 +65,7 @@ class CampaignGraphOps:
         CREATE (e:Entity {
             id: $id,
             name: $name,
+            display_name: $name,
             entity_type: $entity_type,
             description: $description,
             created_at: $created_at,

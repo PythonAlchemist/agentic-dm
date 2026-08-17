@@ -308,9 +308,19 @@ class WriteNode:
         harder to read than a property, and able to answer *when*. If a
         description comes back it comes back as an aggregate of the mentions,
         computed rather than overwritten.
+
+        `display_name` is a DUPLICATE of `name`, and deliberately so. It is the
+        one property every node kind in the graph carries -- `:Section` has a
+        heading, `:Mention` has neither -- which lets Neo4j Browser caption the
+        whole graph with a single rule instead of one per label. Without it
+        Browser falls back to `id`, and since every section and mention id
+        begins with the chapter slug, two-thirds of a chapter's nodes render as
+        `the-villa-ge-of-ba...`. The duplication cannot drift: both come off
+        `self.name` in this one expression.
         """
         return {
             "name": self.name,
+            "display_name": self.name,
             "plane": CANON_PLANE,
             "votes": self.votes,
             "status": self.status,
@@ -1463,9 +1473,10 @@ def _write_spine(tx, spine: "ChapterSpine") -> None:
     tx.run(
         f"""
         MERGE (b:Book {{slug:$book_slug}})
-        SET b.title = $book_title, b.plane = $plane
+        SET b.title = $book_title, b.display_name = $book_title, b.plane = $plane
         MERGE (c:Chapter {{slug:$chapter_slug}})
-        SET c.title = $chapter_title, c.index = $chapter_index, c.plane = $plane
+        SET c.title = $chapter_title, c.display_name = $chapter_title,
+            c.index = $chapter_index, c.plane = $plane
         MERGE (b)-[h:{HAS_CHAPTER}]->(c)
         SET h.index = $chapter_index
         """,
@@ -1568,7 +1579,8 @@ _BACKFILL_ALIASES = f"""
 MATCH (e:Entity {{plane:$plane}})
 WHERE e.name IS NOT NULL AND trim(e.name) <> ''
 MERGE (a:{ALIAS_LABEL} {{name:e.name}})
-SET a.normalized = toLower(trim(replace(e.name, '’', "'")))
+SET a.normalized = toLower(trim(replace(e.name, '’', "'"))),
+    a.display_name = e.name
 MERGE (a)-[r:{ALIAS_OF}]->(e)
 SET r.plane = $plane
 RETURN count(a) AS c

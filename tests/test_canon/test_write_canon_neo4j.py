@@ -905,6 +905,75 @@ class TestTheSpineInTheGraph:
         assert row["edge_index"] == 3
         assert sorted(row["sections"]) == [0, 1]
 
+    def test_every_node_a_write_creates_carries_a_caption(self, graph):
+        """The invariant the Browser stylesheet's single caption rule rests on.
+
+        Asserted over LABELS DISCOVERED IN THE GRAPH rather than a list written
+        here, so a node kind added later fails this test instead of quietly
+        rendering as a bare id. That is the whole point: an enumerated list
+        would have to be remembered, and the thing being guarded against is
+        precisely forgetting.
+        """
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            eva,
+            sections=[prose(0, "Section 0", f"{named('Madam Eva')} reads the cards.")],
+        ))
+
+        missing = graph.run(
+            """
+            MATCH (n)
+            WHERE (n.chapter_slug = $slug OR n.slug = $slug OR n.slug = $book
+                   OR (n:Alias AND n.name STARTS WITH $marker))
+              AND (n.display_name IS NULL OR trim(n.display_name) = '')
+            RETURN collect(DISTINCT labels(n)) AS labels
+            """,
+            {"slug": CHAPTER_A, "book": TEST_BOOK, "marker": NAME_MARKER},
+        ).single()["labels"]
+        assert missing == []
+
+    def test_a_caption_says_what_the_node_is(self, graph):
+        """One assertion per node kind, because "non-empty" is not "right"."""
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            eva,
+            sections=[prose(0, "The Old Bonegrinder",
+                            f"{named('Madam Eva')} reads. {named('Madam Eva')} waits.")],
+        ))
+
+        row = graph.run(
+            """
+            MATCH (b:Book {slug:$book})-[:HAS_CHAPTER]->(c:Chapter {slug:$slug})
+                  -[:HAS_SECTION]->(s:Section)<-[:IN_SECTION]-(m:Mention)
+                  -[:REFERS_TO]->(e:Entity)
+            MATCH (a:Alias)-[:ALIAS_OF]->(e)
+            RETURN b.display_name AS book, c.display_name AS chapter,
+                   s.display_name AS section, m.display_name AS mention,
+                   e.display_name AS entity, a.display_name AS alias
+            """,
+            {"book": TEST_BOOK, "slug": CHAPTER_A},
+        ).single()
+        assert row["book"] == "A Test Book"
+        assert row["chapter"] == "A Test Chapter"
+        assert row["section"] == "The Old Bonegrinder"
+        assert row["entity"] == named("Madam Eva")
+        assert row["alias"] == named("Madam Eva")
+        # The entity, plus how loudly this section names it.
+        assert row["mention"] == f"{named('Madam Eva')} x2"
+
+    def test_a_mention_named_once_carries_no_count(self, graph):
+        """`x1` on every quiet mention would be noise on the majority of nodes."""
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            eva,
+            sections=[prose(0, "Section 0", f"{named('Madam Eva')} reads the cards.")],
+        ))
+        caption = graph.run(
+            "MATCH (m:Mention {chapter_slug:$slug}) RETURN m.display_name AS d",
+            {"slug": CHAPTER_A},
+        ).single()["d"]
+        assert caption == named("Madam Eva")
+
     def test_a_section_carries_the_text_a_mention_quotes(self, graph):
         write(graph, CHAPTER_A, [node("Church")], [], chapter_spine=spine(
             sections=[prose(0, "Section 0", f"The {named('Church')} stands in fog.")],
@@ -1149,6 +1218,7 @@ class TestSilentNoOpsRaise:
             chapter_slug=CHAPTER_A,
             occurrences=1,
             offset=0,
+            entity_name=named("Nobody"),
         )
         with pytest.raises(ValueError, match="mention endpoint missing"):
             graph.execute_write(_write_mention, orphan)
@@ -1385,13 +1455,15 @@ def _scan(graph, chapter_slug: str):
             chapter_slug=chapter_slug,
             occurrences=r["occurrences"],
             offset=r["offset"],
+            entity_name=r["entity_name"],
         )
         for r in graph.run(
             """
             MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention {chapter_slug:$slug})
                   -[:IN_SECTION]->(s:Section)
             RETURN m.id AS id, e.id AS entity, s.id AS section,
-                   m.occurrences AS occurrences, m.offset AS offset
+                   m.occurrences AS occurrences, m.offset AS offset,
+                   e.name AS entity_name
             """,
             {"slug": chapter_slug},
         )

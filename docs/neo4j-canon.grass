@@ -1,0 +1,195 @@
+/* Curse of Strahd canon graph — Neo4j Browser stylesheet.
+ *
+ * Load it: drag this file onto the Neo4j Browser window, or run `:style` and
+ * use the import control. `:style reset` puts the defaults back.
+ *
+ * Note on multi-label nodes: a node like Chapel carries :Entity:LOCATION:AREA,
+ * and Browser styles it with ONE of those. It picks whichever label chip is
+ * selected in the legend at the top of the result pane, so click AREA (or
+ * LOCATION) once per session if Entity wins. There is deliberately no
+ * node.Entity rule below, which makes the specific label the interesting one.
+ *
+ * Location shades run light -> dark as you descend the hierarchy:
+ * REGION > SETTLEMENT > SITE > AREA.
+ *
+ * Captions come from `display_name`, which EVERY node in the graph carries --
+ * an entity's name, a section's heading, a chapter's title, the entity a
+ * mention refers to. One rule, no per-label exceptions. Without it Browser
+ * falls back to `id`, and since section and mention ids begin with the chapter
+ * slug, most of a chapter renders as `the-villa-ge-of-ba...`.
+ */
+
+node {
+  diameter: 50px;
+  color: #A5ABB6;
+  border-color: #9AA1AC;
+  border-width: 2px;
+  text-color-internal: #FFFFFF;
+  font-size: 10px;
+  caption: "{display_name}";
+}
+
+relationship {
+  color: #A5ABB6;
+  shaft-width: 1px;
+  font-size: 8px;
+  padding: 3px;
+  text-color-external: #000000;
+  text-color-internal: #FFFFFF;
+  caption: "<type>";
+}
+
+/* ---- places, light to dark by depth ---------------------------------- */
+
+node.REGION {
+  color: #D9EAD3;
+  border-color: #B6D7A8;
+  text-color-internal: #2A3B22;
+  diameter: 80px;
+}
+
+node.SETTLEMENT {
+  color: #A8D5A2;
+  border-color: #85BC7E;
+  text-color-internal: #1E2E19;
+  diameter: 65px;
+}
+
+node.SITE {
+  color: #6AA84F;
+  border-color: #52803C;
+  diameter: 55px;
+}
+
+node.AREA {
+  color: #38761D;
+  border-color: #274F14;
+  diameter: 45px;
+}
+
+node.WILD {
+  color: #7A9A6B;
+  border-color: #5E7752;
+  diameter: 55px;
+}
+
+/* Fallback for locations not yet given a subtype. */
+node.LOCATION {
+  color: #8FBC8F;
+  border-color: #6B926B;
+  diameter: 50px;
+}
+
+/* ---- people and things ------------------------------------------------ */
+
+node.NPC {
+  color: #C74440;
+  border-color: #A33632;
+  diameter: 55px;
+}
+
+node.MONSTER {
+  color: #7B2D26;
+  border-color: #5C211C;
+  diameter: 50px;
+}
+
+node.FACTION {
+  color: #8E7CC3;
+  border-color: #6F5FA0;
+  diameter: 55px;
+}
+
+node.ITEM {
+  color: #E0A106;
+  border-color: #B58205;
+  text-color-internal: #2B1E00;
+  diameter: 40px;
+}
+
+node.LORE {
+  color: #4A86C8;
+  border-color: #3A6A9E;
+  diameter: 40px;
+}
+
+node.QUEST {
+  color: #E8710A;
+  border-color: #BA5A08;
+  diameter: 50px;
+}
+
+node.EVENT {
+  color: #C27BA0;
+  border-color: #9C6280;
+  diameter: 45px;
+}
+
+node.SETTING {
+  color: #B7B7B7;
+  border-color: #949494;
+  diameter: 60px;
+}
+
+/* ---- structure --------------------------------------------------------- */
+
+node.Book {
+  color: #1F1F1F;
+  border-color: #000000;
+  diameter: 80px;
+}
+
+node.Chapter {
+  color: #434343;
+  border-color: #2B2B2B;
+  diameter: 70px;
+}
+
+node.Section {
+  color: #6E6E6E;
+  border-color: #4F4F4F;
+  diameter: 45px;
+}
+
+/* A mention is captioned with the ENTITY it refers to, plus x<n> when the
+ * section names it more than once. The section it hangs off is captioned
+ * already, so the question this circle answers is who appears here. */
+node.Mention {
+  color: #CFCFCF;
+  border-color: #A8A8A8;
+  text-color-internal: #333333;
+  diameter: 25px;
+}
+
+node.Alias {
+  color: #EFEFEF;
+  border-color: #C4C4C4;
+  text-color-internal: #333333;
+  diameter: 30px;
+}
+
+/* ---- relationships ----------------------------------------------------- */
+
+/* Deterministic structure — the edges worth trusting. */
+relationship.CONTAINS   { color: #38761D; shaft-width: 3px; }
+relationship.LOCATED_IN { color: #6AA84F; shaft-width: 2px; }
+relationship.CONNECTED_TO { color: #8FBC8F; shaft-width: 2px; }
+
+/* Provenance — deterministic and unfalsifiable. */
+relationship.MENTIONED_IN { color: #CFCFCF; shaft-width: 1px; }
+relationship.REFERS_TO    { color: #CFCFCF; shaft-width: 1px; }
+relationship.ALIAS_OF     { color: #C4C4C4; shaft-width: 1px; }
+
+/* The reveal-critical one. */
+relationship.IDENTITY_OF { color: #E8710A; shaft-width: 3px; }
+
+/* Social and narrative — model output, roughly a third false. */
+relationship.RELATED_TO { color: #C74440; shaft-width: 2px; }
+relationship.KNOWS      { color: #D68A87; }
+relationship.SEEKS      { color: #E8710A; }
+relationship.THREATENS  { color: #7B2D26; }
+relationship.OPPOSES    { color: #7B2D26; }
+relationship.SERVES     { color: #8E7CC3; }
+relationship.MEMBER_OF  { color: #8E7CC3; }
+relationship.OWNS       { color: #E0A106; }
+relationship.GUARDS     { color: #B58205; }

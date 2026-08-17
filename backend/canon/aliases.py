@@ -87,8 +87,13 @@ class WriteAlias:
 
     @property
     def properties(self) -> dict:
-        """What lands on the node. `name` is the MERGE key, so it is not here."""
-        return {"normalized": self.normalized}
+        """What lands on the node. `name` is the MERGE key, so it is not here.
+
+        `display_name` restates the merge key, which is the one place in the
+        graph where that is redundant -- and it is written anyway, because the
+        value of a single Browser caption rule is that it has no exceptions.
+        """
+        return {"normalized": self.normalized, "display_name": self.name}
 
 
 def _forms(name: str, authored: Sequence[str]) -> list[str]:
