@@ -1,9 +1,19 @@
 """Turn a DM's question into search terms, by stripping what every question says.
 
-Only used by the TEXT FALLBACK. A question that names something the graph knows
-never reaches here -- resolution through `:Alias` is a fact, and this module
-produces a guess. Keeping the two apart is what lets a miss be diagnosed as
-"named nothing" rather than "ranked badly".
+Two callers, and the difference between them is the difference between choosing
+an answer and ordering one.
+
+`lucene_query` serves the TEXT FALLBACK, which is reached only when a question
+names nothing: there, these terms decide WHICH sections come back at all.
+
+`terms_present` serves the GRAPH path, where the anchors have already decided
+which sections are eligible and these terms only decide what a DM reads first.
+That is why the graph path can use a guess without becoming one -- the candidate
+set is still every section that mentions a resolved name, and no term can add a
+section or remove one. It was worth adding because ranking on anchor
+occurrences alone throws away every word of the question that is not a name:
+"who are Strahd's undead enemies" ranked the answer ninth while `undead` and
+`enemies` sat unused, and the gold section says almost exactly those words.
 
 WHY STRIP AT ALL, when Lucene already has a stopword list. Because a DM's
 question carries a second layer of noise that no general analyzer knows about:
@@ -20,6 +30,7 @@ rule a reader can check beats a rule that is merely general.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 #: Interrogatives and the grammar that carries them. Removed as WORDS.
 _QUESTION_WORDS = frozenset(
@@ -69,6 +80,29 @@ def content_terms(question: str) -> list[str]:
             continue
         seen.setdefault(word, None)
     return list(seen)
+
+
+def terms_present(text: str, terms: Iterable[str]) -> int:
+    """How many of `terms` appear in `text` as whole words. Case-folded always.
+
+    A DIFFERENT OPERATION FROM `spine.mention_pattern`, and deliberately not
+    routed through it. That function attributes a NAME to a span, where case is
+    evidence: a capitalised single word in prose is a proper noun, which is what
+    keeps the LORE entity `Light` off every lit torch. These are ordinary
+    content words -- `undead`, `pastries`, `roll` -- carrying no such signal, and
+    a case-sensitive pass over them would score a section lower for starting a
+    sentence with the word.
+
+    It is also SCORING rather than attribution. Nothing here decides what a
+    passage is about; it decides which of several passages a DM sees first, and
+    a wrong answer is a worse ordering rather than a false fact in the graph.
+    """
+    folded = text.lower()
+    return sum(
+        1
+        for term in terms
+        if re.search(rf"(?<![^\W_]){re.escape(term)}(?![^\W_])", folded)
+    )
 
 
 def lucene_query(terms: list[str]) -> str:

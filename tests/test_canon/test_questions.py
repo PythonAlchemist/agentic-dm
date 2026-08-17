@@ -1,6 +1,6 @@
 """Turning a DM's question into search terms."""
 
-from backend.canon.questions import content_terms, lucene_query
+from backend.canon.questions import content_terms, lucene_query, terms_present
 
 
 class TestContentTerms:
@@ -44,6 +44,30 @@ class TestContentTerms:
         query is a syntax error, not an empty result set."""
         assert content_terms("What is it?") == []
         assert content_terms("") == []
+
+
+class TestTermsPresent:
+    def test_it_counts_distinct_terms_not_occurrences(self):
+        """One section saying `undead` five times is not five times as relevant
+        as one saying it once -- and treating it so is the raw-occurrence defect
+        this signal was added to counter."""
+        assert terms_present("undead undead undead enemies", ["undead", "enemies"]) == 2
+
+    def test_it_is_case_folded_unlike_the_name_matcher(self):
+        """Case is evidence for a NAME and noise for an ordinary word: a section
+        must not score lower for starting a sentence with it."""
+        assert terms_present("Undead walk here", ["undead"]) == 1
+
+    def test_it_is_whole_word(self):
+        assert terms_present("the deadline passed", ["dead"]) == 0
+
+    def test_a_term_the_text_lacks_counts_nothing(self):
+        assert terms_present("nothing relevant", ["undead"]) == 0
+
+    def test_regex_characters_in_a_term_are_matched_literally(self):
+        """`E5f.` is an ordinary thing for a DM to type."""
+        assert terms_present("see area E5f. for details", ["e5f"]) == 1
+        assert terms_present("anything at all", ["a.*"]) == 0
 
 
 class TestLuceneQuery:
