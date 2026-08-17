@@ -39,3 +39,6 @@ htmlcov/
 # Misc
 *.log
 .DS_Store
+
+# Scratch worktrees created by subagent runs — one per dispatched agent.
+.claude/worktrees/
