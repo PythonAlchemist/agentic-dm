@@ -12,7 +12,7 @@ import pytest
 
 from backend.canon.aliases import WriteAlias
 from backend.canon.models import Section
-from backend.canon.retrieval import CanonRetriever, find_names
+from backend.canon.retrieval import CanonRetriever, dedupe_edges, find_names
 from backend.canon.spine import ChapterSpine, WriteSection
 from backend.canon.writer import WriteNode, ensure_schema, write_chapter
 from backend.core.database import neo4j_session
@@ -68,6 +68,51 @@ class TestFindingNamesInAQuestion:
         """A name folding to nothing compiles to a pattern matching at every
         position, which is the one way this could anchor once per character."""
         assert find_names("Who is Ismark?", ["", "   "]) == []
+
+
+class TestDedupingEdges:
+    """`EDGES` reads both directions on purpose -- half of what a DM wants about
+    an NPC is written with the NPC as the target. When BOTH endpoints are
+    anchors, that returns each edge twice."""
+
+    def test_the_same_edge_seen_from_both_ends_is_one_row(self):
+        rows = [
+            {"entity": "Mirabel", "relationship": "OWNS", "other": "Tavern",
+             "direction": "out", "status": "accepted"},
+            {"entity": "Tavern", "relationship": "OWNS", "other": "Mirabel",
+             "direction": "in", "status": "accepted"},
+        ]
+        assert len(dedupe_edges(rows)) == 1
+
+    def test_the_surviving_row_keeps_its_own_direction(self):
+        """`_edge_line` flips an inbound row when rendering, so a survivor that
+        lost its direction would have its arrow written backwards -- and
+        reversal is one of the extractor's measured failure modes."""
+        rows = [
+            {"entity": "Tavern", "relationship": "OWNS", "other": "Mirabel",
+             "direction": "in", "status": "accepted"},
+        ]
+        assert dedupe_edges(rows)[0]["direction"] == "in"
+
+    def test_two_genuinely_different_edges_both_survive(self):
+        rows = [
+            {"entity": "Mirabel", "relationship": "OWNS", "other": "Tavern",
+             "direction": "out", "status": "accepted"},
+            {"entity": "Sorvia", "relationship": "OWNS", "other": "Tavern",
+             "direction": "out", "status": "accepted"},
+        ]
+        assert len(dedupe_edges(rows)) == 2
+
+    def test_opposite_claims_between_one_pair_are_not_collapsed(self):
+        """`A SEEKS B` and `B SEEKS A` are different claims about the same two
+        nodes. Both are outbound, so nothing about direction makes them one."""
+        rows = [
+            {"entity": "Strahd", "relationship": "SEEKS", "other": "Ireena",
+             "direction": "out", "status": "proposed"},
+            {"entity": "Ireena", "relationship": "SEEKS", "other": "Strahd",
+             "direction": "out", "status": "proposed"},
+        ]
+        assert len(dedupe_edges(rows)) == 2
 
 
 class TestScoring:
@@ -332,6 +377,31 @@ class TestRetrievingFromTheGraph:
         assert result.path == "text"
         assert result.terms == ("capital", "france")
         assert all(p.score is not None for p in result.passages)
+
+    def test_the_text_path_still_carries_what_the_graph_knows(self, written):
+        """The defect a real question exposed.
+
+        Asked "who owns the tavern" -- which names nothing, `tavern` being a
+        common noun nobody should alias -- the text path found section E2,
+        exactly the right section, and returned prose alone. Three `OWNS` edges
+        a human had accepted about that very room never reached the model, which
+        answered that the canon did not cover it.
+
+        Which sections to read is still a guess and still labelled `text`. What
+        the graph knows about the entities in them is not a guess.
+        """
+        result = CanonRetriever().retrieve("who listens below")
+        assert result.path == "text"
+        assert result.accepted or result.proposed, (
+            "a section retrieved by text must still bring its entities' edges"
+        )
+
+    def test_the_text_path_honours_the_passage_width(self, written):
+        """It used to call `derive_passage` directly and always send one
+        sentence, silently ignoring the setting."""
+        wide = CanonRetriever(passage_width="section").retrieve("who listens below")
+        narrow = CanonRetriever(passage_width="sentence").retrieve("who listens below")
+        assert len(wide.passages[0].text) > len(narrow.passages[0].text)
 
     def test_a_graph_passage_carries_no_score(self, written):
         """`None`, not `0.0`. A name match has no score, and a zero would read
