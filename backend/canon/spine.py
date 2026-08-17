@@ -373,7 +373,7 @@ def plan_spine(
     )
 
 
-def mention_pattern(name: str) -> re.Pattern[str] | None:
+def mention_pattern(name: str, *, fold_case: bool = False) -> re.Pattern[str] | None:
     """The one matcher. Whole-word, exact, and case-folded only when multi-word.
 
     Lookarounds rather than `\\b`, because a name can end in a character `\\b`
@@ -395,6 +395,19 @@ def mention_pattern(name: str) -> re.Pattern[str] | None:
     capitalisation of a multi-word name is not stable, so requiring the
     extractor's casing would drop real appearances.
 
+    `fold_case` DROPS the single-word case rule, and NOTHING IN THE SCAN MAY
+    PASS IT. It exists for one caller: matching names inside a QUESTION someone
+    typed. The case rule above is an inference about PROSE -- a capitalised word
+    in running text is a proper noun -- and that inference is simply false about
+    a question, where nobody types "who is Strahd" with the capitals in the
+    right places. Measured on the evaluation set: three questions naming
+    `Trapdoor`, `Office` and `Cemetery` in lowercase resolved to nothing at all.
+
+    It is a parameter here rather than a second regex in the calling module
+    because there must stay exactly ONE definition of "this name appears in this
+    text". The rule that varies is which signal the caller's text carries, not
+    what a match is.
+
     Returns None for a name with nothing in it. A name that folds to the empty
     string would compile to a pattern matching at every position in every
     section, which is the one way this scan could produce a mention per
@@ -403,7 +416,7 @@ def mention_pattern(name: str) -> re.Pattern[str] | None:
     folded = fold_apostrophe(name).strip()
     if not folded:
         return None
-    flags = 0 if len(folded.split()) == 1 else re.IGNORECASE
+    flags = re.IGNORECASE if fold_case or len(folded.split()) > 1 else 0
     return re.compile(rf"(?<!{WORD_CHAR}){re.escape(folded)}(?!{WORD_CHAR})", flags)
 
 
