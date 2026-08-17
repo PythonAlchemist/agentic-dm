@@ -1,0 +1,172 @@
+# Retrieval evaluation set for the canon graph.
+#
+# HOW THIS WAS BUILT, BECAUSE IT DETERMINES WHETHER THE NUMBERS MEAN ANYTHING.
+# Every question was written while reading `data/ddb/cos/*.md`, BEFORE running
+# retrieval and without checking what the graph contains. Questions authored
+# against the graph would measure nothing: recall is monotone in what you ask
+# for, and this project has already watched a ten-line regex outscore the tuned
+# pipeline on every recall number by exploiting exactly that.
+#
+# GOLD IS IDS, NEVER PROSE. `sections` names the passage a DM would have to
+# read to answer the question. It is checkable mechanically, needs no judge,
+# and keeps copyrighted book text out of the repository. `note` paraphrases the
+# answer for a human reviewing this file; nothing scores against it.
+#
+# `anchor_hint` is the name a reader would expect the question to resolve
+# through. It is DIAGNOSTIC ONLY and never scored -- it is there so a miss can
+# be read as "the anchor never resolved" rather than just "missed".
+#
+# Coverage is the three written chapters. Two questions at the end name nothing
+# the graph can anchor on; they are kept deliberately, because a retrieval
+# system that cannot say "I have no handle on this" is worse than one that can.
+
+questions:
+  - id: q01
+    question: "Who runs the general store in the village, and what does he charge?"
+    sections: ["cos:the-village-of-barovia#4"]
+    anchor_hint: "Bildrath's Mercantile"
+    note: "Bildrath Cantemir; ten times list price, and he never bargains."
+
+  - id: q02
+    question: "Who is Ismark and what does he want from the party?"
+    sections: ["cos:the-village-of-barovia#5"]
+    anchor_hint: "Ismark"
+    note: "The burgomaster's son; wants help escorting Ireena to Vallaki."
+
+  - id: q03
+    question: "Who owns the Blood of the Vine Tavern?"
+    sections: ["cos:the-village-of-barovia#5"]
+    anchor_hint: "Blood of the Vine Tavern"
+    note: "Three Vistani: Alenka, Mirabel and Sorvia."
+
+  - id: q04
+    question: "What is wrong with Mad Mary?"
+    sections: ["cos:the-village-of-barovia#6"]
+    anchor_hint: "Mad Mary"
+    note: "Her daughter Gertruda broke out a week ago and is missing."
+
+  - id: q05
+    question: "Who made the doll Mad Mary is clutching?"
+    sections: ["cos:the-village-of-barovia#6"]
+    anchor_hint: "Mad Mary's Townhouse"
+    note: "Gadof Blinsky, the toymaker of Vallaki."
+
+  - id: q06
+    question: "How do the characters get Ireena to open the mansion door?"
+    sections: ["cos:the-village-of-barovia#7"]
+    anchor_hint: "Ireena Kolyana"
+    note: "Convince her they serve Strahd in no way, or a DC 15 Charisma check, or arrive with Ismark."
+
+  - id: q07
+    question: "Who is Ireena's brother?"
+    sections: ["cos:the-village-of-barovia#5", "cos:the-village-of-barovia#7"]
+    anchor_hint: "Ireena Kolyana"
+    note: "Ismark Kolyanovich, her adopted brother."
+
+  - id: q08
+    question: "Why is Doru locked in the undercroft?"
+    sections: ["cos:the-village-of-barovia#14", "cos:the-village-of-barovia#15"]
+    anchor_hint: "Doru"
+    note: "He stormed the castle, came back a vampire spawn, and his father trapped him."
+
+  - id: q09
+    question: "What is Donavich praying for?"
+    sections: ["cos:the-village-of-barovia#14"]
+    anchor_hint: "Donavich"
+    note: "That the gods show him how to save Doru without destroying him."
+
+  - id: q10
+    question: "How do the characters open the trapdoor in the church?"
+    sections: ["cos:the-village-of-barovia#12"]
+    anchor_hint: "Trapdoor"
+    note: "The padlocked chain must come off, then a DC 12 Strength check; it is swollen in its frame."
+
+  - id: q11
+    question: "What is in the cabinet in the church office?"
+    sections: ["cos:the-village-of-barovia#13"]
+    anchor_hint: "Office"
+    note: "A tinderbox, boxes of candles, and two books -- one of them on the Ulmist Inquisition."
+
+  - id: q12
+    question: "What happens at the cemetery at midnight?"
+    sections: ["cos:the-village-of-barovia#20"]
+    anchor_hint: "Cemetery"
+    note: "A hundred spirits of dead adventurers march up the road to Castle Ravenloft."
+
+  - id: q13
+    question: "Who is the old woman selling pastries in the village?"
+    sections: ["cos:the-village-of-barovia#21"]
+    anchor_hint: "Morgantha"
+    note: "Morgantha, a night hag from Old Bonegrinder, at 1 gp apiece."
+
+  - id: q14
+    question: "What does Morgantha do with the child she takes?"
+    sections: ["cos:the-village-of-barovia#21"]
+    anchor_hint: "Morgantha"
+    note: "Straps Lucian Jarov to her cart and carries him back to Old Bonegrinder."
+
+  - id: q15
+    question: "Where did Kolyan find Ireena?"
+    sections: ["cos:the-village-of-barovia#14"]
+    anchor_hint: "Kolyan Indirovich"
+    note: "At the edge of the Svalich Woods near the Pillarstone of Ravenloft; she is adopted."
+
+  - id: q16
+    question: "What do I roll to see who is living in a random village house?"
+    sections: ["cos:the-village-of-barovia#2"]
+    anchor_hint: "House Occupants"
+    note: "A d20: rats, Barovian villagers, or Strahd zombies."
+
+  - id: q17
+    question: "Why does Strahd want Ireena?"
+    sections: ["cos:the-village-of-barovia#0"]
+    anchor_hint: "Strahd von Zarovich"
+    note: "She carries the soul of Tatyana and looks exactly like her."
+
+  - id: q18
+    question: "Where does Ismark want to take Ireena, and why there?"
+    sections: ["cos:the-village-of-barovia#5"]
+    anchor_hint: "Vallaki"
+    note: "Vallaki -- out of sight of Castle Ravenloft and, he hopes, out of Strahd's reach."
+
+  - id: q19
+    question: "Who is Parriwimple?"
+    sections: ["cos:the-village-of-barovia#4"]
+    anchor_hint: "Bildrath's Mercantile"
+    note: "Bildrath's nephew and stock-boy; gladiator statistics, Intelligence 6, no shield."
+
+  - id: q20
+    question: "Who is lying in the coffin in the burgomaster's mansion?"
+    sections: ["cos:the-village-of-barovia#7"]
+    anchor_hint: "Burgomaster's Mansion"
+    note: "Kolyan Indirovich, dead three days; Ismark and Ireena built the coffin."
+
+  - id: q21
+    question: "Where are the Vistani camps?"
+    sections: ["cos:the-village-of-barovia#21"]
+    anchor_hint: "Vistani"
+    note: "Tser Pool to the west, and another on the outskirts of Vallaki."
+
+  - id: q22
+    question: "Who are Strahd's undead enemies in Barovia?"
+    sections: ["cos:the-village-of-barovia#21"]
+    anchor_hint: "Order of the Silver Dragon"
+    note: "The revenant knights of the Order of the Silver Dragon, at a ruined mansion west of Vallaki."
+
+  # -- deliberately unanchorable -----------------------------------------
+  # These name no entity. They are here so the harness can distinguish "the
+  # question gave retrieval nothing to hold" from "retrieval had a handle and
+  # ranked the answer badly" -- two failures that a single recall number would
+  # blur into one.
+
+  - id: q23
+    question: "How should I set the tone when running this adventure?"
+    sections: ["cos:introduction#5"]
+    anchor_hint: ""
+    note: "The Marks of Horror section. Names no entity; expected to fail to anchor."
+
+  - id: q24
+    question: "What level should the characters be when they start?"
+    sections: ["cos:introduction#4"]
+    anchor_hint: ""
+    note: "The Character Levels section. Names no entity; expected to fail to anchor."
