@@ -216,7 +216,7 @@ class TestCombiningTheTwoPaths:
 
 
 def _row(qid: str, *, anchored: bool, hit: bool, rr: float, path: str,
-         hit_path: str = "") -> dict:
+         hit_path: str = "", needs: str = "") -> dict:
     """One scored question, as `score` would emit it.
 
     `hit_path` defaults to empty -- no path answered -- so a row declared as a
@@ -224,7 +224,7 @@ def _row(qid: str, *, anchored: bool, hit: bool, rr: float, path: str,
     which path earned it.
     """
     return {"id": qid, "anchored": anchored, "hit": hit, "rr": rr,
-            "path": path, "hit_path": hit_path}
+            "path": path, "hit_path": hit_path, "needs": needs}
 
 
 class TestScoring:
@@ -312,6 +312,52 @@ class TestScoring:
         result = Retrieval(question="q", passages=(_p("cos:x#1"),))
         row = score({"id": "q1", "question": "q", "sections": ["cos:x#9"]}, result)
         assert row["hit_path"] == ""
+
+    def test_an_unlabelled_question_is_in_no_needs_bucket(self):
+        """Set one predates `needs` and is deliberately not backfilled: a label
+        assigned to a question whose result you have already seen produces a
+        prediction that cannot be wrong."""
+        rows = [_row("q1", anchored=True, hit=True, rr=1.0, path="graph",
+                     hit_path="graph")]
+        assert summarize(rows)["by_needs"] == {}
+
+    def test_a_prediction_is_counted_against_what_happened(self):
+        """`needs: graph` claims a resolved name will answer. A `graph` question
+        that Lucene answered is the disagreement worth seeing, and it has to
+        survive into the summary rather than being folded into one recall."""
+        rows = [
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph",
+                 hit_path="graph", needs="graph"),
+            _row("q2", anchored=True, hit=True, rr=1.0, path="graph",
+                 hit_path="text", needs="graph"),
+            _row("q3", anchored=False, hit=False, rr=0.0, path="text",
+                 needs="graph"),
+        ]
+        stat = summarize(rows)["by_needs"]["graph"]
+        assert stat == {"n": 3, "hits": 2, "answered_by_graph": 1,
+                        "answered_by_text": 1, "anchored": 2}
+
+    def test_a_text_question_that_anchored_is_visible(self):
+        """The other direction: `needs: text` claims the question names nothing
+        the graph holds. Six did anyway -- on `wagon`, `Gatehouse` and
+        `vampire` -- and that is a defect in the graph, not in the label."""
+        rows = [
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph",
+                 hit_path="graph", needs="text"),
+        ]
+        assert summarize(rows)["by_needs"]["text"]["anchored"] == 1
+
+    def test_the_buckets_do_not_bleed_into_each_other(self):
+        rows = [
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph",
+                 hit_path="graph", needs="graph"),
+            _row("q2", anchored=False, hit=True, rr=1.0, path="text",
+                 hit_path="text", needs="text"),
+        ]
+        by_needs = summarize(rows)["by_needs"]
+        assert by_needs["graph"]["n"] == 1
+        assert by_needs["text"]["n"] == 1
+        assert "either" not in by_needs
 
     def test_a_hit_is_membership_not_position(self):
         from backend.canon.retrieval import Passage, Retrieval

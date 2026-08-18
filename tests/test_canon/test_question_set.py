@@ -47,6 +47,26 @@ class TestTheLabelsAreWellFormed:
         anybody, including the person who wrote it."""
         assert not [q["id"] for q in questions if not q.get("note", "").strip()]
 
+    def test_the_needs_label_is_one_of_the_three(self, questions):
+        """A typo would silently drop a question out of every prediction bucket
+        and out of the totals that are supposed to add up to the labelled set."""
+        bad = [
+            (q["id"], q["needs"])
+            for q in questions
+            if "needs" in q and q["needs"] not in ("graph", "text", "either")
+        ]
+        assert not bad
+
+    def test_a_question_predicting_text_names_no_anchor_hint(self, questions):
+        """`needs: text` claims the question names nothing the graph holds, so
+        supplying the name a reader would resolve through contradicts it. The
+        two fields would then disagree about the same question."""
+        assert not [
+            q["id"]
+            for q in questions
+            if q.get("needs") == "text" and q.get("anchor_hint")
+        ]
+
     def test_a_gold_section_id_looks_like_one(self, questions):
         bad = [
             (q["id"], s)

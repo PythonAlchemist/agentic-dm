@@ -67,6 +67,12 @@ def score(question: dict, result: Retrieval) -> dict:
     hit = any(section_id in gold for section_id in retrieved)
     return {
         "hit_path": hit_path(result, gold),
+        # The author's PREDICTION about which path should answer, written from
+        # the book before anything was run. Empty for set one, which predates
+        # the field -- and deliberately NOT backfilled, because assigning a
+        # label to a question whose result you have already seen produces a
+        # prediction that cannot be wrong.
+        "needs": question.get("needs", ""),
         "id": question["id"],
         "question": question["question"],
         "gold": gold,
@@ -124,6 +130,24 @@ def summarize(rows: list[dict]) -> dict:
             path: sum(1 for r in rows if r["hit_path"] == path)
             for path in ("graph", "text")
         },
+        # The prediction against the outcome. `needs: graph` claims the question
+        # names something the graph holds and that a resolved name will answer
+        # it; `needs: text` claims it names nothing and the index must. Each
+        # disagreement is a fact no aggregate recall shows -- a `graph` question
+        # answered by Lucene means the name bought nothing, and a `text`
+        # question that anchored means the graph holds a name I did not think
+        # it had.
+        "by_needs": {
+            needs: {
+                "n": len(group),
+                "hits": sum(1 for r in group if r["hit"]),
+                "answered_by_graph": sum(1 for r in group if r["hit_path"] == "graph"),
+                "answered_by_text": sum(1 for r in group if r["hit_path"] == "text"),
+                "anchored": sum(1 for r in group if r["anchored"]),
+            }
+            for needs in ("graph", "text", "either")
+            if (group := [r for r in rows if r["needs"] == needs])
+        },
     }
 
 
@@ -150,7 +174,20 @@ def render(rows: list[dict], summary: dict, *, verbose: bool) -> str:
     out.append("  hits, by the passage that answered")
     out.append(f"    {'a resolved name':<18} {summary['by_answer']['graph']}")
     out.append(f"    {'a Lucene score':<18} {summary['by_answer']['text']}")
-    out.append("")
+    if summary["by_needs"]:
+        out.append("  the prediction against the outcome")
+        out.append(
+            f"    {'needs':<8} {'n':>3} {'hit':>5} {'anchored':>9} "
+            f"{'ans:graph':>10} {'ans:text':>9}"
+        )
+        for needs, stat in summary["by_needs"].items():
+            out.append(
+                f"    {needs:<8} {stat['n']:>3} {stat['hits']:>5} "
+                f"{stat['anchored']:>9} {stat['answered_by_graph']:>10} "
+                f"{stat['answered_by_text']:>9}"
+            )
+        out.append("")
+
     out.append(f"  questions            {summary['total']}")
     out.append(f"  anchored             {summary['anchored']}/{summary['total']}")
     out.append(f"  recall (all)         {summary['recall_overall']:.0%}")

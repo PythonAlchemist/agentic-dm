@@ -371,3 +371,384 @@ questions:
     anchor_hint: "Lich's Lair"
     note: "The lich's lair: a decrepit skeleton amid royal furnishings, asking if it knows you."
 
+
+  # ====================================================================
+  # SET TWO, authored 2026-08-18. Fifty questions carrying a `needs`
+  # field, over the twelve chapters set one never touched.
+  #
+  # WHY THE SECOND SET EXISTS. Set one measures ONE NUMBER over a mixed
+  # bag, and 22 of its 51 gold references are in a single chapter. It
+  # cannot answer the question that now matters most: which PATH is
+  # earning its keep. The text index alone outscores the graph path on
+  # section recall, the graph path reaches none of the misses at any
+  # depth, and neither fact says whether the two are good at DIFFERENT
+  # things or whether one is redundant.
+  #
+  # `needs` IS A PREDICTION, MADE BEFORE RUNNING ANYTHING:
+  #
+  #   graph   the question names a proper noun the graph should hold, and
+  #           the answer lives in a section that name reaches. Its other
+  #           words are mostly absent from that section, so a keyword
+  #           search has little to lock onto.
+  #   text    the question names NO proper noun. It describes the thing
+  #           instead, in wording close to the book's own, which is all a
+  #           full-text index needs and all a name-resolver cannot use.
+  #   either  both: it names an entity AND echoes the section's phrasing.
+  #
+  # The label is falsifiable, which is the point. `graph` predicts the
+  # question anchors and a resolved name answers it; `text` predicts it
+  # anchors on nothing. Every disagreement between the prediction and
+  # `hit_path` is a fact about the system that no aggregate recall shows.
+  #
+  # MATCHED PAIRS. Several questions share a gold section with a
+  # differently-phrased twin -- q47/q48, q53/q54, q60/q61, q68/q69 --
+  # one naming the entity and one describing it. Same answer, same
+  # ranking, one variable: whether a name was available. That is the only
+  # clean way to attribute a difference to the path rather than to the
+  # question being easier.
+  #
+  # AUTHORED FROM THE BOOK, NOT THE GRAPH, and I have to be straight
+  # about the weaker claim here than set one could make: I have spent
+  # this session reading retrieval output, so I cannot say I was blind to
+  # the system the way set one's author was. What I did instead is write
+  # every question and its `needs` label from the chapter markdown with
+  # the graph unqueried, and fix the file before running the eval once.
+  # Notes paraphrase; no book text is reproduced here.
+
+  # -- Chapter 14: Yester Hill ------------------------------------------
+  - id: q47
+    question: "What lurks around the Gulthias Tree?"
+    sections: ["cos:yester-hill#5"]
+    anchor_hint: "Gulthias Tree"
+    needs: graph
+    note: "Vine, needle and twig blights. The tree itself cannot attack."
+
+  - id: q48
+    question: "What is stuck in the bleeding tree at the south end of the hilltop?"
+    sections: ["cos:yester-hill#5"]
+    needs: text
+    note: "A magic battleaxe, with a dead adventurer's bones beneath it. Twin of q47."
+
+  - id: q49
+    question: "Where do the druids send Wintersplinter?"
+    sections: ["cos:yester-hill#8"]
+    anchor_hint: "Wintersplinter"
+    needs: graph
+    note: "North, to wreck the vineyard in chapter 12."
+
+  - id: q50
+    question: "Whose spirit offers a character a spear buried under a cairn?"
+    sections: ["cos:yester-hill#9"]
+    needs: text
+    note: "A long-dead barbarian chieftain."
+
+  - id: q51
+    question: "Why do the druids at Yester Hill worship Strahd?"
+    sections: ["cos:yester-hill#0"]
+    anchor_hint: "Yester Hill"
+    needs: graph
+    note: "They take him for lord of the land and master of its weather."
+
+  # -- Chapter 15: Werewolf Den -----------------------------------------
+  - id: q52
+    question: "What split the werewolf pack between Kiril and Emil?"
+    sections: ["cos:werewolf-den#0"]
+    anchor_hint: "Kiril Stoyanovich"
+    needs: graph
+    note: "Disagreement over what to do with the children they steal."
+
+  - id: q53
+    question: "Who guards the caged children at the werewolf den?"
+    sections: ["cos:werewolf-den#9"]
+    anchor_hint: "Zuleika Toranescu"
+    needs: graph
+    note: "A grieving werewolf ordered to watch them, who would rather be rid of the pack leader."
+
+  - id: q54
+    question: "Where are the stolen children being kept, and what stands among the cages?"
+    sections: ["cos:werewolf-den#9"]
+    needs: text
+    note: "A torchlit cave with a crude statue of a wolf-headed goddess. Twin of q53."
+
+  - id: q55
+    question: "What is Skennis carrying?"
+    sections: ["cos:werewolf-den#5"]
+    anchor_hint: "Skennis"
+    needs: graph
+    note: "An electrum flute, not magical, and a pouch of gemstones."
+
+  - id: q56
+    question: "What happens to the pack if both Kiril and Emil die?"
+    sections: ["cos:werewolf-den#12"]
+    anchor_hint: "Kiril Stoyanovich"
+    needs: graph
+    note: "Emil's widow leads it and severs its ties to Strahd."
+
+  - id: q57
+    question: "Which deity does the pack worship, and what do they call themselves?"
+    sections: ["cos:werewolf-den#0"]
+    needs: text
+    note: "Mother Night; they name themselves her children."
+
+  # -- Chapter 11: Van Richten's Tower ----------------------------------
+  - id: q58
+    question: "Who built the tower on the island in Lake Baratok?"
+    sections: ["cos:van-richtens-tower#0"]
+    anchor_hint: "Khazan"
+    needs: graph
+    note: "An archwizard who helped raise the castle, and who later became a lich."
+
+  - id: q59
+    question: "What are the two command words for the painted wagon?"
+    sections: ["cos:van-richtens-tower#4"]
+    needs: text
+    note: "One summons the quasi-real draft horses; the other dismisses them."
+
+  - id: q60
+    question: "What happens if someone opens Ezmerelda's wagon by its back door?"
+    sections: ["cos:van-richtens-tower#4"]
+    anchor_hint: "Ezmerelda's Magic Wagon"
+    needs: graph
+    note: "A firetrap detonates the alchemist's fire inside and destroys the wagon and its contents."
+
+  - id: q61
+    question: "What is the only safe way into the locked purple wagon?"
+    sections: ["cos:van-richtens-tower#4"]
+    needs: text
+    note: "A hidden trapdoor underneath. Twin of q60."
+
+  - id: q62
+    question: "How does the elevator in Van Richten's Tower work?"
+    sections: ["cos:van-richtens-tower#7"]
+    anchor_hint: "Van Richten's Tower"
+    needs: graph
+    note: "Four clay golems haul the chains, and stop working if one is destroyed."
+
+  - id: q63
+    question: "Why did the archwizard destroy himself?"
+    sections: ["cos:van-richtens-tower#0"]
+    needs: text
+    note: "He could not find a way to send his spirit beyond the domain's borders."
+
+  # -- Chapter 10: The Ruins of Berez -----------------------------------
+  - id: q64
+    question: "Who was Marina?"
+    sections: ["cos:the-ruins-of-berez#0"]
+    anchor_hint: "Marina"
+    needs: graph
+    note: "A peasant who resembled Tatyana; killed by her own burgomaster and priest to spare her from being turned."
+
+  - id: q65
+    question: "Why is Berez flooded and abandoned?"
+    sections: ["cos:the-ruins-of-berez#0"]
+    anchor_hint: "Berez"
+    needs: graph
+    note: "Strahd raised the river in a rage, and the marsh closed in afterwards."
+
+  - id: q66
+    question: "What does Baba Lysaga keep under the floor of her hut?"
+    sections: ["cos:the-ruins-of-berez#8"]
+    anchor_hint: "Baba Lysaga"
+    needs: graph
+    note: "The glowing gem she took from the winery, which is what animates the hut."
+
+  - id: q67
+    question: "What is the hollowed-out giant's skull outside the hut for?"
+    sections: ["cos:the-ruins-of-berez#7"]
+    needs: text
+    note: "She flies in it; nobody else can make it move."
+
+  - id: q68
+    question: "Whose monument shows a kneeling girl holding a rose?"
+    sections: ["cos:the-ruins-of-berez#12"]
+    needs: text
+    note: "Marina's, raised by Strahd and hidden in the marsh."
+
+  - id: q69
+    question: "Where is Marina's monument and how do the characters find it?"
+    sections: ["cos:the-ruins-of-berez#12"]
+    anchor_hint: "Marina"
+    needs: graph
+    note: "Hidden in the marsh; a laid-to-rest spirit points the way, or a thorough search finds it. Twin of q68."
+
+  # -- Chapter 9: Tsolenka Pass -----------------------------------------
+  - id: q70
+    question: "What are the demon statues at Tsolenka Pass really?"
+    sections: ["cos:tsolenka-pass#3"]
+    anchor_hint: "Tsolenka Pass"
+    needs: graph
+    note: "Petrified vrocks that revive and give chase."
+
+  - id: q71
+    question: "What fills the eastern archway of the gatehouse?"
+    sections: ["cos:tsolenka-pass#4"]
+    needs: text
+    note: "Green flame that burns anything entering or starting its turn there."
+
+  - id: q72
+    question: "Where does the road past Tsolenka Pass lead?"
+    sections: ["cos:tsolenka-pass#10"]
+    anchor_hint: "Tsolenka Pass"
+    needs: graph
+    note: "It forks: north to the Amber Temple, south until it meets the mists."
+
+  - id: q73
+    question: "What happens to characters on the mountain road overnight without warm clothing?"
+    sections: ["cos:tsolenka-pass#0"]
+    needs: text
+    note: "They suffer extreme cold."
+
+  - id: q74
+    question: "What flies at the party from Mount Ghakis?"
+    sections: ["cos:tsolenka-pass#12"]
+    anchor_hint: "Mount Ghakis"
+    needs: graph
+    note: "A roc."
+
+  # -- Appendix C: Treasures --------------------------------------------
+  - id: q75
+    question: "What does the Sunsword do?"
+    sections: ["cos:appendix-c-treasures#8"]
+    anchor_hint: "Sunsword"
+    needs: either
+    note: "One of the three artifacts a card reading places."
+
+  - id: q76
+    question: "What is Saint Markovia's thighbone?"
+    sections: ["cos:appendix-c-treasures#7"]
+    anchor_hint: "Saint Markovia's Thighbone"
+    needs: either
+    note: "A relic that works as a weapon against the undead."
+
+  - id: q77
+    question: "Which magic item is grown from a cutting of the bleeding tree?"
+    sections: ["cos:appendix-c-treasures#4"]
+    needs: text
+    note: "The staff cut from the Gulthias tree."
+
+  - id: q78
+    question: "What is the Icon of Ravenloft?"
+    sections: ["cos:appendix-c-treasures#6"]
+    anchor_hint: "Icon of Ravenloft"
+    needs: either
+    note: "One of the three artifacts."
+
+  - id: q79
+    question: "Which book records the vampire's own account of himself?"
+    sections: ["cos:appendix-c-treasures#1"]
+    needs: text
+    note: "His tome, one of the card reading's three placements."
+
+  # -- Epilogue ----------------------------------------------------------
+  - id: q80
+    question: "What does Rahadin do after Strahd dies?"
+    sections: ["cos:epilogue#3"]
+    anchor_hint: "Rahadin"
+    needs: graph
+    note: "He appears moments later to avenge his master."
+
+  - id: q81
+    question: "What happens to the wolves and bats once the vampire is destroyed?"
+    sections: ["cos:epilogue#6"]
+    needs: text
+    note: "They lose their link to him and become ordinary beasts."
+
+  - id: q82
+    question: "Can the characters leave Barovia once Strahd is destroyed?"
+    sections: ["cos:epilogue#5"]
+    anchor_hint: "Barovia"
+    needs: graph
+    note: "The mists lift enough for them to go."
+
+  - id: q83
+    question: "What becomes of Ireena after Strahd's death?"
+    sections: ["cos:epilogue#4"]
+    anchor_hint: "Ireena Kolyana"
+    needs: graph
+    note: "An optional scene reunites her with Sergei."
+
+  - id: q84
+    question: "What ending does the adventure give if the villain wins?"
+    sections: ["cos:epilogue#1"]
+    needs: text
+    note: "The domain carries on under him."
+
+  # -- Chapter 1: Into the Mists -----------------------------------------
+  - id: q85
+    question: "What are Strahd's goals in the adventure?"
+    sections: ["cos:into-the-mists#3"]
+    anchor_hint: "Strahd von Zarovich"
+    needs: graph
+    note: "Three: claim Ireena, find the vampire hunter, and test the newcomers."
+
+  - id: q86
+    question: "Why is Strahd hunting Rudolph van Richten?"
+    sections: ["cos:into-the-mists#5"]
+    anchor_hint: "Rudolph van Richten"
+    needs: graph
+    note: "He wants the old hunter caged in his dungeons and broken slowly."
+
+  - id: q87
+    question: "Should the villain stay out of sight until the final scene?"
+    sections: ["cos:into-the-mists#8"]
+    needs: text
+    note: "No. He is meant to turn up repeatedly, testing the party rather than killing it."
+
+  - id: q88
+    question: "How many cards are drawn for the reading, and from which decks?"
+    sections: ["cos:into-the-mists#10"]
+    needs: text
+    note: "Three from the common deck, then two from the high deck."
+
+  - id: q89
+    question: "What is Strahd looking for in the newcomers to his domain?"
+    sections: ["cos:into-the-mists#6"]
+    anchor_hint: "Strahd von Zarovich"
+    needs: graph
+    note: "A possible successor or consort; he is drawn to defiance and to arrogance like his own."
+
+  - id: q90
+    question: "How does the fog scenario bring a camping party into the valley?"
+    sections: ["cos:into-the-mists#34"]
+    needs: text
+    note: "It closes over their camp overnight and they wake among unfamiliar trees."
+
+  - id: q91
+    question: "Does Strahd ever attack Ireena?"
+    sections: ["cos:into-the-mists#8"]
+    anchor_hint: "Ireena Kolyana"
+    needs: graph
+    note: "No. He and his minions leave her alone."
+
+  # -- Chapter 8: The Village of Krezk -----------------------------------
+  - id: q92
+    question: "Who is Dmitri Krezkov?"
+    sections: ["cos:the-village-of-krezk#3"]
+    anchor_hint: "Dmitri Krezkov"
+    needs: graph
+    note: "Krezk's burgomaster, grieving his youngest son and wary of adventurers."
+
+  - id: q93
+    question: "What does the burgomaster of Krezk want in exchange for hospitality?"
+    sections: ["cos:the-village-of-krezk#3"]
+    needs: text
+    note: "A wagonload of wine from the winery to the south. Twin of q92."
+
+  - id: q94
+    question: "What goes in the sun-shaped hollow on the gravestone?"
+    sections: ["cos:the-village-of-krezk#11"]
+    needs: text
+    note: "A holy symbol taken from a crypt in the castle; a ring is revealed underneath."
+
+  - id: q95
+    question: "Why will Dmitri Krezkov not let the party into Krezk?"
+    sections: ["cos:the-village-of-krezk#3"]
+    anchor_hint: "Krezk"
+    needs: graph
+    note: "He puts the village first and assumes strangers mean trouble either way."
+
+  - id: q96
+    question: "What is at the north end of the village, beside an old gazebo?"
+    sections: ["cos:the-village-of-krezk#7"]
+    needs: text
+    note: "A pool that shimmers even under grey skies, with a shrine by it."
