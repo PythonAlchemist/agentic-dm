@@ -60,9 +60,12 @@ from backend.canon.spine import mention_pattern
 #: what makes "Ireena Kolyana" win over "Ireena" in a question containing both:
 #: the longer form is the more specific claim, and a question that spells a name
 #: out in full should not resolve as though it had not.
+#: The entity id travels with the form because `anchorable_forms` decides per
+#: ENTITY: a thing the book writes as a common noun is not a name under any of
+#: its spellings, so one lower-case alias disqualifies all of them.
 ALL_ALIASES = """
 MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity {plane:$plane})
-RETURN DISTINCT a.name AS name
+RETURN DISTINCT a.name AS name, e.id AS entity_id
 """
 
 #: Which entities a surface form names. Several is a legitimate answer --
@@ -372,6 +375,72 @@ def combine_passages(
     return out
 
 
+def is_common_noun(form: str) -> bool:
+    """Is this surface form a thing-word rather than a name?
+
+    One word, no capital, as the book itself spells it. `coffin`, `wagon`,
+    `key`, `light`, `vampire`.
+
+    THE BOUNDARY IS SINGLE-WORD, AND IT IS THE ONE THE MATCHER ALREADY DRAWS.
+    `mention_pattern` folds case for a multi-word form and not for a single one,
+    because a multi-word match is specific enough to trust on its own. The same
+    holds here: of 103 all-lowercase forms in the plane, 53 are multi-word and
+    nearly all are spell or magic-item names -- `dispel magic`, `potion of
+    healing`, `staff of power` -- which D&D writes lower case by convention and
+    which a question naming them really is about. Refusing those would break
+    anchoring on half the treasure in the book. It is the single words that are
+    thing-words.
+    """
+    stripped = form.strip()
+    return bool(stripped) and " " not in stripped and not any(
+        character.isupper() for character in stripped
+    )
+
+
+def anchorable_forms(rows: list[dict]) -> list[str]:
+    """The surface forms that may anchor a QUESTION, entity by entity.
+
+    The extractor minted a global entity for a great many generic props and
+    creature types -- `cos:coffin`, `cos:wagon`, `cos:key`, `cos:light`,
+    `cos:vampire` -- and each carries an `:Alias` spelled the way the book
+    writes it, in lower case. Fifty of them, and they anchored real questions:
+    "who is lying in the coffin in the burgomaster's mansion" resolved `coffin`
+    to a prop in Castle Ravenloft and went to the tombs; "which book records the
+    vampire's own account of himself" anchored on `vampire` and missed.
+
+    THE SCAN'S CASE RULE GIVES NO PROTECTION HERE. `mention_pattern` matches a
+    single-word form case-sensitively, reading a capital as evidence of a proper
+    noun -- that is what keeps the LORE entity `Light` off every lit torch. But
+    an alias spelled `light` is already lower case, so the case-sensitive
+    pattern matches the lower-case word in a question exactly. The rule guards
+    against the wrong spelling of the problem.
+
+    THE REFUSAL IS PER ENTITY, NOT PER FORM, and that is the whole reason this
+    function groups. Dropping just the lower-case spelling was tried first and
+    moved the defect rather than fixing it: with `wagon` gone nothing else
+    matched, so `find_names` reached its case-folded second pass and matched the
+    entity's OTHER alias, `Wagon`, against the same word. The anchor came back
+    under a different spelling. An entity the book writes as a common noun is
+    not a name under any casing, so the evidence disqualifies the entity.
+
+    NOT A DELETION. The entity keeps its mentions, its edges, and its place in
+    the scan; what it loses is being the handle a DM's question resolves
+    through. A prop named in a section is a fact about that section. It was
+    never a name.
+    """
+    by_entity: dict[str, list[str]] = {}
+    for row in rows:
+        by_entity.setdefault(row["entity_id"], []).append(row["name"])
+    return sorted(
+        {
+            form
+            for names in by_entity.values()
+            if not any(is_common_noun(name) for name in names)
+            for form in names
+        }
+    )
+
+
 def find_names(question: str, forms: list[str], *, fold_case: bool = False) -> list[str]:
     """Every recorded form the question contains, longest first, non-overlapping.
 
@@ -411,7 +480,11 @@ class CanonRetriever:
     def retrieve(self, question: str, *, limit: int | None = None) -> Retrieval:
         limit = self.limit if limit is None else limit
         with self._session() as session:
-            forms = [row["name"] for row in self._rows(session, ALL_ALIASES)]
+            # Filtered here rather than in the query, because this is a rule
+            # about what may anchor a QUESTION and not about what the graph
+            # holds. A prop named in a section is still a fact about that
+            # section, and the scan and the edges go on using it.
+            forms = anchorable_forms(self._rows(session, ALL_ALIASES))
             # Two passes, and the order is the whole point. The first is the
             # scan's own rule, so a question that spells names the way the book
             # does resolves exactly as the graph was built. Only when that finds

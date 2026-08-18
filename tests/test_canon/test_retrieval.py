@@ -17,9 +17,11 @@ from backend.canon.retrieval import (
     PATH_TEXT,
     CanonRetriever,
     Passage,
+    anchorable_forms,
     combine_passages,
     dedupe_edges,
     find_names,
+    is_common_noun,
 )
 from backend.canon.spine import ChapterSpine, WriteSection
 from backend.canon.writer import WriteNode, ensure_schema, write_chapter
@@ -135,6 +137,74 @@ def _graph(*ids: str) -> list[Passage]:
 
 def _text(*ids: str) -> list[Passage]:
     return [_p(i, PATH_TEXT) for i in ids]
+
+
+class TestRefusingCommonNouns:
+    """The extractor minted `cos:coffin`, `cos:wagon`, `cos:vampire` and forty-
+    odd more generic props as global entities, each with an alias spelled the
+    way the book writes it. They anchored real questions: `coffin` sent "who is
+    lying in the coffin in the burgomaster's mansion" to Castle Ravenloft's
+    tombs."""
+
+    def test_a_single_lowercase_word_is_a_thing_word(self):
+        assert is_common_noun("coffin")
+        assert is_common_noun("vampire")
+
+    def test_a_capital_makes_it_a_name(self):
+        assert not is_common_noun("Strahd")
+        assert not is_common_noun("Rahadin")
+
+    def test_a_multi_word_lowercase_form_is_not_refused(self):
+        """53 of the plane's 103 all-lowercase forms are multi-word, and nearly
+        every one is a spell or magic item that D&D writes lower case by
+        convention. Refusing them would break anchoring on half the treasure."""
+        assert not is_common_noun("dispel magic")
+        assert not is_common_noun("potion of healing")
+        assert not is_common_noun("staff of power")
+
+    def test_whitespace_is_not_a_thing_word(self):
+        assert not is_common_noun("")
+        assert not is_common_noun("   ")
+
+    def test_an_entity_with_a_lowercase_alias_loses_every_spelling(self):
+        """THE BUG THE FIRST ATTEMPT SHIPPED. Dropping only the lower-case form
+        moved the defect instead of fixing it: with `wagon` gone nothing else
+        matched, `find_names` reached its case-folded second pass, and `Wagon`
+        matched the same word. The anchor came back under a different spelling,
+        so the refusal has to disqualify the ENTITY."""
+        rows = [
+            {"name": "wagon", "entity_id": "cos:wagon"},
+            {"name": "Wagon", "entity_id": "cos:wagon"},
+        ]
+        assert anchorable_forms(rows) == []
+
+    def test_an_entity_of_names_keeps_all_of_them(self):
+        rows = [
+            {"name": "Strahd", "entity_id": "cos:strahd"},
+            {"name": "Strahd von Zarovich", "entity_id": "cos:strahd"},
+        ]
+        assert anchorable_forms(rows) == ["Strahd", "Strahd von Zarovich"]
+
+    def test_one_entitys_refusal_does_not_touch_another(self):
+        rows = [
+            {"name": "coffin", "entity_id": "cos:coffin"},
+            {"name": "Coffin", "entity_id": "cos:coffin"},
+            {"name": "Rahadin", "entity_id": "cos:rahadin"},
+        ]
+        assert anchorable_forms(rows) == ["Rahadin"]
+
+    def test_a_form_shared_by_two_entities_survives_through_the_clean_one(self):
+        """`Barovia` names a region and a village. If either were disqualified,
+        dropping the shared spelling outright would silently unname the other."""
+        rows = [
+            {"name": "Barovia", "entity_id": "cos:barovia"},
+            {"name": "Barovia", "entity_id": "cos:village-of-barovia"},
+            {"name": "barovia", "entity_id": "cos:barovia"},
+        ]
+        assert anchorable_forms(rows) == ["Barovia"]
+
+    def test_nothing_in_gives_nothing_out(self):
+        assert anchorable_forms([]) == []
 
 
 class TestCombiningTheTwoPaths:
