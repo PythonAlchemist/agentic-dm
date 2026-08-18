@@ -41,7 +41,7 @@ class Depth(BaseModel):
     a browser is a way to spend real money by typing a big number.
     """
 
-    passages: int = Field(default=5, ge=0, le=20)
+    passages: int = Field(default=canon_context.Depth.passages, ge=0, le=20)
     max_edges: int = Field(default=12, ge=0, le=50)
     include_proposed: bool = True
     history_turns: int = Field(default=6, ge=0, le=20)
