@@ -21,6 +21,7 @@ def passage(section_id: str, section: str, text: str, **kw) -> Passage:
         occurrences=kw.get("occurrences", 1),
         entity_ids=kw.get("entity_ids", ("cos:ismark-kolyanovich",)),
         score=kw.get("score"),
+        path=kw.get("path", PATH_GRAPH),
     )
 
 
@@ -130,19 +131,53 @@ class TestProvenanceSurvives:
         block = canon_context.render(graph_retrieval(passage("cos:x#5", "S", "t")))
         assert "KEYWORD MATCH ONLY" not in block
 
+    def test_a_keyword_passage_among_resolved_ones_is_marked_on_its_own_line(self):
+        """`TEXT_SLOTS` puts a Lucene guess inside a result that resolved a
+        name. The block-level warning does not fire for that result, so without
+        a per-passage mark the model reads the guess as though a name had
+        resolved to it."""
+        block = canon_context.render(
+            graph_retrieval(
+                passage("cos:x#5", "Resolved", "a"),
+                passage("cos:x#9", "Guessed", "b", path=PATH_TEXT, score=1.2),
+            )
+        )
+        assert "Guessed  (keyword match" in block
+        assert "Resolved  (keyword match" not in block
+
+    def test_a_wholly_keyword_result_does_not_repeat_the_mark_per_passage(self):
+        """The block already says it once, in stronger words."""
+        result = Retrieval(
+            question="q",
+            passages=(passage("cos:x#0", "Foreword", "t", path=PATH_TEXT, score=1.2),),
+            path=PATH_TEXT,
+        )
+        block = canon_context.render(result)
+        assert "KEYWORD MATCH ONLY" in block
+        assert "(keyword match — may be about something else)" not in block
+
 
 class TestWhenThereIsNothing:
     def test_an_empty_retrieval_says_the_canon_does_not_cover_it(self):
         block = canon_context.render(Retrieval(question="q"))
         assert "nothing retrieved" in block
 
-    def test_it_says_the_graph_is_incomplete_rather_than_the_book(self):
-        """The distinction a DM's trust rests on. 3 of 25 chapters are loaded,
-        so silence means 'not loaded', and a model told only 'not found' will
-        helpfully answer from its memory of the published module."""
+    def test_it_says_a_retrieval_miss_is_not_the_book_being_silent(self):
+        """The distinction a DM's trust rests on: a model told only "not found"
+        will helpfully answer from its memory of the published module.
+
+        This asserted the literal words "3 of its 25 chapters" until the whole
+        book was loaded and the sentence became false -- the model was told the
+        corpus was a tenth present while it was complete. Pinning the CLAIM
+        rather than the count is what keeps this from happening twice."""
         block = canon_context.render(Retrieval(question="q"))
-        assert "3 of its 25 chapters" in block
         assert "Do not answer from memory" in block
+        assert "is not the same as the book not containing it" in block
+
+    def test_it_states_no_count_of_what_is_loaded(self):
+        """A number describing the database does not belong in a constant."""
+        block = canon_context.render(Retrieval(question="q"))
+        assert "25 chapters" not in block
 
 
 class TestTheEdgeBudget:
@@ -169,9 +204,23 @@ class TestSources:
 
     def test_the_path_rides_along_so_a_keyword_hit_can_be_shown_differently(self):
         result = Retrieval(
-            question="q", passages=(passage("cos:x#0", "F", "t"),), path=PATH_TEXT
+            question="q",
+            passages=(passage("cos:x#0", "F", "t", path=PATH_TEXT),),
+            path=PATH_TEXT,
         )
         assert canon_context.sources(result)[0]["path"] == PATH_TEXT
+
+    def test_each_citation_takes_its_own_path_not_the_questions(self):
+        """A mixed result cited every passage with the question's coarse label,
+        which showed a Lucene guess in the UI as a resolved name."""
+        result = graph_retrieval(
+            passage("cos:x#5", "Resolved", "a"),
+            passage("cos:x#9", "Guessed", "b", path=PATH_TEXT),
+        )
+        assert [r["path"] for r in canon_context.sources(result)] == [
+            PATH_GRAPH,
+            PATH_TEXT,
+        ]
 
     def test_no_passages_means_no_citations(self):
         assert canon_context.sources(Retrieval(question="q")) == []

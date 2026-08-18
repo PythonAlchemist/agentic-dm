@@ -93,11 +93,32 @@ _TEXT_WARNING = (
     "answers what was asked, and say the canon does not cover it otherwise."
 )
 
+#: Appended to the heading of a single keyword-matched passage sitting among
+#: resolved ones.
+#:
+#: A result that anchored on a name now also carries text passages, because
+#: `TEXT_SLOTS` reserves room for them, and `_TEXT_WARNING` only fires when the
+#: WHOLE retrieval was a keyword search. Without this the model would read a
+#: Lucene guess under a block that says these passages were retrieved for the
+#: question, with nothing to distinguish it from the section that resolved a
+#: name -- which is the fact/guess line going quiet exactly where it is most
+#: load-bearing.
+_KEYWORD_MARK = "  (keyword match — may be about something else)"
+
+#: What the model is told when retrieval came back empty.
+#:
+#: THE COUNT THAT USED TO BE HERE WENT STALE. This read "only 3 of its 25
+#: chapters have been loaded" long after the whole book was written to the
+#: graph, so the model was being told the corpus was 12% present when it was
+#: complete. A number that describes the state of a database does not belong in
+#: a string constant; the instruction that matters -- do not answer from memory
+#: -- is true at every stage of loading, and is what this says now.
 _NO_CANON = (
-    "CANON — nothing retrieved for this question. Say that the canon graph "
-    "does not cover it. Do not answer from memory of the published adventure; "
-    "only 3 of its 25 chapters have been loaded, so silence here means "
-    "'not loaded', not 'not in the book'."
+    "CANON — nothing retrieved for this question. Say plainly that the canon "
+    "graph did not return anything on it. Do not answer from memory of the "
+    "published adventure: retrieval missing something is not the same as the "
+    "book not containing it, and a DM cannot tell an invented detail from a "
+    "real one until it fails at the table."
 )
 
 #: Relationship trust, in words a model will act on rather than a status string.
@@ -129,6 +150,10 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
 
     for number, passage in enumerate(retrieval.passages, start=1):
         heading = f"[{number}] {passage.chapter} › {passage.section}"
+        # Only when the block has not already said it wholesale, so a pure text
+        # retrieval does not repeat the warning on every line.
+        if passage.path == PATH_TEXT and retrieval.path != PATH_TEXT:
+            heading += _KEYWORD_MARK
         parts.append(f"{heading}\n{passage.text}")
 
     for heading, edges in (
@@ -153,6 +178,10 @@ def sources(retrieval: Retrieval) -> list[dict]:
     `path` rides along so a caller can render a keyword match differently from a
     resolved one. A citation that looks equally authoritative either way would
     undo the labelling the block above works to preserve.
+
+    Taken from the PASSAGE, not from the retrieval. One result now mixes both
+    paths, and stamping the question's coarse label on every citation was how a
+    Lucene guess came to be presented in the UI as a resolved name.
     """
     return [
         {
@@ -160,7 +189,7 @@ def sources(retrieval: Retrieval) -> list[dict]:
             "type": "canon",
             "chapter": passage.chapter,
             "section": passage.section,
-            "path": retrieval.path,
+            "path": passage.path,
             "citation": f"[{number}]",
         }
         for number, passage in enumerate(retrieval.passages, start=1)

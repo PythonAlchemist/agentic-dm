@@ -45,11 +45,28 @@ def reciprocal_rank(retrieved: tuple[str, ...], gold: list[str]) -> float:
     return 0.0
 
 
+def hit_path(result: Retrieval, gold: list[str]) -> str:
+    """Which path produced the FIRST gold passage, or empty if none did.
+
+    Not `result.path`. A result that anchored on a name now also carries text
+    passages -- `TEXT_SLOTS` reserves room for them -- so grouping hits by how
+    the QUESTION resolved credited the graph for answers Lucene found. That
+    reporting said "by name 26/31" on a run where several of the 26 were text.
+    Crediting the wrong path is exactly the conclusion this harness exists to
+    make impossible, so the credit follows the passage.
+    """
+    for passage in result.passages:
+        if passage.section_id in gold:
+            return passage.path
+    return ""
+
+
 def score(question: dict, result: Retrieval) -> dict:
     gold = list(question.get("sections") or [])
     retrieved = result.section_ids
     hit = any(section_id in gold for section_id in retrieved)
     return {
+        "hit_path": hit_path(result, gold),
         "id": question["id"],
         "question": question["question"],
         "gold": gold,
@@ -87,10 +104,8 @@ def summarize(rows: list[dict]) -> dict:
         "mrr": sum(r["rr"] for r in rows) / total if total else 0.0,
         "no_anchor": [r["id"] for r in rows if not r["anchored"]],
         "anchored_but_missed": [r["id"] for r in rows if r["anchored"] and not r["hit"]],
-        # Reported per path, never merged. A graph hit resolved a name the book
-        # wrote; a text hit is a Lucene score agreeing with a guess. Averaging
-        # them into one recall makes the fallback look like an improvement to
-        # the graph, which is the one conclusion this harness must not support.
+        # How the QUESTION resolved: on a name, or on nothing. This is about
+        # anchoring, and says nothing about which path then answered.
         "by_path": {
             path: {
                 "n": len(group),
@@ -98,6 +113,16 @@ def summarize(rows: list[dict]) -> dict:
             }
             for path in ("graph", "text", "-")
             if (group := [r for r in rows if r["path"] == path])
+        },
+        # Which path produced the answer, never merged. A graph hit resolved a
+        # name the book wrote; a text hit is a Lucene score agreeing with a
+        # guess. Averaging them into one recall makes the fallback look like an
+        # improvement to the graph, which is the one conclusion this harness
+        # must not support -- and since a graph-anchored result now CARRIES text
+        # passages, this is the only place that distinction survives.
+        "by_answer": {
+            path: sum(1 for r in rows if r["hit_path"] == path)
+            for path in ("graph", "text")
         },
     }
 
@@ -113,9 +138,18 @@ def render(rows: list[dict], summary: dict, *, verbose: bool) -> str:
         )
 
     out.append("")
+    out.append("  questions, by how they anchored")
     for path, stat in summary["by_path"].items():
-        label = {"graph": "by name", "text": "by text", "-": "no answer"}[path]
-        out.append(f"  {label:<20} {stat['hits']}/{stat['n']}")
+        label = {
+            "graph": "on a name",
+            "text": "on nothing",
+            "-": "no answer at all",
+        }[path]
+        out.append(f"    {label:<18} {stat['hits']}/{stat['n']} hit")
+    out.append("")
+    out.append("  hits, by the passage that answered")
+    out.append(f"    {'a resolved name':<18} {summary['by_answer']['graph']}")
+    out.append(f"    {'a Lucene score':<18} {summary['by_answer']['text']}")
     out.append("")
     out.append(f"  questions            {summary['total']}")
     out.append(f"  anchored             {summary['anchored']}/{summary['total']}")

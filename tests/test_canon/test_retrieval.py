@@ -12,7 +12,15 @@ import pytest
 
 from backend.canon.aliases import WriteAlias
 from backend.canon.models import Section
-from backend.canon.retrieval import CanonRetriever, dedupe_edges, find_names
+from backend.canon.retrieval import (
+    PATH_GRAPH,
+    PATH_TEXT,
+    CanonRetriever,
+    Passage,
+    combine_passages,
+    dedupe_edges,
+    find_names,
+)
 from backend.canon.spine import ChapterSpine, WriteSection
 from backend.canon.writer import WriteNode, ensure_schema, write_chapter
 from backend.core.database import neo4j_session
@@ -115,6 +123,110 @@ class TestDedupingEdges:
         assert len(dedupe_edges(rows)) == 2
 
 
+def _p(section_id: str, path: str = PATH_GRAPH) -> Passage:
+    """A passage with nothing on it but its identity and its provenance, which
+    is all the combining rule is allowed to look at."""
+    return Passage(section_id, "ch", 0, "S", 0, "text", 0, (), path=path)
+
+
+def _graph(*ids: str) -> list[Passage]:
+    return [_p(i) for i in ids]
+
+
+def _text(*ids: str) -> list[Passage]:
+    return [_p(i, PATH_TEXT) for i in ids]
+
+
+class TestCombiningTheTwoPaths:
+    """One budget, split between a resolved name and a Lucene score.
+
+    The rule replaced an all-or-nothing fallback: text used to run only when
+    NOTHING anchored, so a question anchoring on the WRONG thing had no way
+    back. Seven of the nine anchored misses hit on the text path.
+    """
+
+    def test_the_graph_keeps_every_slot_the_reservation_does_not_take(self):
+        got = combine_passages(_graph("g1", "g2", "g3", "g4", "g5"), _text("t1"), 5)
+        assert [p.section_id for p in got] == ["g1", "g2", "g3", "g4", "t1"]
+
+    def test_a_short_graph_result_is_padded_out_of_text(self):
+        """The effect that displaces nothing: the graph found two candidates and
+        the other three slots would otherwise have gone unused."""
+        got = combine_passages(_graph("g1", "g2"), _text("t1", "t2", "t3", "t4"), 5)
+        assert [p.section_id for p in got] == ["g1", "g2", "t1", "t2", "t3"]
+
+    def test_padding_cannot_evict_a_graph_passage(self):
+        """Stated as a property over every split, because the claim that padding
+        is free is what justifies doing it at all."""
+        graph = _graph("g1", "g2", "g3", "g4", "g5", "g6")
+        for reserve in range(6):
+            got = combine_passages(graph, _text("t1", "t2"), 5, reserve=reserve)
+            kept = [p.section_id for p in got if p.path == PATH_GRAPH]
+            assert kept == [p.section_id for p in graph][: len(kept)]
+
+    def test_reserve_zero_is_padding_alone(self):
+        got = combine_passages(_graph("g1", "g2", "g3", "g4", "g5"), _text("t1"), 5,
+                               reserve=0)
+        assert [p.section_id for p in got] == ["g1", "g2", "g3", "g4", "g5"]
+
+    def test_text_never_exceeds_its_reservation_while_the_graph_has_more(self):
+        got = combine_passages(_graph("g1", "g2", "g3", "g4", "g5"),
+                               _text("t1", "t2", "t3"), 5)
+        assert sum(1 for p in got if p.path == PATH_TEXT) == 1
+
+    def test_the_graph_reclaims_slack_text_did_not_use(self):
+        """A reservation is a ceiling on text, not a floor. With nothing to
+        search, the graph gets the whole budget back rather than returning four."""
+        got = combine_passages(_graph("g1", "g2", "g3", "g4", "g5", "g6"), [], 5)
+        assert [p.section_id for p in got] == ["g1", "g2", "g3", "g4", "g5"]
+
+    def test_a_section_both_paths_found_appears_once(self):
+        got = combine_passages(_graph("g1", "shared"), _text("shared", "t2"), 5)
+        assert [p.section_id for p in got] == ["g1", "shared", "t2"]
+
+    def test_the_shared_section_keeps_the_graphs_copy(self):
+        """Whichever came first wins, and inside the kept prefix that is the
+        graph's -- the copy carrying the occurrence count and the entity ids."""
+        got = combine_passages(_graph("shared"), _text("shared"), 5)
+        assert [p.path for p in got] == [PATH_GRAPH]
+
+    def test_a_budget_of_one_still_goes_to_the_resolved_name(self):
+        """`limit - reserve` was 0 here, so the one slot went to a Lucene guess
+        and both real candidates were reported dropped. A guess may fill what a
+        name left empty; it may not evict the name."""
+        got = combine_passages(_graph("g1", "g2"), _text("t1"), 1)
+        assert [p.section_id for p in got] == ["g1"]
+
+    def test_a_budget_of_one_with_no_graph_result_still_reaches_text(self):
+        assert [p.section_id for p in combine_passages([], _text("t1"), 1)] == ["t1"]
+
+    def test_the_budget_is_never_exceeded(self):
+        got = combine_passages(_graph("g1", "g2", "g3"), _text("t1", "t2", "t3"), 4)
+        assert len(got) == 4
+
+    def test_nothing_from_either_path_is_nothing(self):
+        assert combine_passages([], [], 5) == []
+
+    def test_scores_are_never_blended(self):
+        """The rule may only reorder and cut. If it ever computed a combined
+        score, a passage would come back changed -- these are the same objects."""
+        graph, text = _graph("g1", "g2"), _text("t1")
+        got = combine_passages(graph, text, 5)
+        assert all(p is graph[0] or p is graph[1] or p is text[0] for p in got)
+
+
+def _row(qid: str, *, anchored: bool, hit: bool, rr: float, path: str,
+         hit_path: str = "") -> dict:
+    """One scored question, as `score` would emit it.
+
+    `hit_path` defaults to empty -- no path answered -- so a row declared as a
+    miss cannot silently credit anything, and a row declared as a hit has to say
+    which path earned it.
+    """
+    return {"id": qid, "anchored": anchored, "hit": hit, "rr": rr,
+            "path": path, "hit_path": hit_path}
+
+
 class TestScoring:
     """What the harness concludes from a retrieval, with no graph involved."""
 
@@ -133,10 +245,10 @@ class TestScoring:
         one asks whether the system helped, the other whether RANKING is the
         thing to fix."""
         rows = [
-            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0, "path": "graph"},
-            {"id": "q2", "anchored": True, "hit": False, "rr": 0.0, "path": "graph"},
-            {"id": "q3", "anchored": False, "hit": False, "rr": 0.0, "path": "-"},
-            {"id": "q4", "anchored": False, "hit": False, "rr": 0.0, "path": "-"},
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph", hit_path="graph"),
+            _row("q2", anchored=True, hit=False, rr=0.0, path="graph"),
+            _row("q3", anchored=False, hit=False, rr=0.0, path="-"),
+            _row("q4", anchored=False, hit=False, rr=0.0, path="-"),
         ]
         s = summarize(rows)
         assert s["recall_overall"] == pytest.approx(0.25)
@@ -149,9 +261,9 @@ class TestScoring:
         answers a question that never anchored, so it belongs to neither the
         numerator nor the denominator of anchored recall."""
         rows = [
-            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0, "path": "graph"},
-            {"id": "q2", "anchored": False, "hit": True, "rr": 1.0, "path": "text"},
-            {"id": "q3", "anchored": False, "hit": True, "rr": 1.0, "path": "text"},
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph", hit_path="graph"),
+            _row("q2", anchored=False, hit=True, rr=1.0, path="text", hit_path="text"),
+            _row("q3", anchored=False, hit=True, rr=1.0, path="text", hit_path="text"),
         ]
         s = summarize(rows)
         assert s["recall_anchored"] == pytest.approx(1.0)
@@ -162,13 +274,44 @@ class TestScoring:
         score agreeing with a guess. Merged, the fallback would read as an
         improvement to the graph."""
         rows = [
-            {"id": "q1", "anchored": True, "hit": True, "rr": 1.0, "path": "graph"},
-            {"id": "q2", "anchored": True, "hit": False, "rr": 0.0, "path": "graph"},
-            {"id": "q3", "anchored": False, "hit": True, "rr": 1.0, "path": "text"},
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph", hit_path="graph"),
+            _row("q2", anchored=True, hit=False, rr=0.0, path="graph"),
+            _row("q3", anchored=False, hit=True, rr=1.0, path="text", hit_path="text"),
         ]
         by_path = summarize(rows)["by_path"]
         assert by_path["graph"] == {"n": 2, "hits": 1}
         assert by_path["text"] == {"n": 1, "hits": 1}
+
+    def test_a_text_passage_inside_a_graph_result_credits_text(self):
+        """The reservation broke the old reporting. A question that anchored on
+        a name can now be answered by a passage Lucene found, and grouping the
+        hit by how the QUESTION resolved credited the graph for it -- the run
+        that motivated this said "by name 26/31" when four of those were text."""
+        rows = [
+            _row("q1", anchored=True, hit=True, rr=1.0, path="graph", hit_path="text"),
+            _row("q2", anchored=True, hit=True, rr=1.0, path="graph", hit_path="graph"),
+        ]
+        s = summarize(rows)
+        assert s["by_path"]["graph"] == {"n": 2, "hits": 2}
+        assert s["by_answer"] == {"graph": 1, "text": 1}
+
+    def test_the_credit_follows_the_passage_that_holds_the_gold(self):
+        from backend.canon.retrieval import Retrieval
+
+        result = Retrieval(
+            question="q",
+            anchors=(),
+            passages=(_p("cos:x#1"), _p("cos:x#9", PATH_TEXT)),
+        )
+        row = score({"id": "q1", "question": "q", "sections": ["cos:x#9"]}, result)
+        assert row["hit_path"] == PATH_TEXT
+
+    def test_a_miss_credits_no_path_at_all(self):
+        from backend.canon.retrieval import Retrieval
+
+        result = Retrieval(question="q", passages=(_p("cos:x#1"),))
+        row = score({"id": "q1", "question": "q", "sections": ["cos:x#9"]}, result)
+        assert row["hit_path"] == ""
 
     def test_a_hit_is_membership_not_position(self):
         from backend.canon.retrieval import Passage, Retrieval
@@ -260,7 +403,12 @@ def written(graph):
         _section(0, "The Church", f"{named('Donavich')} prays here in soiled vestments."),
         _section(1, "Below", f"{named('Donavich')} listens at the {named('Undercroft')}. "
                              f"{named('Donavich')} waits."),
-        _section(2, "Elsewhere", "Nothing relevant happens in this section at all."),
+        # `Zzelsewhere` is a word NO entity is named by, so this section can
+        # never be a graph candidate -- and it is marker-prefixed so the real
+        # book sitting in the same database cannot outrank it on the text path.
+        # That makes it the one section that proves the text reservation is
+        # reaching sections the graph alone could not.
+        _section(2, "Elsewhere", "Nothing Zzelsewhere happens in this section at all."),
     ]
     write_chapter(
         graph,
@@ -306,6 +454,43 @@ class TestRetrievingFromTheGraph:
         assert [a.name for a in result.anchors] == [named("Donavich")]
         assert f"cos:{CHAPTER}#0" in result.section_ids
         assert f"cos:{CHAPTER}#2" not in result.section_ids
+
+    def test_an_anchored_question_still_reaches_a_section_the_graph_cannot(self, written):
+        """The whole change, end to end.
+
+        Section 2 mentions no entity, so no anchor can ever reach it. Before
+        this, a question that resolved a name never ran the text search at all,
+        and the section was unreachable for anyone who happened to name the
+        priest in the same breath.
+
+        Satisfied here by PADDING rather than by the reservation -- the graph
+        offers two candidates against a budget of five -- and it stays green at
+        `TEXT_SLOTS = 0`. That is deliberate: this pins the union existing at
+        all, and `TestCombiningTheTwoPaths` pins the split. A test asserting
+        both would fail for two unrelated reasons.
+        """
+        result = CanonRetriever().retrieve(
+            f"What does {named('Donavich')} think of Zzelsewhere?"
+        )
+        assert result.anchors, "the question must anchor for this to mean anything"
+        assert f"cos:{CHAPTER}#2" in result.section_ids
+
+    def test_the_passage_from_the_text_path_says_so(self, written):
+        """Provenance is per passage now, because one result mixes both."""
+        result = CanonRetriever().retrieve(
+            f"What does {named('Donavich')} think of Zzelsewhere?"
+        )
+        found = next(p for p in result.passages if p.section_id == f"cos:{CHAPTER}#2")
+        assert found.path == PATH_TEXT
+        assert found.score is not None
+
+    def test_the_graph_passages_in_a_mixed_result_are_still_labelled_graph(self, written):
+        result = CanonRetriever().retrieve(
+            f"What does {named('Donavich')} think of Zzelsewhere?"
+        )
+        found = next(p for p in result.passages if p.section_id == f"cos:{CHAPTER}#1")
+        assert found.path == PATH_GRAPH
+        assert found.score is None
 
     def test_the_section_id_matches_the_one_the_write_path_minted(self, written):
         """`_section_id` rebuilds the id from parts rather than reading it, so

@@ -8,9 +8,17 @@ what this module adds. Everything downstream is the lookup's queries.
 WHY NO EMBEDDINGS. A similarity score cannot be argued with. When a graph-native
 retrieval misses, the miss points at a specific missing thing -- an alias that
 was never recorded, a section the scan skipped, an edge nobody wrote -- and that
-is a repairable defect. A vector miss points at a number. The graph's mentions,
-aliases and hierarchy already encode what a text index would have to guess, and
-at 36 sections there is nothing for an index to do that a scan cannot.
+is a repairable defect. A vector miss points at a number.
+
+*Corrected 2026-08-18.* This paragraph used to continue "the graph's mentions
+and aliases already encode what a text index would have to guess, and at 36
+sections there is nothing for an index to do that a scan cannot". At 835
+sections that is measurably false. Over the 46-question set the BM25 index alone
+retrieves the right section 78% of the time against the graph path's 67%, and
+seven of the nine questions the graph anchored and then missed were sitting in
+the index. The argument against embeddings survives -- a keyword hit can still
+be read back to the words that caused it -- but the claim that the graph makes a
+text index redundant did not, and `TEXT_SLOTS` is what was done about it.
 
 WHY NO ANSWER GENERATION. Retrieval returns passages; it never writes prose. A
 model asked to answer will paper over a retrieval hole with something plausible,
@@ -141,6 +149,34 @@ PATH_NONE = ""
 #: combined, which is why occurrences are not simply replaced.
 TERM_WEIGHT = 3
 
+#: How many of the budget's passages are held for the text path when a question
+#: DID anchor. The rest go to the graph, and any slack the graph does not use
+#: goes to text as well.
+#:
+#: THE FALLBACK USED TO BE ALL-OR-NOTHING, and that was the single largest
+#: defect in retrieval. Text ran only when NOTHING anchored, so a question that
+#: anchored on the WRONG thing was dead: `coffin` resolved to an extracted prop
+#: in Castle Ravenloft, and "who is lying in the coffin in the burgomaster's
+#: mansion" went to the tombs. Forced onto the text path, seven of the nine
+#: anchored-but-missed questions hit, two of them at rank 1.
+#:
+#: Swept over the 46-question set at limit 5. `reserve 0` is padding alone --
+#: text fills only slots the graph left empty, so it displaces nothing and
+#: cannot cost a hit:
+#:
+#:     reserve      0     1     2     3     4     5   graph only
+#:     hits/46     33    35    34    35    35    36    31
+#:     recall     72%   76%   74%   76%   76%   78%   67%
+#:
+#: 1 is chosen over the larger reserves because they buy nothing beyond it
+#: while evicting more of the path that resolved a name. The last column is why
+#: this constant exists at all; the 5 column is reported because it is
+#: uncomfortable and hiding it would be dishonest -- BM25 alone outscores the
+#: graph path on SECTION RECALL, which is the only thing this set measures. It
+#: does not measure the edges, and the edges are what made the agent right
+#: about the tavern's three owners where prose alone said canon did not cover it.
+TEXT_SLOTS = 1
+
 
 @dataclass(frozen=True)
 class Anchor:
@@ -183,6 +219,16 @@ class Passage:
     #: Switzerland. The score is the only signal a caller has that an answer is
     #: thin, so it travels rather than being consumed here.
     score: float | None = None
+    #: Which path put THIS passage in front of the reader. One result now mixes
+    #: both, so the label belongs on the passage rather than only on the
+    #: `Retrieval`: a section that resolved a name is a fact about the book, a
+    #: section Lucene scored is a guess about the question, and the two now sit
+    #: side by side in one list.
+    #:
+    #: Defaulted rather than required so the callers and fixtures that build a
+    #: graph passage by hand keep working. `_text_passages` sets it explicitly,
+    #: and a test pins that every text passage carries the label.
+    path: str = PATH_GRAPH
 
 
 @dataclass(frozen=True)
@@ -203,10 +249,16 @@ class Retrieval:
     #: case-folded fallback was what anchored the question. Surfaced rather
     #: than swallowed: a fallback nobody can observe becomes the default.
     loose: bool = False
-    #: Which path answered: `graph` (a name resolved), `text` (the prose
-    #: fallback), or empty (nothing did). Never inferred from whether `anchors`
-    #: is empty -- a caller reading a text answer must be able to see that it
-    #: is one.
+    #: How the QUESTION was answered: `graph` (a name resolved), `text` (nothing
+    #: did and the prose was searched instead), or empty (nothing answered).
+    #: Never inferred from whether `anchors` is empty -- a caller reading a text
+    #: answer must be able to see that it is one.
+    #:
+    #: This is now the coarser of two labels. A `graph` result still contains
+    #: text passages, because `TEXT_SLOTS` reserves room for them; which one put
+    #: any PARTICULAR passage in front of the reader is `Passage.path`. Reading
+    #: this field as "every passage below resolved a name" was true before that
+    #: reservation existed and is not true now.
     path: str = PATH_NONE
     #: The terms the text fallback searched on, so a bad text answer can be read
     #: back to the question that produced it.
@@ -248,6 +300,58 @@ def dedupe_edges(rows: list[dict]) -> list[dict]:
         seen.add(key)
         unique.append(row)
     return unique
+
+
+def combine_passages(
+    graph: list[Passage],
+    text: list[Passage],
+    limit: int,
+    reserve: int = TEXT_SLOTS,
+) -> list[Passage]:
+    """One budget, split between the path that resolved a name and the one that
+    scored the prose. Concatenation, never a blended score.
+
+    The two orderings are NOT comparable -- `occurrences + 3*terms` and Lucene's
+    BM25 are different units -- so nothing here adds, scales or normalises them
+    against each other. Each list arrives already ranked by its own rule, and
+    this function only decides how many slots each gets. That is what keeps
+    `Passage.path` meaningful: a reader can still say which path is responsible
+    for any line, which a merged score would destroy.
+
+    `reserve` slots are held for text. The graph takes the rest AND any slack
+    text does not use, so the two effects the sweep measured apart are one rule
+    here:
+
+      * a graph path returning FEWER than `limit - reserve` candidates is padded
+        out of text, displacing nothing -- 11 of the 46 questions
+      * a graph path with more candidates than budget gives `reserve` of them up
+
+    Order is graph-first because a resolved name outranks a guess at equal
+    standing; `reserve=0` degenerates to padding alone.
+
+    A section reached by both paths appears ONCE, keeping whichever came first
+    -- which, for anything inside the graph's kept prefix, is the graph's copy
+    with its occurrence count and entity ids intact.
+
+    THE RESERVATION NEVER TAKES THE GRAPH'S LAST SLOT. At `limit=1` the
+    arithmetic gave the graph `1 - 1 = 0`, so a question that resolved a name
+    got back a single Lucene guess and both of its real candidates counted as
+    dropped. A guess may fill what a name left empty and may take the tail of a
+    long list; it may not evict the name entirely.
+    """
+    if graph:
+        reserve = min(reserve, limit - 1)
+    kept = graph[: max(0, limit - reserve)]
+    out: list[Passage] = list(kept)
+    seen = {p.section_id for p in kept}
+    for passage in [*text, *graph[max(0, limit - reserve) :]]:
+        if len(out) >= limit:
+            break
+        if passage.section_id in seen:
+            continue
+        seen.add(passage.section_id)
+        out.append(passage)
+    return out
 
 
 def find_names(question: str, forms: list[str], *, fold_case: bool = False) -> list[str]:
@@ -350,24 +454,95 @@ class CanonRetriever:
             anchor_words = {word for a in anchors for word in a.surface.lower().split()}
             terms = [t for t in content_terms(question) if t not in anchor_words]
             passages = self._passages(session, ids, terms)
-            kept = passages[:limit]
+
+            # The text path runs even though a name resolved, and this is the
+            # change that matters most. Anchoring is not the same as anchoring
+            # WELL: `coffin` resolves to an extracted prop in Castle Ravenloft,
+            # and while text ran only on a total anchoring failure, "who is
+            # lying in the coffin in the burgomaster's mansion" had no way back.
+            #
+            # Searched on the question's OWN terms -- `content_terms(question)`,
+            # not `terms` -- because the anchor words are removed only to stop
+            # one signal being counted twice inside the graph's ranking. Lucene
+            # is a separate ordering that never sees those occurrences, so
+            # withholding `strahd` from it would just make it a worse search.
+            text_terms = content_terms(question)
+            text_passages = self._text_passages(session, text_terms, limit)
+            kept = combine_passages(passages, text_passages, limit)
+
             edges = dedupe_edges(self._rows(session, EDGES, {"ids": ids}))
             accepted, proposed = split_by_status(edges)
 
+            # Edges stay anchored on the RESOLVED names, and deliberately do not
+            # follow the text passages the reservation added. The text path
+            # gathers entities from the sections it scored because it has no
+            # resolved name to work from; here there is one, and pulling in
+            # relationships about entities the question never named -- chosen by
+            # a Lucene score -- would put guesses under the heading that reads
+            # as what the graph knows about what you asked.
             return Retrieval(
                 question=question,
                 anchors=tuple(anchors),
                 passages=tuple(kept),
                 accepted=tuple(accepted),
                 proposed=tuple(proposed),
-                dropped=len(passages) - len(kept),
+                # Graph candidates the budget cut, which is what this has always
+                # counted. Text passages are not counted as dropped: the text
+                # path is bounded by `limit` at the query, so it has no tail.
+                dropped=max(0, len(passages) - sum(1 for p in kept if p.path == PATH_GRAPH)),
                 ambiguous=tuple(ambiguous),
                 loose=loose,
                 path=PATH_GRAPH,
+                terms=tuple(text_terms),
                 miss_reason="" if kept else "anchored, but no section mentions the anchors",
             )
 
     # -- internals ---------------------------------------------------------
+
+    def _text_passages(self, session, terms: list[str], limit: int) -> list[Passage]:
+        """The prose search itself, with no opinion about why it was called.
+
+        Split out of `_by_text` so the two callers cannot drift: the fallback
+        that runs when nothing anchored, and the `TEXT_SLOTS` reservation that
+        runs alongside a graph result. A second copy of "search the sections and
+        build passages" would be free to disagree with this one about width,
+        truncation or the score -- the same duplication `passage.py` exists to
+        prevent for "the same sentence".
+
+        The passage is anchored at offset 0, since Lucene scores a whole
+        document and picking one matched term to centre on would imply the
+        section is about that term. At `section` width that is the whole
+        section anyway; at `sentence` width it is the section's opening, which
+        is the book's own topic statement.
+        """
+        if not terms:
+            return []
+        rows = self._rows(
+            session,
+            SEARCH_SECTIONS,
+            {"query": lucene_query(terms), "limit": limit},
+        )
+        return [
+            Passage(
+                section_id=row["section_id"],
+                chapter=row["chapter"],
+                chapter_index=row["chapter_index"],
+                section=row["section"],
+                section_index=row["section_index"],
+                # Through `_render`, so `passage_width` applies here too. It
+                # used to call `derive_passage` directly and always sent one
+                # sentence, silently ignoring the setting -- which is how a
+                # whole-section search returned 930 tokens of the wrong
+                # sentence.
+                text=self._render({"text": row["text"], "offset": 0}),
+                truncated=self._truncated({"text": row["text"]}),
+                occurrences=0,
+                entity_ids=(),
+                score=row["score"],
+                path=PATH_TEXT,
+            )
+            for row in rows
+        ]
 
     def _by_text(self, session, question: str, limit: int) -> Retrieval:
         """The last resort: search the prose for what the question describes.
@@ -401,31 +576,7 @@ class CanonRetriever:
                     "removed, says nothing to search for"
                 ),
             )
-        rows = self._rows(
-            session,
-            SEARCH_SECTIONS,
-            {"query": lucene_query(terms), "limit": limit},
-        )
-        passages = [
-            Passage(
-                section_id=row["section_id"],
-                chapter=row["chapter"],
-                chapter_index=row["chapter_index"],
-                section=row["section"],
-                section_index=row["section_index"],
-                # Through `_render`, so `passage_width` applies here too. It
-                # used to call `derive_passage` directly and always sent one
-                # sentence, silently ignoring the setting -- which is how a
-                # whole-section search returned 930 tokens of the wrong
-                # sentence.
-                text=self._render({"text": row["text"], "offset": 0}),
-                truncated=self._truncated({"text": row["text"]}),
-                occurrences=0,
-                entity_ids=(),
-                score=row["score"],
-            )
-            for row in rows
-        ]
+        passages = self._text_passages(session, terms, limit)
         section_ids = [p.section_id for p in passages]
         ids = sorted(
             row["id"]
@@ -478,10 +629,17 @@ class CanonRetriever:
 
         Note what this does NOT fix, because ranking cannot: a section the scan
         never linked is not a candidate at any weight. "What happens at the
-        cemetery at midnight" still misses, because the book writes `cemetery`
-        in lower case there and the single-word case rule -- the rule keeping
-        the LORE entity `Light` off every lit torch -- means `Cemetery` has no
-        mention in it.
+        cemetery at midnight" is the example -- the book writes `cemetery` in
+        lower case in `March of the Dead`, and the single-word case rule (the
+        rule keeping the LORE entity `Light` off every lit torch) means
+        `Cemetery` has no mention there.
+
+        That question now hits, and NOT because ranking improved: `TEXT_SLOTS`
+        reaches the section through the index instead. The limit stated here is
+        real and unchanged. It is worth being precise about which repair worked,
+        because a sweep of nine occurrence-saturating and term-weighting
+        variants moved this set by at most one question in either direction --
+        ranking was measured, repeatedly, and is not where these misses live.
         """
         merged: dict[str, dict] = {}
         for row in self._rows(session, MENTIONS, {"ids": ids}):
