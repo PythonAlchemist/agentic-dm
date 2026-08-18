@@ -63,6 +63,21 @@ def normalize(name: str) -> str:
     `Ismark Kolyanovich` are the same name written twice. Dropping it changes
     length, which would be unsafe on section text -- offsets index that -- and
     is safe here, where a name is only ever compared.
+
+    AN ABBREVIATION'S PERIOD IS NOT DROPPED HERE, and the asymmetry with
+    `mention_pattern` -- which does make it optional -- is deliberate.
+
+    `normalized` is STORED on every `:Alias` node, so changing this function
+    silently invalidates every value already in the graph. Dropping periods here
+    was tried on 2026-08-17 and made `St. Andral's Church` unresolvable: the
+    query normalized to `st andrals church` while the node still held
+    `st. andral's church`, and the lookup that had been returning the wrong
+    church started returning nothing at all.
+
+    It is also unnecessary. `find_names` matches a question against the ALIAS's
+    own spelling and returns THAT, so what reaches this function is the string
+    the book wrote, not the string a caller typed. Tolerating the caller's
+    spelling is the matcher's job, and it is done there.
     """
     folded = strip_soft_hyphens(fold_apostrophe(name))
     trimmed = folded.strip()

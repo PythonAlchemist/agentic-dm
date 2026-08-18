@@ -449,7 +449,19 @@ def mention_pattern(name: str, *, fold_case: bool = False) -> re.Pattern[str] | 
     # SETS IT, so the pattern tolerates one anywhere inside. Absorbing it here
     # rather than deleting it from the text is what keeps every stored offset
     # valid -- the match still reports a span in the section's own coordinates.
-    body = rf"{SOFT_HYPHEN}*".join(re.escape(ch) for ch in folded)
+    #
+    # AN ABBREVIATION'S PERIOD IS OPTIONAL, for the same reason and in the same
+    # spirit as the apostrophe fold. The book sets `St. Andral's Church`; a DM
+    # types `St Andral's church`; they are the same name, and the difference is
+    # typographic rather than about the world. Measured: that one period was the
+    # whole reason "why is St Andral's church no longer safe" resolved to
+    # chapter 3's `Church` in Barovia instead.
+    #
+    # Optional, never inserted: the pattern still requires the LETTERS, so `St`
+    # cannot match `Str` and this loosens nothing beyond the period itself.
+    body = rf"{SOFT_HYPHEN}*".join(
+        r"\.?" if ch == "." else re.escape(ch) for ch in folded
+    )
     return re.compile(rf"(?<!{WORD_CHAR}){body}(?!{WORD_CHAR})", flags)
 
 

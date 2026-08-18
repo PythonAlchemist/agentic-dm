@@ -876,3 +876,42 @@ class TestAKeyedPlacesNameIsOnlyItsOwnChaptersName:
         )
         strahd = EntityNames(id="cos:strahd-von-zarovich", name="Strahd von Zarovich")
         assert len(scan_mentions([section], [strahd], "into-the-mists")) == 1
+
+
+class TestAnAbbreviationsPeriodIsOptional:
+    """The book sets `St. Andral's Church`; a DM types `St Andral's church`.
+
+    Measured: that one period sent "why is St Andral's church no longer safe"
+    to chapter 3's `Church` in Barovia instead of Vallaki's.
+    """
+
+    def test_a_name_with_a_period_matches_text_without_one(self):
+        pattern = mention_pattern("St. Andral's Church")
+        assert pattern.search("why is St Andral's Church unsafe")
+
+    def test_and_still_matches_text_that_has_it(self):
+        pattern = mention_pattern("St. Andral's Church")
+        assert pattern.search("the St. Andral's Church stands here")
+
+    def test_the_letters_are_still_required(self):
+        """Optional, never inserted -- this loosens nothing but the period."""
+        assert mention_pattern("St.").search("Strahd walks") is None
+
+    def test_a_period_is_not_a_wildcard(self):
+        assert mention_pattern("St. Andral").search("St Xavier Andral") is None
+
+
+class TestNormalizeIsNotChangedLightly:
+    def test_it_keeps_the_period_because_the_graph_stores_the_result(self):
+        """`normalized` is stored on every :Alias node, so changing this
+        function invalidates every value already written. Dropping periods here
+        was tried and made `St. Andral's Church` resolve to NOTHING -- the query
+        normalized to `st andrals church`, the node still held
+        `st. andral's church`.
+
+        It is also unnecessary: `find_names` returns the ALIAS's own spelling,
+        so what reaches `normalize` is the book's string, never the caller's.
+        """
+        from backend.canon.aliases import normalize
+
+        assert normalize("St. Andral's Church") == "st. andral's church"
