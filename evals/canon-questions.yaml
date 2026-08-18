@@ -141,15 +141,26 @@ questions:
     anchor_hint: "Burgomaster's Mansion"
     note: "Kolyan Indirovich, dead three days; Ismark and Ireena built the coffin."
 
+  # *Corrected 2026-08-18.* Both of these pointed at
+  # `cos:the-village-of-barovia#21`, which is the section headed "Dream
+  # Pastries" -- Morgantha selling to villagers, and the gold for q13 and q14
+  # directly above. Neither question can be answered from it, so both were
+  # unhittable by any retrieval whatsoever, and both spent months being counted
+  # as "anchored but missed" -- the bucket that means RANKING is at fault. Two
+  # rounds of ranking work were aimed partly at them.
+  #
+  # Found by reading every gold heading back against its own note, which is now
+  # the standing check: a gold is only as good as somebody having looked at it.
+  # The other 44 were correct.
   - id: q21
     question: "Where are the Vistani camps?"
-    sections: ["cos:the-village-of-barovia#21"]
+    sections: ["cos:the-lands-of-barovia#49", "cos:the-town-of-vallaki#93"]
     anchor_hint: "Vistani"
     note: "Two of them: one at Tser Pool, one just outside Vallaki."
 
   - id: q22
     question: "Who are Strahd's undead enemies in Barovia?"
-    sections: ["cos:the-village-of-barovia#21"]
+    sections: ["cos:argynvostholt#1"]
     anchor_hint: "Order of the Silver Dragon"
     note: "Revenants of the fallen Order of the Silver Dragon, in a ruin west of Vallaki (chapter 7)."
 

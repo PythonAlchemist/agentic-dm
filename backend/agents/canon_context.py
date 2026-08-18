@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from backend.canon.retrieval import PATH_TEXT, Retrieval
+from backend.canon.retrieval import DEFAULT_LIMIT, PATH_TEXT, Retrieval
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,10 @@ class Depth:
     a bad answer came from the model or from a false edge fed to it.
     """
 
-    passages: int = 5
+    #: Defaulted from the retriever's own budget rather than restated, so the
+    #: number the evaluation harness measures is the number the agent gets.
+    #: These were both 5 and drifted apart the moment one of them moved.
+    passages: int = DEFAULT_LIMIT
     max_edges: int = 12
     include_proposed: bool = True
     #: `section` sends each passage's whole section; `sentence` sends one

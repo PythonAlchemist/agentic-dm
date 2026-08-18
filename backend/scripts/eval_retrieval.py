@@ -27,7 +27,7 @@ from pathlib import Path
 
 import yaml
 
-from backend.canon.retrieval import CanonRetriever, Retrieval
+from backend.canon.retrieval import DEFAULT_LIMIT, CanonRetriever, Retrieval
 
 DEFAULT_QUESTIONS = Path("evals/canon-questions.yaml")
 
@@ -180,7 +180,10 @@ def render(rows: list[dict], summary: dict, *, verbose: bool) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
-    parser.add_argument("--limit", type=int, default=5, help="passages per question")
+    parser.add_argument(
+        "--limit", type=int, default=DEFAULT_LIMIT,
+        help="passages per question; defaults to what the retriever ships with",
+    )
     parser.add_argument("--verbose", action="store_true", help="print every miss in full")
     args = parser.parse_args()
 

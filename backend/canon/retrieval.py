@@ -114,7 +114,19 @@ RETURN DISTINCT e.id AS id
 #: Retrieval returns at most this many passages unless told otherwise. A DM
 #: reading an answer will not read twenty paragraphs, and an unbounded context
 #: hides a ranking problem by making every miss a hit.
-DEFAULT_LIMIT = 5
+#:
+#: RAISED FROM 5 TO 8 ON 2026-08-18, and it is a COST decision rather than a
+#: tuned one. Recall rises with the budget and does not come back down --
+#: 5 -> 35/46, 6 -> 35, 8 -> 38, 10 -> 38, 12 -> 40 -- so there is no peak to
+#: find, only a point to stop at. 8 is where the curve has given up most of
+#: what it has for about 1,700 tokens of context instead of 1,050.
+#:
+#: What it buys is coverage, NOT precision. MRR is 0.57 at every budget in that
+#: sweep, so this is showing a DM more passages rather than putting the right
+#: one higher, and every extra passage is also another distractor for a model
+#: answering from them. Six of the misses it fixes were already sitting in the
+#: text index's top 20; the graph path reaches none of them at any depth.
+DEFAULT_LIMIT = 8
 
 #: How much of a section a passage carries.
 WIDTH_SENTENCE = "sentence"
@@ -169,7 +181,13 @@ TERM_WEIGHT = 3
 #:     recall     72%   76%   74%   76%   76%   78%   67%
 #:
 #: 1 is chosen over the larger reserves because they buy nothing beyond it
-#: while evicting more of the path that resolved a name. The last column is why
+#: while evicting more of the path that resolved a name. It was left at 1 when
+#: `DEFAULT_LIMIT` rose to 8, where the whole range from 1 to 7 scores 38 or 39
+#: of 46 -- one question wide. Moving it to the 39 would be fitting a constant
+#: to noise, the mistake `TERM_WEIGHT` documents avoiding. Once the budget is
+#: this wide the split stops mattering; the budget is doing the work.
+#:
+#: The last column is why
 #: this constant exists at all; the 5 column is reported because it is
 #: uncomfortable and hiding it would be dishonest -- BM25 alone outscores the
 #: graph path on SECTION RECALL, which is the only thing this set measures. It
