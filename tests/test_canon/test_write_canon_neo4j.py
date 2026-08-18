@@ -958,8 +958,11 @@ class TestTheSpineInTheGraph:
         assert row["section"] == "The Old Bonegrinder"
         assert row["entity"] == named("Madam Eva")
         assert row["alias"] == named("Madam Eva")
-        # The entity, plus how loudly this section names it.
-        assert row["mention"] == f"{named('Madam Eva')} x2"
+        # The SECTION, plus how loudly it names the entity. Not the entity:
+        # expanding an entity draws its mentions and no sections, and captioning
+        # each with the name of the node they all point at made six mentions of
+        # Ismark render as six identical circles.
+        assert row["mention"] == "The Old Bonegrinder x2"
 
     def test_a_mention_named_once_carries_no_count(self, graph):
         """`x1` on every quiet mention would be noise on the majority of nodes."""
@@ -972,7 +975,34 @@ class TestTheSpineInTheGraph:
             "MATCH (m:Mention {chapter_slug:$slug}) RETURN m.display_name AS d",
             {"slug": CHAPTER_A},
         ).single()["d"]
-        assert caption == named("Madam Eva")
+        assert caption == "Section 0"
+
+    def test_two_mentions_of_one_entity_get_different_captions(self, graph):
+        """THE DEFECT THAT MOVED THE CAPTION, stated as the property it broke.
+
+        Expanding an entity in the Browser draws its mentions and no sections,
+        so a caption naming the entity is the name of the node they all point
+        at. Six mentions of Ismark rendered as six identical circles, truncated
+        to `Ismark Kolyan...` -- which cut off the occurrence count, the only
+        part that had differed.
+        """
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva], [], chapter_spine=spine(
+            eva,
+            sections=[
+                prose(0, "The Old Bonegrinder", f"{named('Madam Eva')} reads."),
+                prose(1, "Tser Pool", f"{named('Madam Eva')} waits."),
+            ],
+        ))
+        captions = [
+            r["d"]
+            for r in graph.run(
+                "MATCH (m:Mention {chapter_slug:$slug}) RETURN m.display_name AS d",
+                {"slug": CHAPTER_A},
+            )
+        ]
+        assert len(captions) == 2
+        assert len(set(captions)) == 2, captions
 
     def test_a_section_carries_the_text_a_mention_quotes(self, graph):
         write(graph, CHAPTER_A, [node("Church")], [], chapter_spine=spine(
@@ -1219,6 +1249,7 @@ class TestSilentNoOpsRaise:
             occurrences=1,
             offset=0,
             entity_name=named("Nobody"),
+            section_heading="A Section",
         )
         with pytest.raises(ValueError, match="mention endpoint missing"):
             graph.execute_write(_write_mention, orphan)
@@ -1456,6 +1487,7 @@ def _scan(graph, chapter_slug: str):
             occurrences=r["occurrences"],
             offset=r["offset"],
             entity_name=r["entity_name"],
+            section_heading=r["section_heading"],
         )
         for r in graph.run(
             """
@@ -1463,7 +1495,7 @@ def _scan(graph, chapter_slug: str):
                   -[:IN_SECTION]->(s:Section)
             RETURN m.id AS id, e.id AS entity, s.id AS section,
                    m.occurrences AS occurrences, m.offset AS offset,
-                   e.name AS entity_name
+                   e.name AS entity_name, s.heading AS section_heading
             """,
             {"slug": chapter_slug},
         )

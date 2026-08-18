@@ -55,13 +55,18 @@ WHERE n.{source} IS NOT NULL AND trim(n.{source}) <> ''
 RETURN elementId(n) AS eid, n.{source} AS value
 """
 
-#: A mention's caption names the ENTITY it refers to. A mention whose
-#: `REFERS_TO` is missing is skipped rather than captioned blank -- it is a
-#: broken mention, and this script's job is not to paper over that.
+#: A mention's caption names the SECTION it sits in -- see
+#: `WriteMention.properties` for why the entity's name was the wrong choice.
+#: Both endpoints are required and a mention missing either is SKIPPED rather
+#: than captioned blank: it is a broken mention, and this script's job is not to
+#: paper over that.
 _MENTION_ROWS = """
 MATCH (m:Mention)-[:REFERS_TO]->(e:Entity)
+MATCH (m)-[:IN_SECTION]->(s:Section)
 WHERE e.name IS NOT NULL AND trim(e.name) <> ''
+  AND s.heading IS NOT NULL AND trim(s.heading) <> ''
 RETURN elementId(m) AS eid, m.id AS id, e.id AS entity_id, e.name AS entity_name,
+       s.heading AS section_heading,
        m.chapter_slug AS chapter_slug, m.occurrences AS occurrences,
        m.offset AS offset, m.display_name AS current
 """
@@ -79,6 +84,7 @@ def _mention_caption(row) -> str:
         occurrences=row["occurrences"] or 1,
         offset=row["offset"] or 0,
         entity_name=row["entity_name"],
+        section_heading=row["section_heading"],
     ).properties["display_name"]
 
 

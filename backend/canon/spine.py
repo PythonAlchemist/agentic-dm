@@ -278,12 +278,16 @@ class WriteMention:
     occurrences: int
     #: Character offset of the FIRST occurrence, into the section's own text.
     offset: int
-    #: The name of the entity this mention refers to, carried for one purpose:
-    #: `display_name`. REQUIRED rather than defaulted to `""`, because a
-    #: defaulted caption is the silent-zero shape this module exists to remove
-    #: -- it would render as a blank circle and look like a styling problem
-    #: rather than a missing plumb.
+    #: The name of the entity this mention refers to. REQUIRED rather than
+    #: defaulted to `""`, because a defaulted caption is the silent-zero shape
+    #: this module exists to remove -- it would render as a blank circle and
+    #: look like a styling problem rather than a missing plumb.
     entity_name: str
+    #: The heading of the section this mention sits in, carried for the same
+    #: one purpose as `entity_name`: `display_name`. Same reasoning about being
+    #: required, and see `properties` for why it is the caption and the entity
+    #: name is not.
+    section_heading: str
     #: Which surface forms did the naming, most-used first. Empty is impossible
     #: for a scanned mention -- something matched, or there would be no mention.
     uses: tuple[AliasUse, ...] = ()
@@ -297,11 +301,38 @@ class WriteMention:
         not declare its chapter could not be replaced with the chapter that made
         it.
 
-        `display_name` is the ENTITY's name, not the section's. A mention hangs
-        off a section that is captioned already, so the question its own circle
-        has to answer is *who appears here* -- and `occurrences` rides along so
-        a glance distinguishes a passing reference from the section that is
-        really about someone.
+        `display_name` IS THE SECTION'S HEADING, NOT THE ENTITY'S NAME, and it
+        was the other way round until a reader opened the graph and reported a
+        mention of Ismark with nothing in it.
+
+        The old caption read `Ismark Kolyanovich x13`, on the reasoning that a
+        mention hangs off a section captioned already, so its own circle should
+        answer *who appears here*. That reasoning fails in the view people
+        actually use. Expanding an ENTITY draws its mentions and no sections at
+        all: six circles, every one captioned with the name of the node they all
+        point at, and the Browser truncating each to `Ismark Kolyan...` so that
+        even the occurrence count -- the only part that differed -- fell off the
+        end. Six mentions in six different sections, indistinguishable.
+
+        The reverse view does not have the matching problem, which is what
+        settles it. Expanding a SECTION draws mentions whose `REFERS_TO` targets
+        are all DIFFERENT entities, visible on screen, so a shared caption still
+        leaves them told apart. An entity view captioned by entity leaves
+        nothing to tell them apart by.
+
+        A mention IS the pair `(entity, section)` -- its id says so -- and the
+        entity half is the one already answered by the edge it sits on.
+
+        `occurrences` rides along, so a glance still distinguishes a passing
+        reference from the section that is really about someone.
+
+        A RESIDUAL, MEASURED AND LEFT: 17 entities across 3,304 mentions are
+        still captioned identically twice, because the book reuses a handful of
+        headings between chapters -- `Fortunes of Ravenloft`, `Random
+        Encounters`, `Treasure`, `High Deck`. Naming the chapter as well would
+        fix those and cost every other caption its first thirteen characters to
+        a slug the reader can already see, which is the trade that produced the
+        original defect. 17 out of 3,304 is where this stops.
         """
         loud = f" x{self.occurrences}" if self.occurrences > 1 else ""
         return {
@@ -309,7 +340,7 @@ class WriteMention:
             "chapter_slug": self.chapter_slug,
             "occurrences": self.occurrences,
             "offset": self.offset,
-            "display_name": f"{self.entity_name}{loud}",
+            "display_name": f"{self.section_heading}{loud}",
         }
 
 
@@ -626,6 +657,7 @@ def scan_mentions(
                     occurrences=len(spans),
                     offset=start,
                     entity_name=entity.name,
+                    section_heading=section.heading,
                     # Most-used first, ties by name: a stable order, and the
                     # form the section leans on reads first.
                     uses=tuple(
