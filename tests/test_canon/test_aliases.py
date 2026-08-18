@@ -16,6 +16,16 @@ from backend.canon.seed_loader import (
 )
 
 
+def _every_form() -> set[str]:
+    """Every authored surface form in the committed seed, case-folded.
+
+    Folded because these are refusal tests: recording `Castle` rather than
+    `castle` must fail them too, and an exact-string check would quietly let
+    the capitalised spelling back in.
+    """
+    return {a.lower() for forms in load_aliases().values() for a in forms}
+
+
 class TestNormalize:
     def test_it_lowercases(self):
         assert normalize("Strahd von Zarovich") == "strahd von zarovich"
@@ -240,3 +250,29 @@ class TestSeedValidation:
         bad.write_text("aliases:\n  - name: Strahd\n    aliases: []\n")
         with pytest.raises(ValueError, match="invalid alias seed"):
             load_aliases(bad)
+
+    def test_the_correct_shorthands_are_withdrawn_on_measurement(self):
+        """`castle`, `abbey`, `temple` and `winery` all PASSED the corpus check
+        -- every occurrence refers to the intended place -- and are still not
+        recorded, because retrieval measured worse with them: 67% -> 65%, and
+        "what guards the madhouse at the abbey" went from a hit to a miss.
+
+        `abbey` pulls the whole Abbey of Saint Markovia into the anchor set and
+        the madhouse loses to its own siblings. Being right about the book is
+        not sufficient; a broad anchor drowns a specific answer while ranking
+        cannot separate them.
+        """
+        assert not ({"castle", "abbey", "temple", "winery"} & _every_form())
+
+    def test_windmill_is_heraldry_in_death_house(self):
+        """25 occurrences, 7 of them in Death House: a coat of arms, a cameo
+        worked into a sword hilt, a framed picture. Not Old Bonegrinder --
+        the same shape as `Blinsky toy`."""
+        forms = {a.lower() for a in load_aliases().get("old-bonegrinder", ())}
+        assert "windmill" not in forms
+
+    def test_the_ambiguous_shorthands_are_refused(self):
+        """Barovia and Vallaki each have a church, a burgomaster and a mansion.
+        `count` is also an English verb."""
+        assert not ({"church", "mansion", "burgomaster", "tavern",
+                     "town", "village", "count", "devil"} & _every_form())

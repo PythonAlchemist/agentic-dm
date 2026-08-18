@@ -200,3 +200,38 @@ aliases:
     aliases: ["Donavich’s Bedroom"]
   - name: Doru's Bedroom
     aliases: ["Doru’s Bedroom"]
+
+  # --- Shorthand a DM types: CHECKED, CORRECT, AND NOT RECORDED ---
+  #
+  # `castle`, `abbey`, `temple` and `winery` all passed the corpus check that
+  # refused `Blinsky` and `Mary`. Counted across the whole book, their
+  # occurrences outside the home chapter read one by one, every one referring to
+  # the intended place:
+  #
+  #   castle 250 over 21 chapters, all Castle Ravenloft
+  #   abbey   77, 51 in Krezk, the rest appendix D on the Abbot
+  #   temple 116, 86 in chapter 13, the rest "Amber Temple" in full
+  #   winery  74, 44 in chapter 12, the rest naming the Wizard of Wines
+  #
+  # THEY WERE RECORDED, MEASURED, AND WITHDRAWN. Retrieval got worse:
+  #
+  #   recall 67% -> 65%, MRR 0.55 -> 0.53 over 46 questions
+  #   "what guards the madhouse at the abbey" went from a HIT to a miss
+  #
+  # `abbey` pulled the whole Abbey of Saint Markovia into the anchor set and the
+  # madhouse section lost to its own siblings. The alias is right about the book
+  # and wrong for the system: a broad anchor drowns a specific answer, which is
+  # the same failure `Strahd` produces on q17 and q22.
+  #
+  # ALIAS BREADTH AND RANKING QUALITY ARE COUPLED, and that is the finding worth
+  # keeping. These four are correct and should go in the moment ranking can tell
+  # a section about the abbey from a section merely inside it. Recording them now
+  # buys one anchored question and costs a right answer.
+  #
+  # Also refused, on the corpus check rather than on measurement:
+  #   windmill  25, and 7 in DEATH HOUSE -- a coat of arms, a cameo on a sword
+  #             hilt, a framed picture. Heraldry. The `Blinsky toy` shape.
+  #   count     the English verb.
+  #   devil     a creature type before it is an epithet.
+  #   tavern, church, mansion, burgomaster, town, village
+  #             each names two or more different things here.
