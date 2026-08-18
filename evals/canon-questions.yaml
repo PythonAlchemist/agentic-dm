@@ -16,9 +16,33 @@
 # through. It is DIAGNOSTIC ONLY and never scored -- it is there so a miss can
 # be read as "the anchor never resolved" rather than just "missed".
 #
-# Coverage is the three written chapters. Two questions at the end name nothing
-# the graph can anchor on; they are kept deliberately, because a retrieval
-# system that cannot say "I have no handle on this" is worse than one that can.
+# Two questions at the end name nothing the graph can anchor on; they are kept
+# deliberately, because a retrieval system that cannot say "I have no handle on
+# this" is worse than one that can.
+#
+# GOLD MAY NAME MORE THAN ONE SECTION, AND MUST WHEN THE BOOK ANSWERS TWICE.
+# Audited fully on 2026-08-18, in two passes that ask different things:
+#
+#   1. does each gold answer its question?  Two did not -- q21 and q22 both
+#      pointed at "Dream Pastries", which is q13's and q14's gold. Corrected.
+#   2. does the book ALSO answer it somewhere unlisted?  Two did -- q22 through
+#      Appendix D's Vladimir Horngaard entry, and q25 through Appendix D's
+#      Rahadin entry, which is a BETTER answer than the encounter that was
+#      listed. Both widened.
+#
+# Only the first pass had ever been run, and on its own it is misleading: a
+# perfectly correct gold still scores retrieval a miss for returning the book's
+# other correct section, and that miss lands in `anchored but missed` -- the
+# bucket that says RANKING is at fault. It sent two rounds of work in the wrong
+# direction. `backend.scripts.audit_questions` runs the second pass now, so it
+# is a command rather than something somebody has to think to do.
+#
+# Widening a gold raises the score, which makes it the one edit here that can
+# become tuning the ruler. The rule: a section joins a gold only if it answers
+# the question ON ITS OWN, judged by reading it, and the reason is written into
+# this file beside the entry. The remaining 44 were read and left alone --
+# `N7. Blinsky Toys` never mentions Mary's doll, and Appendix D's Abbot entry
+# describes his golem BRIDE rather than the madhouse's guardian.
 
 questions:
   - id: q01
@@ -158,9 +182,15 @@ questions:
     anchor_hint: "Vistani"
     note: "Two of them: one at Tser Pool, one just outside Vallaki."
 
+  # *Widened 2026-08-18.* Appendix D's entry for Vladimir Horngaard carries a
+  # bolded "Enemies of Strahd" heading and names the revenant who leads them,
+  # so it answers this question on its own. Retrieval was returning it at rank
+  # 5 and being scored a miss for it.
   - id: q22
     question: "Who are Strahd's undead enemies in Barovia?"
-    sections: ["cos:argynvostholt#1"]
+    sections:
+      - "cos:argynvostholt#1"
+      - "cos:appendix-d-monsters-and-npcs#38"
     anchor_hint: "Order of the Silver Dragon"
     note: "Revenants of the fallen Order of the Silver Dragon, in a ruin west of Vallaki (chapter 7)."
 
@@ -196,9 +226,22 @@ questions:
   # running retrieval, gold is section ids, notes paraphrase rather than quote.
   # ==================================================================
 
+  # *Widened 2026-08-18, and the ORIGINAL GOLD WAS THE WORSE OF THE TWO.* Both
+  # sections are headed "Rahadin". `castle-ravenloft#7` is a random-encounter
+  # entry -- "If Rahadin was killed or captured in a previous encounter, this
+  # encounter doesn't occur" -- followed by a d6 table of where he leads you.
+  # `appendix-d#28` opens "Rahadin, the dusk elf chamberlain of Castle
+  # Ravenloft, has served Strahd's family faithfully for nearly five hundred
+  # years", which is the answer to the question as asked. Retrieval was
+  # returning THAT at rank 3 and being scored a miss.
+  #
+  # The encounter is kept rather than replaced: a DM asking who the chamberlain
+  # is may well want the scene in which he turns up.
   - id: q25
     question: "Who is Strahd's chamberlain?"
-    sections: ["cos:castle-ravenloft#7"]
+    sections:
+      - "cos:appendix-d-monsters-and-npcs#28"
+      - "cos:castle-ravenloft#7"
     anchor_hint: "Rahadin"
     note: "Rahadin. He approaches quietly and summons the party to his master."
 
