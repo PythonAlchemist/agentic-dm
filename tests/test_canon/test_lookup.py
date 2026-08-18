@@ -782,7 +782,14 @@ class TestTheRealBook:
         mentions = canon.lookup("Strahd")["mentions"]
 
         assert mentions
-        seen = [(m["chapter"], m["section"]) for m in mentions]
+        # Keyed on `mention_id`, which IS the identity, rather than on
+        # `(chapter, heading)`. *Corrected 2026-08-17*, when the whole book
+        # landed: a heading does not identify a section and this file's own
+        # neighbours say so -- Death House has two `Storage Room`s and two
+        # `Spare Bedroom`s, chapter 4 four `Treasure`s. The test failed on 261
+        # rows against 260 distinct headings, which was the BOOK being right and
+        # the key being wrong.
+        seen = [m["mention_id"] for m in mentions]
         assert len(seen) == len(set(seen)), sorted(seen)
 
     def test_a_section_using_both_of_strahds_names_keeps_both(self, canon):

@@ -63,6 +63,15 @@ def seeded(graph):
     return graph
 
 
+#: Big enough that a page cannot exclude the fixture. *Raised 2026-08-17*, when
+#: the whole book landed: these assertions are about whether campaign scoping
+#: ADMITS a canon node, and `ours()` already filters the answer down to this
+#: test's own ids. A limit of 100 additionally required the fixture to sort into
+#: the first hundred of 626 canon entities, which is a fact about pagination
+#: rather than about scoping, and which broke the moment the graph grew.
+PAGE = 5000
+
+
 def ours(rows: list[dict]) -> set[str]:
     """Ids from this test's own fixture, so a populated database cannot flake it."""
     return {r["id"] for r in rows if str(r.get("id", "")).startswith("pytest:")}
@@ -70,7 +79,7 @@ def ours(rows: list[dict]) -> set[str]:
 
 class TestCanonSurvivesCampaignScoping:
     def test_list_entities_returns_a_canon_item(self, seeded):
-        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=100)
+        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=PAGE)
 
         assert CANON_ITEM in ours(rows)
 
@@ -80,7 +89,7 @@ class TestCanonSurvivesCampaignScoping:
         The share half is the only branch that can admit it: it belongs to no
         campaign, so `BELONGS_TO` cannot, and the type test has to survive NULL.
         """
-        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=100)
+        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=PAGE)
 
         assert CANON_LOCATION in ours(rows)
 
@@ -90,20 +99,20 @@ class TestCanonSurvivesCampaignScoping:
         assert CANON_ITEM in ours(rows)
 
     def test_the_full_graph_returns_canon_nodes(self, seeded):
-        data = CampaignGraphOps().get_full_graph(campaign_id=CAMPAIGN, limit=200)
+        data = CampaignGraphOps().get_full_graph(campaign_id=CAMPAIGN, limit=PAGE)
 
         assert CANON_ITEM in ours(data["nodes"])
 
     def test_this_campaigns_own_entities_still_come_back(self, seeded):
         """The fix must widen the share half, not disable the scoping."""
-        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=100)
+        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=PAGE)
 
         assert CAMPAIGN_NPC in ours(rows)
 
     def test_another_campaigns_entities_are_still_hidden(self, seeded):
         """The regression this scoping exists to prevent. A node with a scoped
         type and no `BELONGS_TO` to us is somebody else's game."""
-        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=100)
+        rows = CampaignGraphOps().list_entities(campaign_id=CAMPAIGN, limit=PAGE)
 
         assert OTHER_NPC not in ours(rows)
 

@@ -195,7 +195,17 @@ class TestSeedUnderResolver:
         ).consume()
 
         edges = PlaneResolver(CAMPAIGN).edges("truth", layers=["narrative"])
-        resolves = [e for e in edges if e["rel_type"] == "RESOLVES_TO"]
+        # Scoped to the TOME's fan-out, which is what shadowing is about.
+        # *Corrected 2026-08-17*: this counted every narrative `RESOLVES_TO` in
+        # the database and asserted 1, which held only while the graph contained
+        # nothing but this fixture. With the whole book loaded, chapter 4
+        # contributes `glyph of warding -RESOLVES_TO-> Strahd`, and the test
+        # failed on the book being present rather than on shadowing being wrong.
+        tome = {"pytest:item:tome@a", "cos:item:tome-of-strahd"}
+        resolves = [
+            e for e in edges
+            if e["rel_type"] == "RESOLVES_TO" and e["source_id"] in tome
+        ]
 
         assert len(resolves) == 1, [e["target_id"] for e in resolves]
         assert resolves[0]["target_id"] == "cos:location:church-of-barovia"

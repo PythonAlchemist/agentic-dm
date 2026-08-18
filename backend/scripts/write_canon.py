@@ -122,6 +122,37 @@ def chapter_place_of_run(extraction_run: dict) -> str | None:
     return place_from_chapter_title(title)
 
 
+
+def keyed_headings_of(
+    chapter_slug: str, corpus: str, splitter: str
+) -> list[tuple[str, str]]:
+    """`(key, place name)` for every keyed section the chapter heads.
+
+    READ FROM THE BOOK, not from the candidates. `keyed_index` derives the same
+    thing from `node.section_heading`, which means a room is only known to be a
+    room if the extractor emitted a surviving candidate from its section --
+    the most reliable evidence in the corpus made conditional on the least.
+    Castle Ravenloft heads 94 keyed rooms and the graph held 65.
+    """
+    from backend.canon.sections import KEYED_HEADING
+
+    _, _, sections = load_spine_sections(chapter_slug, corpus, splitter)
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for section in sections:
+        match = KEYED_HEADING.match(section.heading.strip())
+        if not match:
+            continue
+        key = f"{match.group('stem')}{match.group('suffix') or ''}".strip().lower()
+        # First occurrence wins, as `keyed_index` does: a duplicated key is a
+        # transcription artifact rather than two rooms.
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append((key, match.group("name").strip()))
+    return found
+
+
 def load_spine_sections(
     chapter_slug: str, corpus: str, splitter: str
 ) -> tuple[Chapter, int, list[Section]]:
@@ -521,6 +552,7 @@ def main() -> None:
         chapter_place=chapter_place,
         subtypes=subtypes,
         artifacts=artifacts,
+        keyed_headings=keyed_headings_of(args.chapter, args.corpus, args.splitter),
     )
     print(format_report(report))
 

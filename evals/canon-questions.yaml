@@ -170,3 +170,150 @@ questions:
     sections: ["cos:introduction#4"]
     anchor_hint: ""
     note: "The Character Levels section. Names no entity; expected to fail to anchor."
+
+  # ==================================================================
+  # SECOND SET, written 2026-08-17 after the whole book was loaded.
+  #
+  # WHY IT EXISTS. The 24 questions above all have gold in three of the
+  # book's twenty-four chapters -- the 12% that was written when they were
+  # authored. Tuning retrieval against them optimises for finding chapter 3,
+  # and measurably did: every ranking variant tried returned village-of-barovia
+  # sections most often. A ranking change cannot be trusted until the
+  # measurement spans the corpus it runs on.
+  #
+  # Same discipline as the first set: written from `data/ddb/cos/*.md` before
+  # running retrieval, gold is section ids, notes paraphrase rather than quote.
+  # ==================================================================
+
+  - id: q25
+    question: "Who is Strahd's chamberlain?"
+    sections: ["cos:castle-ravenloft#7"]
+    anchor_hint: "Rahadin"
+    note: "Rahadin. He approaches quietly and summons the party to his master."
+
+  - id: q26
+    question: "Who is the maid cleaning the servants' quarters in the castle, really?"
+    sections: ["cos:castle-ravenloft#50"]
+    anchor_hint: "Maid in Hell"
+    note: "Helga Ruvak, a vampire spawn who claims to be the bootmaker's daughter."
+
+  - id: q27
+    question: "What is at the bottom of the stairs in the Heart of Sorrow tower?"
+    sections: ["cos:castle-ravenloft#34"]
+    anchor_hint: "Heart of Sorrow"
+    note: "The central stair descends to K71; the spiral one climbs every level."
+
+  - id: q28
+    question: "Why is St Andral's church no longer safe?"
+    sections: ["cos:the-town-of-vallaki#10"]
+    anchor_hint: "St. Andral's Church"
+    note: "The saint's bones were stolen from the crypt beneath the altar."
+
+  - id: q29
+    question: "Who are the Keepers of the Feather?"
+    sections: ["cos:the-town-of-vallaki#12"]
+    anchor_hint: "Keepers of the Feather"
+    note: "A secret society of wereravens opposing Strahd; Urwin Martikov is senior in it."
+
+  - id: q30
+    question: "What is the mannequin in the baroness's room wearing?"
+    sections: ["cos:the-town-of-vallaki#49"]
+    anchor_hint: "Bridal Gown and Spirit Mirror"
+    note: "A white bridal gown; there is a gilded full-length mirror on another wall."
+
+  - id: q31
+    question: "How many gates does Vallaki have and what are they called?"
+    sections: ["cos:the-town-of-vallaki#2"]
+    anchor_hint: ""
+    note: "Three: the Zarovich gate north, the Sunset gate west, and an east gate."
+
+  - id: q32
+    question: "Who leads the revenants at Argynvostholt?"
+    sections: ["cos:argynvostholt#1"]
+    anchor_hint: "Order of the Silver Dragon"
+    note: "Vladimir Horngaard, greatest of Argynvost's knights, returned as a revenant."
+
+  - id: q33
+    question: "What roosts at the top of the beacon tower?"
+    sections: ["cos:argynvostholt#61"]
+    anchor_hint: "Beacon of Argynvostholt"
+    note: "Ravens, harmless but watchful, on rafters under a pitched roof."
+
+  - id: q34
+    question: "What guards the madhouse at the abbey?"
+    sections: ["cos:the-village-of-krezk#20"]
+    anchor_hint: "Madhouse"
+    note: "A golem the Abbot made before attempting a bride; it stops mongrelfolk escaping."
+
+  - id: q35
+    question: "Who owns the winery and what will he not talk about?"
+    sections: ["cos:the-wizard-of-wines#2"]
+    anchor_hint: "Martikov"
+    note: "Davian Martikov, old and suspicious; silent on the stolen gems until he trusts you."
+
+  - id: q36
+    question: "What does Morgantha grind in the mill?"
+    sections: ["cos:old-bonegrinder#6"]
+    anchor_hint: "Bone Mill"
+    note: "Children's bones, for the powder that goes into her dream pastries."
+
+  - id: q37
+    question: "Who has the coven's hag eye?"
+    sections: ["cos:old-bonegrinder#1"]
+    anchor_hint: "Morgantha"
+    note: "Cyrus Belview. The coven breaks if a hag dies."
+
+  - id: q38
+    question: "Who are the two children standing in the village street?"
+    sections: ["cos:appendix-b-death-house#2"]
+    anchor_hint: ""
+    note: "Rose and Thorn, the hook that draws the party into Death House."
+
+  - id: q39
+    question: "Where does the chanting heard through the dungeon come from?"
+    sections: ["cos:appendix-b-death-house#45"]
+    anchor_hint: "Ritual Chamber"
+    note: "The ritual chamber; it stops the moment the characters look in."
+
+  - id: q40
+    question: "Does sunlight work normally in Barovia?"
+    sections: ["cos:the-lands-of-barovia#3"]
+    anchor_hint: "Barovia"
+    note: "No. Daylight is bright light but not sunlight, so it triggers no vulnerability."
+
+  - id: q41
+    question: "What is the Evil Eye and what does it do?"
+    sections: ["cos:the-lands-of-barovia#15"]
+    anchor_hint: "Vistani"
+    note: "A Vistana ability duplicating animal friendship, charm person or hold person."
+
+  - id: q42
+    question: "What happens to someone raised from the dead here?"
+    sections: ["cos:the-lands-of-barovia#6"]
+    anchor_hint: ""
+    note: "Indefinite madness, from realising the soul was trapped in the mists."
+
+  - id: q43
+    question: "How often should I check for random encounters on the road?"
+    sections: ["cos:the-lands-of-barovia#16"]
+    anchor_hint: ""
+    note: "Every 30 minutes outdoors; 18+ on a d20 on a road, capped at two per 12 hours."
+
+  - id: q44
+    question: "What is the Vistani camp by the lake like?"
+    sections: ["cos:the-lands-of-barovia#49"]
+    anchor_hint: "Tser Pool"
+    note: "A clearing at Tser Pool, wagon ruts in the mud, five coloured wagons."
+
+  - id: q45
+    question: "What stands at the north end of the Temple of Lost Secrets?"
+    sections: ["cos:the-amber-temple#9"]
+    anchor_hint: "Temple of Lost Secrets"
+    note: "A forty-foot statue of a cowled figure with a face of pure blackness."
+
+  - id: q46
+    question: "Where in the Amber Temple do the characters meet a lich?"
+    sections: ["cos:the-amber-temple#39"]
+    anchor_hint: "Lich's Lair"
+    note: "The lich's lair: a decrepit skeleton amid royal furnishings, asking if it knows you."
+

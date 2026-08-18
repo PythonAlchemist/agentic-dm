@@ -1299,3 +1299,54 @@ class TestAcceptedOnly:
         _, kept_edges = restrict_to_accepted(nodes, edges)
 
         assert [e.rel_type for e in kept_edges] == [RelationshipType.CONTAINS]
+
+
+class TestEveryKeyedRoomTheBookHeads:
+    """*Added 2026-08-17.* `K32. Maid in Hell`, `X27. Lich's Lair` and
+    `N1. St. Andral's Church` were absent from a graph holding the whole book.
+
+    A keyed heading IS the book naming a place, exactly as `E5` containing `E5g`
+    is the book nesting one. It reached the graph only if the extractor emitted
+    a surviving candidate from that section -- the most reliable evidence in the
+    corpus made conditional on the least. Castle Ravenloft heads 94 keyed rooms
+    and the graph held 65.
+    """
+
+    def test_a_keyed_room_is_written_even_with_no_candidate_from_it(self):
+        nodes, _, report = plan_write(
+            [], [], gazetteer(), SLUG,
+            keyed_headings=[("k32", "Maid in Hell")],
+        )
+        assert [n.name for n in nodes] == ["Maid in Hell"]
+        assert report.derived_nodes == 1
+
+    def test_it_is_a_location(self):
+        nodes, _, _ = plan_write(
+            [], [], gazetteer(), SLUG, keyed_headings=[("k32", "Maid in Hell")]
+        )
+        assert "LOCATION" in nodes[0].entity_types
+
+    def test_its_id_carries_the_key_so_two_rooms_of_one_name_stay_two(self):
+        """Castle Ravenloft heads five `Empty Cell`s. A name-only id would make
+        them one room and silently drop four rooms' worth of containment."""
+        nodes, _, _ = plan_write(
+            [], [], gazetteer(), SLUG,
+            keyed_headings=[("k61a", "Empty Cell"), ("k62a", "Empty Cell")],
+        )
+        assert len({n.id for n in nodes}) == 2
+
+    def test_a_candidate_for_the_same_room_keeps_its_own_node(self):
+        """The candidate carries a real section heading and a vote count; the
+        minted one carries neither, and must not overwrite it."""
+        candidate = node("Maid in Hell", "LOCATION", section_heading="K32. Maid in Hell")
+        nodes, _, report = plan_write(
+            [candidate], [], gazetteer("Maid in Hell"), SLUG,
+            keyed_headings=[("k32", "Maid in Hell")],
+        )
+        assert len([n for n in nodes if n.name == "Maid in Hell"]) == 1
+        assert report.derived_nodes == 0
+
+    def test_no_keyed_headings_mints_nothing(self):
+        nodes, _, report = plan_write([], [], gazetteer(), SLUG, keyed_headings=[])
+        assert nodes == []
+        assert report.derived_nodes == 0

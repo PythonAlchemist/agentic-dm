@@ -19,7 +19,7 @@ refuses rather than reaching for DETACH DELETE.
 """
 
 import logging
-from collections.abc import Container, Mapping
+from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
@@ -877,6 +877,7 @@ def plan_write(
     chapter_place: str | None = None,
     subtypes: Mapping[str, LocationSubtype] | None = None,
     artifacts: Container[str] | None = None,
+    keyed_headings: Sequence[tuple[str, str]] = (),
 ) -> tuple[list[WriteNode], list[WriteEdge], FilterReport]:
     """Decide exactly what to write, and count every candidate that is dropped.
 
@@ -1067,6 +1068,33 @@ def plan_write(
             report.derived_nodes += 1
     else:
         chapter_place_ids = set()
+
+    # EVERY KEYED ROOM THE BOOK HEADS, whether or not extraction noticed it.
+    #
+    # A keyed heading -- `K32. Maid in Hell` -- IS the book naming a place, in
+    # the same way `E5 contains E5g` is the book nesting one. It used to reach
+    # the graph only if the extractor happened to emit a surviving candidate
+    # from that section, which made the most reliable evidence in the corpus
+    # conditional on the least reliable. Castle Ravenloft heads 94 keyed rooms
+    # and had 65: a third of the castle did not exist, including `K32. Maid in
+    # Hell`, `X27. Lich's Lair` and `N1. St. Andral's Church`.
+    #
+    # Minted here, deterministically, exactly as the chapter's own place is.
+    # A candidate that already minted the same id keeps its node -- it carries a
+    # real section heading and a vote count, and this does not.
+    for key, place_name in keyed_headings:
+        room_id = mint_id(chapter_slug, place_name, key)
+        types_seen.setdefault(room_id, []).append(LOCATION_LABEL)
+        ids_by_name.setdefault(_fold(place_name), set()).add(room_id)
+        if room_id not in by_id:
+            by_id[room_id] = WriteNode(
+                id=room_id,
+                name=place_name,
+                entity_types=(LOCATION_LABEL,),
+                chapter_slug=chapter_slug,
+            )
+            provenance_rank[room_id] = 0
+            report.derived_nodes += 1
 
     # Types first, the authored labels second, in two passes: `_subtype_of` and
     # `artifact_label` both read `labels`, and a node still carrying one
