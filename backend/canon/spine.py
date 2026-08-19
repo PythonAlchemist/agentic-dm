@@ -67,7 +67,7 @@ from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from backend.canon.models import Section
-from backend.canon.sections import KEYED_HEADING
+from backend.canon.sections import LEGACY_SCHEME, KeyScheme
 from backend.canon.structure import place_of_section
 from backend.canon.writer import BOOK, CANON_PLANE, mint_id
 
@@ -361,17 +361,15 @@ class ChapterSpine:
     describes: tuple[tuple[str, str], ...]
 
 
-def _key_of(heading: str) -> str:
+def _key_of(heading: str, scheme: KeyScheme = LEGACY_SCHEME) -> str:
     """`e5g` for `E5g. Undercroft`, `""` for a prose heading.
 
     The same `KEYED_HEADING` the splitter and `structure.py` share, and the same
     lowercase-and-join `writer.keyed_index` performs -- so the key here and the
     key that minted the place's id are one computation, not two that must agree.
     """
-    match = KEYED_HEADING.match(heading.strip())
-    if not match:
-        return ""
-    return f"{match.group('stem')}{match.group('suffix') or ''}".strip().lower()
+    match = scheme.match(heading)
+    return match.key if match else ""
 
 
 def plan_spine(
@@ -383,6 +381,7 @@ def plan_spine(
     chapter_index: int,
     sections: Sequence[Section],
     location_ids: Container[str],
+    scheme: KeyScheme = LEGACY_SCHEME,
 ) -> ChapterSpine:
     """The spine for one chapter, and the places its sections describe.
 
@@ -407,14 +406,14 @@ def plan_spine(
             depth=section.depth,
             parent_index=section.parent_index,
             text=section.markdown,
-            key=_key_of(section.heading),
+            key=_key_of(section.heading, scheme),
         )
         for section in sections
     )
 
     describes: list[tuple[str, str]] = []
     for section, plain in zip(written, sections, strict=True):
-        place = place_of_section(plain)
+        place = place_of_section(plain, scheme)
         if not place:
             continue
         place_id = mint_id(chapter_slug, place, section.key)

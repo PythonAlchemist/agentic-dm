@@ -124,6 +124,25 @@ def chapter_place_of_run(extraction_run: dict) -> str | None:
 
 
 
+def scheme_for(chapter_slug: str, corpus: str = "ddb") -> "KeyScheme":
+    """The key shapes this chapter refers to, read off its own text.
+
+    Per chapter rather than per book: chapter 2 keys regions with bare letters
+    and Death House keys rooms with bare numbers, and inferring over the whole
+    corpus at once would hand every chapter every other chapter's shapes. Then
+    chapter 1's five tarokka positions -- numbered exactly as Death House
+    numbers rooms -- would become keyed places, and `3. The Sunsword` would be
+    a room.
+    """
+    from backend.canon.sections import KeyScheme
+    from backend.scripts.extract_canon import load_chapters
+
+    for chapter in load_chapters(corpus):
+        if chapter.slug == chapter_slug:
+            return KeyScheme.infer(chapter.markdown)
+    return KeyScheme(frozenset())
+
+
 def book_names_of(corpus: str = "ddb") -> frozenset[str]:
     """Every name the BOOK heads, anywhere in it, minus the structural seed.
 
@@ -151,7 +170,7 @@ def book_names_of(corpus: str = "ddb") -> frozenset[str]:
     separately as `chapter_place`.
     """
     from backend.canon.aliases import normalize
-    from backend.canon.sections import KEYED_HEADING
+    from backend.canon.sections import KeyScheme
     from backend.canon.seed_loader import load_structural_headings
     from backend.scripts.extract_canon import load_chapters
 
@@ -159,11 +178,17 @@ def book_names_of(corpus: str = "ddb") -> frozenset[str]:
     title = re.compile(r"^(chapter \d+|appendix [a-f])\b", re.IGNORECASE)
     names: set[str] = set()
     for chapter in load_chapters(corpus):
+        # The chapter's OWN scheme, so a keyed room is left to the keyed path
+        # and does not arrive here under its full heading. `14. Storage Room`
+        # reaching this as the literal string `14. storage room` could never
+        # match a candidate named `Storage Room`, which is half of why Death
+        # House had nothing.
+        scheme = KeyScheme.infer(chapter.markdown)
         for line in chapter.markdown.splitlines():
             if not line.startswith("#"):
                 continue
             heading = line.lstrip("#").strip()
-            if not heading or KEYED_HEADING.match(heading) or title.match(heading):
+            if not heading or scheme.match(heading) or title.match(heading):
                 continue
             folded = normalize(heading)
             if folded and folded not in structural:
@@ -200,7 +225,6 @@ def keyed_headings_of(
     the most reliable evidence in the corpus made conditional on the least.
     Castle Ravenloft heads 94 keyed rooms and the graph held 65.
     """
-    from backend.canon.sections import KEYED_HEADING
     from backend.scripts.extract_canon import load_chapters
 
     # Chapter 2 is the overland map, and nine of its twenty-six keyed areas are
@@ -215,23 +239,24 @@ def keyed_headings_of(
         place_from_chapter_title(c.title) for c in load_chapters(corpus)
     }
     chapter_places.discard(None)
+    scheme = scheme_for(chapter_slug, corpus)
 
     _, _, sections = load_spine_sections(chapter_slug, corpus, splitter)
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
     for section in sections:
-        match = KEYED_HEADING.match(section.heading.strip())
+        match = scheme.match(section.heading)
         if not match:
             continue
-        if match.group("name").strip() in chapter_places:
+        if match.name in chapter_places:
             continue
-        key = f"{match.group('stem')}{match.group('suffix') or ''}".strip().lower()
+        key = match.key
         # First occurrence wins, as `keyed_index` does: a duplicated key is a
         # transcription artifact rather than two rooms.
         if key in seen:
             continue
         seen.add(key)
-        found.append((key, match.group("name").strip()))
+        found.append((key, match.name))
     return found
 
 
@@ -637,6 +662,7 @@ def main() -> None:
         keyed_headings=keyed_headings_of(args.chapter, args.corpus, args.splitter),
         book_names=book_names_of(args.corpus),
         cross_references=chapter_places_of(args.corpus),
+        scheme=scheme_for(args.chapter, args.corpus),
     )
     print(format_report(report))
 

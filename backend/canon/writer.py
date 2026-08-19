@@ -29,7 +29,7 @@ from backend.canon.assembler import slugify
 from backend.canon.constraints import check_edges, exclusive_conflicts
 from backend.canon.gazetteer import Gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode
-from backend.canon.sections import KEYED_HEADING
+from backend.canon.sections import LEGACY_SCHEME, KeyScheme
 from backend.canon.structure import STRUCTURAL_EVIDENCE
 from backend.graph.schema import (
     ALIAS_LABEL,
@@ -613,20 +613,22 @@ class KeyedIndex:
         return "", True
 
 
-def keyed_index(nodes: list[CandidateNode]) -> KeyedIndex:
+def keyed_index(
+    nodes: list[CandidateNode], scheme: KeyScheme = LEGACY_SCHEME
+) -> KeyedIndex:
     """Build the chapter's keyed-area index from its candidates' provenance."""
     by_section: dict[int, tuple[str, str, str]] = {}
     keys_by_place: dict[str, list[str]] = {}
     subarea_keys: set[str] = set()
     for node in nodes:
-        match = KEYED_HEADING.match(node.section_heading.strip())
+        match = scheme.match(node.section_heading)
         if not match:
             continue
-        suffix = match.group("suffix") or ""
-        key = f"{match.group('stem')}{suffix}".strip().lower()
+        suffix = match.suffix
+        key = match.key
         if suffix:
             subarea_keys.add(key)
-        place = match.group("name").strip()
+        place = match.name
         by_section.setdefault(node.section_index, (key, slugify(place), place))
         keys = keys_by_place.setdefault(slugify(place), [])
         if key not in keys:
@@ -886,6 +888,7 @@ def plan_write(
     keyed_headings: Sequence[tuple[str, str]] = (),
     book_names: Container[str] = frozenset(),
     cross_references: Container[str] = frozenset(),
+    scheme: KeyScheme = LEGACY_SCHEME,
 ) -> tuple[list[WriteNode], list[WriteEdge], FilterReport]:
     """Decide exactly what to write, and count every candidate that is dropped.
 
@@ -991,7 +994,7 @@ def plan_write(
     # rather than a second definition of it.
     from backend.canon.aliases import normalize
 
-    keyed = keyed_index(nodes)
+    keyed = keyed_index(nodes, scheme)
     kept_nodes: list[CandidateNode] = []
     for node in nodes:
         if slugify(node.name) in keyed.place_slugs or normalize(node.name) in book_names:

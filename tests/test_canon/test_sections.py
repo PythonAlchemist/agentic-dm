@@ -35,7 +35,14 @@ from pathlib import Path
 import pytest
 
 from backend.canon.models import Chapter
-from backend.canon.sections import KEYED_HEADING, units_from_sections
+from pathlib import Path
+
+from backend.canon.sections import (
+    LEGACY_SCHEME,
+    KeyScheme,
+    key_shape,
+    units_from_sections,
+)
 from backend.canon.sections import split_sections as _split_sections
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -153,18 +160,16 @@ class TestSplitSections:
         digit -- written to exclude bare NUMBERS, and excluding bare letters
         with them -- so `the-lands-of-barovia` was the only chapter in the book
         with zero keyed places, and Madam Eva's camp had no entity."""
-        assert KEYED_HEADING.match("G. Tser Pool Encampment").group("name") == (
-            "Tser Pool Encampment"
-        )
-        assert KEYED_HEADING.match("G. Tser Pool Encampment").group("stem") == "G"
+        assert LEGACY_SCHEME.match("G. Tser Pool Encampment").name == "Tser Pool Encampment"
+        assert LEGACY_SCHEME.match("G. Tser Pool Encampment").stem == "G"
 
     def test_a_sub_area_letter_needs_a_numbered_parent(self):
-        """`[A-Z]\d*[a-z]?` also matches `St. Andral's Feast` as stem `S`
+        r"""`[A-Z]\d*[a-z]?` also matches `St. Andral's Feast` as stem `S`
         suffix `t` -- the one false positive in the corpus's 1,063 headings.
         A sub-area letter only means anything under a numbered area."""
-        assert KEYED_HEADING.match("St. Andral's Feast") is None
-        assert KEYED_HEADING.match("Mr. Smith") is None
-        assert KEYED_HEADING.match("E5g. Undercroft").group("suffix") == "g"
+        assert LEGACY_SCHEME.match("St. Andral's Feast") is None
+        assert LEGACY_SCHEME.match("Mr. Smith") is None
+        assert LEGACY_SCHEME.match("E5g. Undercroft").suffix == "g"
 
     def test_a_keyed_heading_ends_the_section_before_it(self):
         """A split point that did not terminate the previous body would leave
@@ -377,7 +382,7 @@ class TestRealCorpusSections:
             keyed_headings = [
                 text
                 for level, text in re.findall(r"^(#{1,6})\s+(.+?)\s*$", markdown, re.MULTILINE)
-                if KEYED_HEADING.match(text)
+                if LEGACY_SCHEME.match(text)
             ]
             headings = {s.heading for s in split_sections(real_chapter(*fixture))}
 
@@ -391,3 +396,126 @@ class TestRealCorpusSections:
 
         assert "Areas of the Village" not in headings
         assert "Chapter 3: The Village of Barovia" not in headings
+
+
+class TestKeyShape:
+    def test_the_shapes_of_the_books_own_keys(self):
+        assert key_shape("K85") == "A#"
+        assert key_shape("E5g") == "A#a"
+        assert key_shape("G") == "A"
+        assert key_shape("21") == "#"
+        assert key_shape("23A") == "#A"
+
+    def test_runs_collapse_so_k85_and_k3_are_one_shape(self):
+        """A book referring to either has told you about both."""
+        assert key_shape("K85") == key_shape("K3")
+
+    def test_a_word_is_its_own_shape_and_no_book_refers_to_one(self):
+        assert key_shape("St") == "Aa"
+        assert key_shape("Mr") == "Aa"
+
+
+class TestKeyScheme:
+    """The regex this replaces enumerated Curse of Strahd's three conventions.
+    A heading prefix is an author's formatting choice and must not decide
+    whether the pipeline can see a room."""
+
+    def test_a_scheme_reads_the_books_own_cross_references(self):
+        scheme = KeyScheme.infer("The door opens onto area 14, beyond area 21.")
+        assert scheme.shapes == {"#"}
+
+    def test_a_chapter_that_points_at_nothing_has_no_scheme(self):
+        """The honest answer: no evidence that a prefix is a key rather than
+        numbering."""
+        assert KeyScheme.infer("Just prose, with no references at all.").shapes == set()
+
+    def test_a_heading_is_keyed_only_under_a_shape_the_book_refers_to(self):
+        numbers = KeyScheme(frozenset({"#"}))
+        assert numbers.match("14. Storage Room").name == "Storage Room"
+        assert numbers.match("K85. Sergei's Tomb") is None
+
+    def test_a_sub_area_letter_splits_off_its_numbered_parent(self):
+        keyed = KeyScheme(frozenset({"A#a", "#A"}))
+        assert (keyed.match("E5g. Undercroft").stem, keyed.match("E5g. Undercroft").suffix) == ("E5", "g")
+        assert (keyed.match("23A. Empty Crypt").stem, keyed.match("23A. Empty Crypt").suffix) == ("23", "A")
+
+    def test_a_bare_letter_has_no_sub_area_to_be(self):
+        """`G` is a whole region, not `G` suffixed onto nothing."""
+        found = KeyScheme(frozenset({"A"})).match("G. Tser Pool Encampment")
+        assert (found.stem, found.suffix, found.key) == ("G", "", "g")
+
+    def test_a_word_prefix_is_not_a_key_without_a_lookahead_hack(self):
+        """`St. Andral's Feast` used to need a special guard in the regex. Its
+        shape is `Aa`, which no chapter refers to, so evidence handles it."""
+        for scheme in (LEGACY_SCHEME, KeyScheme(frozenset({"A", "A#", "#"}))):
+            assert scheme.match("St. Andral's Feast") is None
+            assert scheme.match("Mr. Smith") is None
+
+
+@pytest.mark.skipif(
+    not Path("data/ddb/cos").is_dir(),
+    reason="the corpus is gitignored; this runs where the book is present",
+)
+class TestInferenceAgreesWithTheHandWrittenRegex:
+    """The proof that replacing the regex with inference is safe.
+
+    `LEGACY_SCHEME` holds exactly the shapes the old pattern enumerated. Over
+    the whole book, inference must agree with it everywhere it was right and
+    differ only where it was wrong -- which is Death House, whose 44 rooms the
+    old pattern could not see because they are keyed with bare numbers.
+
+    Mechanically checkable, so this is a test rather than a paragraph claiming
+    it was checked once.
+    """
+
+    @staticmethod
+    def _headings(text: str) -> list[str]:
+        return [
+            line.lstrip("#").strip()
+            for line in text.splitlines()
+            if line.startswith("#")
+        ]
+
+    def test_inference_never_loses_a_heading_the_regex_found(self, chapters):
+        lost = []
+        for slug, text in chapters:
+            scheme = KeyScheme.infer(text)
+            for heading in self._headings(text):
+                if LEGACY_SCHEME.match(heading) and not scheme.match(heading):
+                    lost.append((slug, heading))
+        assert lost == []
+
+    def test_the_only_chapter_inference_adds_is_death_house(self, chapters):
+        gained = {
+            slug
+            for slug, text in chapters
+            for heading in self._headings(text)
+            if (scheme := KeyScheme.infer(text)).match(heading)
+            and not LEGACY_SCHEME.match(heading)
+        }
+        assert gained == {"appendix-b-death-house"}
+
+    def test_death_house_gains_its_rooms(self, chapters):
+        text = dict(chapters)["appendix-b-death-house"]
+        scheme = KeyScheme.infer(text)
+        found = [h for h in self._headings(text) if scheme.match(h)]
+        assert len(found) == 44
+
+    def test_the_tarokka_positions_are_not_rooms(self, chapters):
+        """Chapter 1 numbers five card positions exactly as Death House numbers
+        rooms. It never refers to a bare number as an area, so `#` is not in its
+        scheme -- the discrimination the old pattern needed a special case for.
+        """
+        text = dict(chapters)["into-the-mists"]
+        scheme = KeyScheme.infer(text)
+        assert "#" not in scheme.shapes
+        assert scheme.match("1. The Tome of Strahd") is None
+
+
+@pytest.fixture(scope="module")
+def chapters() -> list[tuple[str, str]]:
+    """(slug, markdown) for every chapter of the corpus on disk."""
+    return [
+        (path.stem, path.read_text(encoding="utf-8"))
+        for path in sorted(Path("data/ddb/cos").glob("*.md"))
+    ]

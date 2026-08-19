@@ -28,28 +28,110 @@ from backend.canon.models import Chapter, ExtractionUnit, Section
 
 logger = logging.getLogger(__name__)
 
-# "E1. Bildrath's Mercantile", "E5g. Undercroft", "K18a. High Tower Shaft",
-# "G. Tser Pool Encampment". A letter prefix is required: the book's only
-# bare-number keys are chapter 1's Tarokka card list and Appendix B's Death
-# House rooms, neither of which names a physical room. `stem`/`suffix` split
-# "E5g" into the parent area "E5" and its sub-area letter.
-#
-# A BARE LETTER IS A KEY TOO, and requiring a digit silently cost a whole
-# chapter. This read `[A-Z]\d+`, written to exclude bare NUMBERS -- and it
-# excluded bare LETTERS with them. Chapter 2 is the overland map and keys its
-# areas `A.` through `Z.`, one per region, because there are fewer than
-# twenty-six of them; every other chapter maps an interior and keys
-# letter-plus-number. So `the-lands-of-barovia` was the only chapter in the
-# book with ZERO keyed places minted, and `G. Tser Pool Encampment` -- where
-# Madam Eva reads the cards -- had no entity at all.
-#
-# The bare-letter branch requires the dot IMMEDIATELY, via lookahead. Without
-# it `[A-Z]\d*` also matches `St. Andral's Feast` as stem `S` suffix `t`, which
-# is the one false positive in the corpus's 1,063 headings. A sub-area letter
-# only makes sense under a numbered parent, and the lookahead says so.
-KEYED_HEADING = re.compile(
-    r"^(?P<stem>[A-Z]\d+|[A-Z](?=\.))(?P<suffix>[a-z])?\.\s*(?P<name>.+)$"
+#: A heading's leading token, whatever shape it has. PERMISSIVE ON PURPOSE: the
+#: shape of a key is what varies between books, so this parses and `KeyScheme`
+#: decides. It matches `St. Andral's Feast` too, and that is fine -- nothing
+#: consults it without a scheme.
+KEY_PREFIX = re.compile(r"^(?P<key>[^\s.]{1,4})\.\s+(?P<name>\S.*)$")
+
+#: How the book refers to its own keys. A key exists SO THAT the book can point
+#: at it, which is why this is the evidence a scheme is inferred from.
+_AREA_REFERENCE = re.compile(
+    r"\b(?:area|areas|room|rooms)\s+(?P<key>[A-Za-z][0-9]{0,2}[a-z]?|[0-9]{1,3}[A-Za-z]?)\b"
 )
+
+#: A token ending in a letter is a SUB-area of the number before it -- `E5g`
+#: under `E5`, `23A` under `23`. A token with no digits has no sub-area to be:
+#: `G` is a whole region, not `G` suffixed onto nothing.
+_SUBAREA = re.compile(r"^(?P<stem>.*[0-9])(?P<suffix>[A-Za-z])$")
+
+
+def key_shape(token: str) -> str:
+    """`K85` -> `A#`, `E5g` -> `A#a`, `G` -> `A`, `21` -> `#`, `St` -> `Aa`.
+
+    Runs collapse, so `K85` and `K3` are one shape and a book that refers to
+    either covers both. This is the whole of what "the same kind of key" means.
+    """
+    kinds: list[str] = []
+    for character in token:
+        kind = "#" if character.isdigit() else ("A" if character.isupper() else "a")
+        if not kinds or kinds[-1] != kind:
+            kinds.append(kind)
+    return "".join(kinds)
+
+
+@dataclass(frozen=True)
+class KeyedHeading:
+    """A heading parsed under a scheme: `E5g. Undercroft`."""
+
+    key: str
+    stem: str
+    suffix: str
+    name: str
+
+
+@dataclass(frozen=True)
+class KeyScheme:
+    r"""Which leading tokens this book treats as area keys.
+
+    INFERRED, NOT SPELLED OUT, and that is the whole point. The regex this
+    replaces enumerated Curse of Strahd's three conventions -- `[A-Z]\d+` for
+    interior maps, a bare letter for the overland map, bare numbers for Death
+    House -- as alternatives in one pattern. Three special cases for one book,
+    and every other book brings its own. A heading prefix is a formatting
+    choice by an author, and a formatting choice must not decide whether the
+    pipeline can see a room.
+
+    What is general is WHY a key exists: so the book can point at it. Every
+    keyed map is cross-referenced, or the keys would be decoration. So the book
+    says which prefixes are keys, by writing "area E6", "area 21", "room K85",
+    and `infer` reads that back.
+
+    Membership is by SHAPE rather than by the literal keys referenced. Testing
+    each heading against the referenced set was tried and lost 161 real rooms:
+    `Q22. Bathroom` is a room nothing happens to point at. The references are
+    evidence about the shape of this chapter's keys, not about which rooms
+    matter.
+    """
+
+    shapes: frozenset[str]
+
+    def match(self, heading: str) -> KeyedHeading | None:
+        """The heading's key and name, or `None` if it carries no key."""
+        found = KEY_PREFIX.match(heading.strip())
+        if not found or key_shape(found.group("key")) not in self.shapes:
+            return None
+        token = found.group("key")
+        sub = _SUBAREA.match(token)
+        stem = sub.group("stem") if sub else token
+        suffix = sub.group("suffix") if sub else ""
+        return KeyedHeading(
+            key=f"{stem}{suffix}".lower(),
+            stem=stem,
+            suffix=suffix,
+            name=found.group("name").strip(),
+        )
+
+    @classmethod
+    def infer(cls, text: str) -> "KeyScheme":
+        """Read a chapter's key shapes out of its own cross-references.
+
+        A chapter that refers to nothing yields an EMPTY scheme and therefore
+        no keyed headings, which is the honest answer: a book that never points
+        at its rooms has given no evidence that its heading prefixes are keys
+        rather than numbering.
+        """
+        return cls(
+            frozenset(
+                key_shape(m.group("key")) for m in _AREA_REFERENCE.finditer(text)
+            )
+        )
+
+
+#: Curse of Strahd's shapes, as the hand-written regex enumerated them. Kept so
+#: a caller with no chapter text in hand behaves exactly as before, and so the
+#: equivalence between the two is a test rather than a claim.
+LEGACY_SCHEME = KeyScheme(frozenset({"A#", "A#a", "A"}))
 
 # H1 to H6. The vision transcription emitted exactly one H5 in the whole corpus
 # and no H6; D&D Beyond emits H5 in four chapters. Neither is ever a keyed
@@ -202,7 +284,7 @@ def _is_key_split_point(match: re.Match[str]) -> bool:
     transcribed at H1 too. An unkeyed H3/H4 stays inside its section, which is
     what keeps Appendix D's 37 stat-block sub-headings out of the unit list.
     """
-    return len(match.group(1)) == 2 or KEYED_HEADING.match(match.group(2)) is not None
+    return len(match.group(1)) == 2 or LEGACY_SCHEME.match(match.group(2)) is not None
 
 
 def _key_pieces(markdown: str) -> list[tuple[int, str, str]]:

@@ -24,7 +24,7 @@ from backend.canon.models import CandidateEdge, CandidateNode, Section
 # One definition, shared with the splitter -- see the comment on KEYED_HEADING
 # in sections.py. Two copies of this pattern that must agree is a defect waiting
 # to happen. Note what it is NOT used for any more: finding sections.
-from backend.canon.sections import KEYED_HEADING
+from backend.canon.sections import LEGACY_SCHEME, KeyScheme
 
 STRUCTURAL_EVIDENCE = "derived from document structure"
 
@@ -81,7 +81,9 @@ def _same_place(a: str, b: str) -> bool:
     return a.strip().lower() == b.strip().lower()
 
 
-def place_of_section(section: Section) -> str | None:
+def place_of_section(
+    section: Section, scheme: KeyScheme = LEGACY_SCHEME
+) -> str | None:
     """The place a keyed section names, or None if it names no place.
 
     Keyed areas carry an identifier prefix; prose sections like "Approaching the
@@ -91,8 +93,8 @@ def place_of_section(section: Section) -> str | None:
     denotes a room at all. "Creatures (A-H)" nests three levels of Appendix D
     under it and is not a place.
     """
-    match = KEYED_HEADING.match(section.heading.strip())
-    return match.group("name").strip() if match else None
+    match = scheme.match(section.heading)
+    return match.name if match else None
 
 
 def _ancestor_place(
@@ -124,6 +126,7 @@ def derive_structure(
     sections: list[Section],
     nodes: list[CandidateNode],
     chapter_place: str | None,
+    scheme: KeyScheme = LEGACY_SCHEME,
 ) -> StructureResult:
     """Containment implied by the chapter/section hierarchy, with its provenance.
 
@@ -153,7 +156,7 @@ def derive_structure(
     # not a unique key -- duplicate headings occur within a chapter (four
     # sections named "Treasure" in Chapter 4, three named "Actions" in
     # Appendix D), and a heading-keyed dict silently keeps only the last.
-    by_index = {s.index: place_of_section(s) for s in sections}
+    by_index = {s.index: place_of_section(s, scheme) for s in sections}
     parents = {s.index: s.parent_index for s in sections}
     tagged: list[tuple[str, CandidateEdge]] = []
 
@@ -185,17 +188,17 @@ def derive_structure(
     # duplicated key is a transcription artifact rather than two parents.
     stems: dict[str, str] = {}
     for s in sections:
-        match = KEYED_HEADING.match(s.heading.strip())
-        if match and not match.group("suffix"):
-            stems.setdefault(match.group("stem"), match.group("name").strip())
+        match = scheme.match(s.heading)
+        if match and not match.suffix:
+            stems.setdefault(match.stem, match.name)
 
     for s in sections:
         place = by_index[s.index]
         if not place:
             continue
         nested = _ancestor_place(s.index, by_index, parents)
-        match = KEYED_HEADING.match(s.heading.strip())
-        keyed = stems.get(match.group("stem")) if match and match.group("suffix") else None
+        match = scheme.match(s.heading)
+        keyed = stems.get(match.stem) if match and match.suffix else None
 
         # The parent is chosen first and self-containment checked second, in
         # that order. A cascade that fell through on the self-check would reach
