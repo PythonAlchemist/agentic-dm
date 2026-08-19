@@ -1,0 +1,86 @@
+# Headings the book writes that are NOT the book naming a thing.
+#
+# The write path admits a candidate when the book HEADS it -- see
+# `writer.plan_write`. That rule replaces a gate on a 677-entry wiki index
+# which dropped 69% of all candidates book-wide, including Rictavio, The
+# Abbot and Ezmerelda d'Avenir, each proposed at maximum consensus in several
+# chapters. The book is the authority on what exists; the wiki supplements it.
+#
+# But a heading is also how a book ORGANISES TEXT, and those headings name no
+# thing at all. `Treasure` heads 44 sections and is not a treasure. So the
+# admit rule needs one hand-authored exception list, and this is it -- read
+# the same way `location-subtypes.yaml` is read, as claims a person made and
+# can be argued with.
+#
+# SCOPE. 406 distinct plain (unkeyed) headings exist in the corpus, but only
+# 186 are also names the extractor proposed, and only those ever reach the
+# gate. Every one of the 186 was read. The rest are listed here; everything
+# not listed is admitted.
+#
+# NOT IN HERE, DELIBERATELY: keyed headings. `E2. Blood of the Vine Tavern`
+# and `G. Tser Pool Encampment` are handled by `KEYED_HEADING` and were never
+# in question.
+
+# --- The book's own apparatus ------------------------------------------
+# Labels for a step in the DM's procedure, or for a table. Every one of these
+# is a section a reader turns to; none is a thing in Barovia.
+apparatus:
+  - Fortunes of Ravenloft   # 47 sections, one per place a card reading may put an artifact
+  - Treasure                # 44
+  - Development             # 27
+  - Special Events          # 11
+  - Teleport Destination    # 6
+  - Harrowing Event
+  - Random Encounters
+  - House Occupants
+  - Beliefs and Superstitions
+  - Barovian Lore
+  - Treasure Locations
+  - Magic Items
+  - Card Reading
+  - Common Deck
+  - High Deck
+  - Tarokka Cards
+  # The four tarokka suits. Card categories, not objects: the CARDS are named
+  # individually elsewhere and those names are admitted.
+  - Swords
+  - Stars
+  - Coins
+  - Glyphs
+  # Random-table headings in appendix A.
+  - Trinket
+  - Gothic Trinkets
+
+# --- Generic features ---------------------------------------------------
+# A thing many rooms have, headed because the room's entry needed a paragraph
+# about it. These are capitalised only because headings are, so
+# `retrieval.is_common_noun` cannot catch them -- it reads the book's own
+# spelling and the book spells a heading with a capital.
+#
+# THIS GROUP IS THE ONE THE HEADING RULE WOULD OTHERWISE GET WRONG. A heading
+# says the book is organising text, not that a thing exists, and `Light`
+# heading one room's paragraph does not make light an entity -- `cos:light`
+# already carries 118 mentions and is exactly the junk that made `coffin`
+# anchor a question about a burgomaster's mansion to Castle Ravenloft's tombs.
+features:
+  - Light
+  - Grave
+  - Corpse
+  - Locked Door
+  - Concealed Door
+  - Secret Door
+  - Secret Doors
+  - Dumbwaiter
+  - Landing
+  - Main Floor
+  - Vestibule
+  - Hunting Trap
+
+# --- Admitted, and worth saying why -------------------------------------
+# `Cellar`, `Garden`, `Goat Pen` and `Gate Towers` read like features and are
+# NOT refused: in chapter 10 they head sub-areas of the Ulrich Mansion, which
+# are places a party walks into. The cost of admitting a real place is a node
+# nobody asks about; the cost of refusing one is a question that cannot be
+# answered. Where the two groups above are unambiguous, this one is not, and
+# it is recorded so the next reader knows it was a decision rather than an
+# oversight.

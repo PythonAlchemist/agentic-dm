@@ -26,6 +26,11 @@ SEED_DIR = Path(__file__).parent / "seeds"
 #: `data/` is gitignored because the corpus under it is copyrighted.
 LOCATION_SUBTYPE_SEED = SEED_DIR / "location-subtypes.yaml"
 
+#: Headings the book writes that name no thing -- its own apparatus (`Treasure`,
+#: `Development`) and the generic room features (`Light`, `Secret Door`). Read by
+#: the write path, which otherwise admits anything the book heads.
+STRUCTURAL_HEADING_SEED = SEED_DIR / "structural-headings.yaml"
+
 # Grading metadata, not graph data. A marked entry is a fact the seed asserts but the
 # seed's own chapter does not state, so a run over that chapter must not be scored
 # against it. Stripped before writing -- see `_GRADING_KEYS`.
@@ -376,3 +381,42 @@ def load_seed(path: str | Path, session) -> dict:
         )
 
     return {"nodes": len(data["nodes"]), "edges": len(data["edges"])}
+
+
+def load_structural_headings(
+    path: str | Path = STRUCTURAL_HEADING_SEED,
+) -> frozenset[str]:
+    """Headings that are the book organising text, not the book naming a thing.
+
+    The write path admits a candidate the book HEADS, which replaced a gate on a
+    wiki index that dropped 69% of every candidate in the book. A heading is also
+    how a book lays itself out, though: `Treasure` heads 44 sections and is not a
+    treasure, and `Light` heads one room's paragraph without light being an
+    entity. This is the hand-authored exception, read like the location rungs
+    beside it -- claims a person made, which a reader can argue with.
+
+    NORMALISED THE WAY `aliases.normalize` NORMALISES, not slugified. A slug
+    discards punctuation, and these are matched against candidate NAMES rather
+    than used to mint ids, so the comparison should keep what the book wrote.
+
+    Both groups of the seed are read into one set. They are kept apart in the
+    file because the REASONS differ and a reader deserves to see which applies,
+    but nothing downstream needs to tell them apart.
+
+    Returns a frozenset and touches no database, for the reason
+    `load_artifacts` does: `plan_write` is pure, so its caller reads the file.
+    """
+    from backend.canon.aliases import normalize
+
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    headings: set[str] = set()
+    problems: list[str] = []
+    for group in ("apparatus", "features"):
+        for name in data.get(group) or []:
+            if not str(name).strip():
+                problems.append(f"{group}: an empty heading refuses nothing")
+                continue
+            headings.add(normalize(str(name)))
+    if problems:
+        raise ValueError("invalid structural-heading seed: " + "; ".join(problems))
+    return frozenset(headings)

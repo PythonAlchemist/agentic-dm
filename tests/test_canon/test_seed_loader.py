@@ -318,3 +318,47 @@ class TestExtractionProvenance:
             "MATCH (e:Entity {id:'pytest:npc:marked'}) RETURN e.extractable_from AS m"
         ).single()
         assert row["m"] is None
+
+
+class TestStructuralHeadings:
+    """The write path admits what the book HEADS. A heading is also how a book
+    organises text, and `Treasure` heads 44 sections without being a treasure."""
+
+    def test_the_books_apparatus_is_refused(self):
+        from backend.canon.seed_loader import load_structural_headings
+
+        refused = load_structural_headings()
+        assert "treasure" in refused
+        assert "fortunes of ravenloft" in refused
+        assert "development" in refused
+
+    def test_a_generic_room_feature_is_refused(self):
+        """`is_common_noun` cannot catch these: it reads the book's own spelling
+        and a heading is spelled with a capital."""
+        from backend.canon.seed_loader import load_structural_headings
+
+        refused = load_structural_headings()
+        assert "light" in refused
+        assert "secret door" in refused
+
+    def test_a_real_name_is_not_in_the_seed(self):
+        from backend.canon.seed_loader import load_structural_headings
+
+        refused = load_structural_headings()
+        assert not {"rictavio", "the abbot", "madam eva", "baba lysaga"} & refused
+
+    def test_the_committed_seed_loads(self):
+        from backend.canon.seed_loader import load_structural_headings
+
+        assert len(load_structural_headings()) > 20
+
+    def test_an_empty_heading_is_refused_loudly(self, tmp_path):
+        """An empty entry refuses nothing and would read as a decision."""
+        import pytest
+
+        from backend.canon.seed_loader import load_structural_headings
+
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("apparatus:\n  - ''\n")
+        with pytest.raises(ValueError, match="invalid structural-heading seed"):
+            load_structural_headings(bad)

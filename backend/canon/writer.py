@@ -437,6 +437,11 @@ class FilterReport:
     derived_nodes: int = 0
     # Node drops
     gazetteer_dropped: int = 0
+    # NOT a drop: candidates kept because the BOOK names them -- a keyed area or
+    # a heading that survived the structural seed. Counted apart from the plain
+    # keeps so the effect of trusting the book over the wiki is readable in the
+    # run artifact rather than inferred from a total going up.
+    book_asserted: int = 0
     unnameable: int = 0
     undecidable_keyed: int = 0
     duplicate_nodes: int = 0
@@ -488,6 +493,7 @@ class FilterReport:
             "candidate_edges": self.candidate_edges,
             "derived_nodes": self.derived_nodes,
             "gazetteer_dropped": self.gazetteer_dropped,
+            "book_asserted": self.book_asserted,
             "unnameable": self.unnameable,
             "undecidable_keyed": self.undecidable_keyed,
             "duplicate_nodes": self.duplicate_nodes,
@@ -878,6 +884,8 @@ def plan_write(
     subtypes: Mapping[str, LocationSubtype] | None = None,
     artifacts: Container[str] | None = None,
     keyed_headings: Sequence[tuple[str, str]] = (),
+    book_names: Container[str] = frozenset(),
+    cross_references: Container[str] = frozenset(),
 ) -> tuple[list[WriteNode], list[WriteEdge], FilterReport]:
     """Decide exactly what to write, and count every candidate that is dropped.
 
@@ -953,11 +961,44 @@ def plan_write(
     report.constraint_violations = len(violating)
     surviving_edges = [e for i, e in enumerate(surviving_edges) if i not in violating]
 
-    # 3 -- gazetteer junk, with keyed places exempt
+    # 3 -- junk, with everything the BOOK names exempt.
+    #
+    # THE BOOK ASSERTS; THE WIKI SUPPLEMENTS. This used to read
+    # `gazetteer.is_known(name) or keyed place`, so a candidate reached the
+    # graph only if a 677-entry Forgotten Realms Wiki index page listed it. That
+    # dropped 4,397 of 6,413 candidates book-wide -- 69% -- and the drops were
+    # not junk. Rictavio was proposed in four chapters at maximum consensus and
+    # discarded four times, because a fan wiki has no page for a disguise
+    # identity. So were The Abbot and Ezmerelda d'Avenir.
+    #
+    # It was inverted on exactly the cases that mattered: asked about the
+    # fifteen common-noun anchors that `retrieval.is_common_noun` refuses --
+    # `coffin`, `wagon`, `vampire`, `light` -- the gazetteer admits every one.
+    # It passed the props that poison anchoring and cut the people a DM asks
+    # about.
+    #
+    # `book_names` is what the book HEADS, minus the seed of headings that name
+    # no thing. It is the same argument `keyed_headings_of` already makes one
+    # level down -- "READ FROM THE BOOK, not from the candidates ... the most
+    # reliable evidence in the corpus made conditional on the least" -- applied
+    # to the headings that carry no area key.
+    #
+    # The gazetteer stays, as the supplement its own docstring describes: a
+    # candidate the book never heads can still get in on the wiki's say-so.
+    # Imported at the use site: `aliases` imports `spine`, which imports this
+    # module, so a top-level import here is a cycle. `load_structural_headings`
+    # does the same for the same reason -- and both need THIS `normalize`
+    # rather than a second definition of it.
+    from backend.canon.aliases import normalize
+
     keyed = keyed_index(nodes)
     kept_nodes: list[CandidateNode] = []
     for node in nodes:
-        if gazetteer.is_known(node.name) or slugify(node.name) in keyed.place_slugs:
+        if slugify(node.name) in keyed.place_slugs or normalize(node.name) in book_names:
+            report.book_asserted += 1
+            kept_nodes.append(node)
+            continue
+        if gazetteer.is_known(node.name):
             kept_nodes.append(node)
             continue
         report.gazetteer_dropped += 1
@@ -980,7 +1021,19 @@ def plan_write(
     #: same key rather than re-derived from a name.
     key_by_id: dict[str, str] = {}
     for node in kept_nodes:
-        node_key, undecidable = keyed.key_for(node.name, node.section_index)
+        # A keyed area that merely POINTS at another chapter is that chapter's
+        # place, not a second one. Chapter 2 is the overland map and nine of its
+        # twenty-six areas are one-sentence stubs -- `V. Van Richten's Tower`
+        # says chapter 11 describes it. Keying those mints a duplicate of every
+        # major location, and the duplicate answers to the same name: "how does
+        # the elevator in Van Richten's Tower work" resolved to BOTH, and the
+        # stub's overland sections crowded the real tower out of the budget.
+        # Left unkeyed, the candidate falls through to the global id that
+        # already exists, which is the one entity there should be.
+        if node.name in cross_references:
+            node_key, undecidable = "", False
+        else:
+            node_key, undecidable = keyed.key_for(node.name, node.section_index)
         if undecidable:
             # A name two sections key, mentioned from neither. Choosing one
             # would invent a room; the count says how often the book's own

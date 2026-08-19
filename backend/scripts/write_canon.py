@@ -15,6 +15,7 @@ filtering has twice hidden a defect in this project for weeks.
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from dataclasses import asdict, fields
@@ -123,6 +124,71 @@ def chapter_place_of_run(extraction_run: dict) -> str | None:
 
 
 
+def book_names_of(corpus: str = "ddb") -> frozenset[str]:
+    """Every name the BOOK heads, anywhere in it, minus the structural seed.
+
+    BOOK-WIDE, not this chapter's. The book heading `Rictavio` in appendix D is
+    the book asserting Rictavio exists, and it goes on being that while chapter
+    5 is written. Scoping this to the chapter would make the admission depend on
+    which file happened to be written first, which is the ordering bug that kind
+    of scoping always is.
+
+    Reads through `load_chapters`, the corpus abstraction the rest of this
+    module uses, rather than globbing a directory. The first version took a PATH
+    and was handed `args.corpus`, which is the corpus NAME -- `ddb` -- so it
+    globbed a directory that does not exist, returned an empty set, and every
+    chapter was written as though the book had named nothing. Nothing failed;
+    the counter simply read 482 instead of 969. Hence the raise below: an empty
+    result here can only mean a misconfigured corpus, and this project has been
+    bitten too often by a filter that silently removes everything.
+
+    Keyed headings are NOT here and do not need to be: `plan_write` exempts a
+    keyed place through `keyed.place_slugs`, and `keyed_headings_of` mints every
+    keyed area the chapter heads whether or not a candidate survived from it.
+
+    A chapter or appendix title is refused by rule rather than by seed -- there
+    are 25, they are perfectly regular, and the chapter's own place is minted
+    separately as `chapter_place`.
+    """
+    from backend.canon.aliases import normalize
+    from backend.canon.sections import KEYED_HEADING
+    from backend.canon.seed_loader import load_structural_headings
+    from backend.scripts.extract_canon import load_chapters
+
+    structural = load_structural_headings()
+    title = re.compile(r"^(chapter \d+|appendix [a-f])\b", re.IGNORECASE)
+    names: set[str] = set()
+    for chapter in load_chapters(corpus):
+        for line in chapter.markdown.splitlines():
+            if not line.startswith("#"):
+                continue
+            heading = line.lstrip("#").strip()
+            if not heading or KEYED_HEADING.match(heading) or title.match(heading):
+                continue
+            folded = normalize(heading)
+            if folded and folded not in structural:
+                names.add(folded)
+    if not names:
+        raise ValueError(
+            f"corpus {corpus!r} yielded no headings; the book names nothing, "
+            "which cannot be right"
+        )
+    return frozenset(names)
+
+
+def chapter_places_of(corpus: str = "ddb") -> frozenset[str]:
+    """The place each chapter is ABOUT, for every chapter in the book.
+
+    A keyed area naming one of these is a cross-reference to that chapter
+    rather than a place of its own -- see the use in `plan_write`.
+    """
+    from backend.scripts.extract_canon import load_chapters
+
+    return frozenset(
+        p for c in load_chapters(corpus) if (p := place_from_chapter_title(c.title))
+    )
+
+
 def keyed_headings_of(
     chapter_slug: str, corpus: str, splitter: str
 ) -> list[tuple[str, str]]:
@@ -135,6 +201,20 @@ def keyed_headings_of(
     Castle Ravenloft heads 94 keyed rooms and the graph held 65.
     """
     from backend.canon.sections import KEYED_HEADING
+    from backend.scripts.extract_canon import load_chapters
+
+    # Chapter 2 is the overland map, and nine of its twenty-six keyed areas are
+    # CROSS-REFERENCES rather than places: `V. Van Richten's Tower` is a
+    # one-sentence stub saying chapter 11 describes it. Minting those duplicates
+    # every major location, and the duplicate competes for the same name --
+    # "how does the elevator in Van Richten's Tower work" started resolving to
+    # BOTH, and the overland stub's sections crowded the real tower's out of the
+    # budget. A keyed area whose name is another chapter's own place is that
+    # chapter's place, referred to from the map.
+    chapter_places = {
+        place_from_chapter_title(c.title) for c in load_chapters(corpus)
+    }
+    chapter_places.discard(None)
 
     _, _, sections = load_spine_sections(chapter_slug, corpus, splitter)
     found: list[tuple[str, str]] = []
@@ -142,6 +222,8 @@ def keyed_headings_of(
     for section in sections:
         match = KEYED_HEADING.match(section.heading.strip())
         if not match:
+            continue
+        if match.group("name").strip() in chapter_places:
             continue
         key = f"{match.group('stem')}{match.group('suffix') or ''}".strip().lower()
         # First occurrence wins, as `keyed_index` does: a duplicated key is a
@@ -553,6 +635,8 @@ def main() -> None:
         subtypes=subtypes,
         artifacts=artifacts,
         keyed_headings=keyed_headings_of(args.chapter, args.corpus, args.splitter),
+        book_names=book_names_of(args.corpus),
+        cross_references=chapter_places_of(args.corpus),
     )
     print(format_report(report))
 

@@ -1350,3 +1350,71 @@ class TestEveryKeyedRoomTheBookHeads:
         nodes, _, report = plan_write([], [], gazetteer(), SLUG, keyed_headings=[])
         assert nodes == []
         assert report.derived_nodes == 0
+
+
+class TestTheBookAssertsAndTheWikiSupplements:
+    """The gate used to be `gazetteer.is_known(name) or a keyed place`, so a
+    candidate reached the graph only if a 677-entry Forgotten Realms Wiki index
+    page listed it. That dropped 4,397 of 6,413 candidates book-wide -- and it
+    was inverted on the cases that mattered, admitting `coffin`, `wagon` and
+    `vampire` while cutting Rictavio, proposed in four chapters at maximum
+    consensus."""
+
+    def test_a_name_the_book_heads_gets_in_without_the_wiki(self):
+        nodes, _, report = plan_write(
+            [node("Rictavio", "NPC")], [], gazetteer(), SLUG,
+            book_names=frozenset({"rictavio"}),
+        )
+        assert [n.name for n in nodes] == ["Rictavio"]
+        assert report.book_asserted == 1
+        assert report.gazetteer_dropped == 0
+
+    def test_the_wiki_still_supplements_what_the_book_never_heads(self):
+        """Not a replacement. A candidate the book heads nowhere can still get
+        in on the wiki's say-so -- that is what supplementing means."""
+        nodes, _, report = plan_write(
+            [node("Madam Eva", "NPC")], [], gazetteer("Madam Eva"), SLUG,
+            book_names=frozenset(),
+        )
+        assert [n.name for n in nodes] == ["Madam Eva"]
+        assert report.book_asserted == 0
+
+    def test_a_name_neither_heads_nor_knows_is_still_dropped(self):
+        """Inverting the gate is not removing it."""
+        nodes, _, report = plan_write(
+            [node("some rubble")], [], gazetteer(), SLUG, book_names=frozenset()
+        )
+        assert nodes == []
+        assert report.gazetteer_dropped == 1
+
+    def test_the_book_admits_under_the_books_own_spelling(self):
+        """Matched on `normalize`, so a curly apostrophe in the heading and a
+        straight one in the candidate are the same name."""
+        nodes, _, _ = plan_write(
+            [node("Ezmerelda d'Avenir", "NPC")], [], gazetteer(), SLUG,
+            book_names=frozenset({"ezmerelda d’avenir".replace("’", "'")}),
+        )
+        assert len(nodes) == 1
+
+    def test_a_cross_reference_is_not_a_second_place(self):
+        """Chapter 2 is the overland map, and nine of its keyed areas are
+        one-sentence stubs pointing at another chapter. Keying those minted a
+        duplicate of every major location which answered to the same name, and
+        the stub's sections crowded the real place out of the retrieval budget.
+        """
+        keyed = node("Van Richten's Tower", section_heading="V. Van Richten's Tower")
+        nodes, _, _ = plan_write(
+            [keyed], [], gazetteer("Van Richten's Tower"), "the-lands-of-barovia",
+            cross_references=frozenset({"Van Richten's Tower"}),
+        )
+        assert [n.id for n in nodes] == ["cos:van-richten-s-tower"]
+
+    def test_without_the_cross_reference_it_would_be_chapter_scoped(self):
+        """The other half of the pair: this is what the duplicate looked like."""
+        keyed = node("Van Richten's Tower", section_heading="V. Van Richten's Tower")
+        nodes, _, _ = plan_write(
+            [keyed], [], gazetteer("Van Richten's Tower"), "the-lands-of-barovia",
+        )
+        assert [n.id for n in nodes] == [
+            "cos:the-lands-of-barovia:v-van-richten-s-tower"
+        ]
