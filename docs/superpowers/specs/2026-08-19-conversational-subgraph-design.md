@@ -86,9 +86,35 @@ a node in the subgraph with an id. The DM agent does not resolve a pronoun; it
 already knows which node the conversation is about, and says so when it asks
 the graph agent for more.
 
-**It is what gets rendered, not the retrieval.** Today every turn re-sends
-whole sections. A subgraph sends a compact node and edge summary plus prose
-only for sections newly read this turn. That is where the 6,160 tokens go.
+**It is what gets rendered, not the retrieval** -- a compact node and edge
+summary, plus prose for sections newly read this turn.
+
+*Corrected 2026-08-19, after measuring rather than assuming.* An earlier draft
+of this section claimed that was where the 6,160 tokens go. It is not. Counted
+on a real turn:
+
+    system prompt              734
+    canon block              5,501
+      passage prose          5,078    82% of the whole turn
+      relationship lines       162     3%
+      headings + preamble      261
+
+Fetching edges on demand instead of dumping twelve saves about 3%. THE MODEL
+HAS NO MEMORY BETWEEN CALLS, so a subgraph tracked on this side does not
+reduce what has to sit in front of it: if a later turn needs those sections,
+they are re-sent whether or not we recorded having fetched them. And the
+current design does not accumulate -- the canon block is inserted fresh each
+turn and never enters history -- so there is no stacking to remove.
+
+Sending summaries of already-read sections instead of prose WOULD cut it, and
+trades grounding fidelity: a model cannot quote or cite accurately from a
+summary, and citation reliability is already the weakest measured behaviour
+(one answer-eval question cites its section on three runs in five).
+
+So this is a correctness and continuity design, not a cost one. Per-turn
+tokens are roughly flat and TOTAL tokens likely rise, because the graph agent
+carries the ontology in its own context on every call and a turn becomes two
+calls instead of one.
 
 ## What must survive contact with a generated query
 
@@ -145,10 +171,11 @@ Each one is useful alone and verifiable before the next.
 
 1. **A read-only role and `read_only_session()`.** No model involved. Testable
    immediately, and required before anything else here is safe.
-2. **The `Subgraph` object, seeded from existing retrieval**, rendered as a
-   summary plus newly-read prose. This is the increment that pays soonest and
-   risks least: it should cut the 6,160-token context substantially and the
-   effect is measurable the day it lands, with no change to what is retrieved.
+2. **The `Subgraph` object, seeded from existing retrieval.** The increment
+   that risks least, because it changes what is TRACKED rather than what is
+   retrieved, so the existing eval still applies unchanged. It does not save
+   tokens -- see the measurement above -- and its value is that increment 3
+   has somewhere to put what it fetches.
 3. **The graph agent with named tools** — `resolve`, `expand`, `passages` — a
    floor that cannot emit a bad query, plus the multi-turn eval cases. The
    pronoun problem is solved here, without a pronoun rule.
@@ -164,6 +191,12 @@ which is a plain omission and should be corrected on its own.
   section is not reachable today, it is not reachable after this.
 - **It does not fix edge precision.** Roughly a third of proposed edges are
   false. The subgraph means a model is handed fewer of them, not better ones.
+- **It does not reduce the token budget.** The two levers that do are
+  `passages` and `passage_width`, both existing knobs with measured
+  trade-offs: 8 -> 5 saves about 1,900 tokens a turn and costs 7 points of
+  recall at unchanged MRR; sentence width saves far more and is measurably
+  worse, since the tavern's owners are named 3,300 characters after the first
+  mention of it. For scale, a 2,000-turn campaign costs $2.07 in total.
 - **It does not remove the deterministic path.** Anything that cannot be
   answered from the seed plus expansion is still a countable hole.
 
