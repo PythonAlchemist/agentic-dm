@@ -82,14 +82,6 @@ export function Controls({
           max={50}
           onChange={(max_edges) => onDepth({ ...depth, max_edges })}
         />
-        <Slider
-          label="History turns"
-          hint="Prior exchanges sent along. 0 isolates the question."
-          value={depth.history_turns}
-          min={0}
-          max={20}
-          onChange={(history_turns) => onDepth({ ...depth, history_turns })}
-        />
 
         <div className="mt-3">
           <div className="text-sm mb-1">Passage width</div>

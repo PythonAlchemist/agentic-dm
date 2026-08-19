@@ -11,7 +11,6 @@ const FALLBACK_DEPTH: Depth = {
   passages: 5,
   max_edges: 12,
   include_proposed: true,
-  history_turns: 6,
   passage_width: 'section',
 }
 

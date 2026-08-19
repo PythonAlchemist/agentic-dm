@@ -27,7 +27,6 @@ export interface Depth {
   passages: number
   max_edges: number
   include_proposed: boolean
-  history_turns: number
   /** 'section' sends the whole section; 'sentence' one sentence around the mention. */
   passage_width: 'sentence' | 'section'
 }

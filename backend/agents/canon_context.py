@@ -47,6 +47,13 @@ class Depth:
     #: These were both 5 and drifted apart the moment one of them moved.
     passages: int = DEFAULT_LIMIT
     max_edges: int = 12
+    #: Tokens the working subgraph may occupy before the oldest-touched items
+    #: are evicted. Chosen against the measured shape of a turn: passage prose
+    #: is about 5,000 tokens and relationship lines about 160, so 400 leaves
+    #: the summary an order of magnitude smaller than the book it describes --
+    #: which is the right proportion for something that says what the
+    #: conversation is ABOUT rather than what the book says.
+    subgraph_budget: int = 400
     include_proposed: bool = True
     #: `section` sends each passage's whole section; `sentence` sends one
     #: sentence around the mention.
@@ -59,10 +66,6 @@ class Depth:
     #: are cheap enough to send whole: the median is 842 characters, and five of
     #: them run about a thousand tokens.
     passage_width: str = "section"
-    #: Prior turns of conversation sent with the question. 0 is a genuine
-    #: setting, not a degenerate one: it isolates a single question from
-    #: everything the model has already said about it.
-    history_turns: int = 6
 
 
 def apply(retrieval: Retrieval, depth: Depth) -> Retrieval:

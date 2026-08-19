@@ -12,6 +12,7 @@ from backend.agents import canon_context
 from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
 from backend.agents.conversation import ConversationManager, MessageRole
 from backend.agents.prompts import SYSTEM_PROMPT
+from backend.agents.subgraph import Subgraph, seed as seed_subgraph
 from backend.canon.retrieval import (
     PATH_GRAPH,
     PATH_TEXT,
@@ -75,6 +76,9 @@ class DMAgent:
             limit=self.depth.passages, passage_width=self.depth.passage_width
         )
         self.conversation = ConversationManager()
+        #: What this conversation is holding, as graph entities. The transcript
+        #: is bounded and short; THIS is how a follow-up knows who "him" is.
+        self.subgraph = Subgraph()
 
         # Set system prompt
         self._set_system_prompt()
@@ -124,6 +128,10 @@ class DMAgent:
         Returns:
             DMResponse with the agent's response.
         """
+        # A turn is one exchange, and everything touched during it is pinned
+        # against eviction -- see `Subgraph.evict`.
+        self.subgraph.turn += 1
+
         # Add user message to history
         self.conversation.add_user_message(user_input)
 
@@ -140,6 +148,9 @@ class DMAgent:
         # "about the book" would fail exactly on the questions a DM most needs
         # grounded. A question naming nothing simply retrieves little.
         retrieval = self._retrieve_canon(user_input) if use_canon else None
+        if retrieval is not None:
+            seed_subgraph(self.subgraph, retrieval)
+            self.subgraph.evict(self.depth.subgraph_budget)
 
         # Use RAG pipeline for context
         rag_response = None
@@ -335,6 +346,13 @@ class DMAgent:
                     "content": canon_context.render(shown, max_edges=self.depth.max_edges),
                 },
             )
+            # AFTER the canon block, so the model reads the book's words
+            # first and then what the conversation has been about -- the same
+            # ordering argument as inserting canon before the question.
+            summary = self.subgraph.render(self.depth.include_proposed)
+            if summary:
+                context.insert(2, {"role": "system", "content": summary})
+
             canon_sources = canon_context.sources(shown)
             # Reported off the UNFILTERED retrieval on purpose: a reader needs
             # to see that 30 proposed edges existed and were withheld, not that
@@ -410,19 +428,29 @@ class DMAgent:
         )
 
     def _trim(self, context: list[dict]) -> list[dict]:
-        """The system messages, plus the most recent `history_turns` exchanges.
+        """The system messages, plus the current question. THE TRANSCRIPT IS
+        NOT THE MEMORY.
 
-        System messages are never trimmed -- they carry the canon block and the
-        instructions for reading it, and dropping either would leave the model
-        holding passages it has not been told how to treat.
+        This used to keep `history_turns` exchanges, defaulting to six. That is
+        both too little to reach session 3 from session 7 and the wrong thing
+        to enlarge: a bigger number re-sends old dialogue on every turn in the
+        hope the answer is somewhere in it. What carries instead is the
+        SUBGRAPH -- what the conversation is about, as entities with ids -- and
+        the campaign plane, which the graph already holds. A long campaign
+        grows the graph rather than the context.
 
-        Trimming from the END keeps the current question and the turns nearest
-        it. `history_turns=0` sends the question alone, which is the setting
-        that isolates one answer from everything the model has already said.
+        THE COST, ACCEPTED DELIBERATELY: conversational repair. "No, the other
+        one", "shorter", "explain that again" are about the dialogue rather
+        than about entities, and nothing in the subgraph holds them. Reference
+        resolution is unaffected -- "him" works because Rictavio is a node with
+        an id, not because the previous message is still in view.
+
+        System messages are never trimmed: they carry the canon block, the
+        subgraph, and the instructions for reading both.
         """
         system = [m for m in context if m["role"] == "system"]
         rest = [m for m in context if m["role"] != "system"]
-        keep = self.depth.history_turns * 2 + 1  # each turn is a user/assistant pair
+        keep = 1  # the current question
         return system + rest[-keep:] if keep < len(rest) else system + rest
 
     def _generate_suggestions(self, query_type: Optional[QueryType]) -> list[str]:

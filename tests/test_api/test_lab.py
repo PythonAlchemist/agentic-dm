@@ -8,12 +8,24 @@ from fastapi.testclient import TestClient
 
 from backend.agents import canon_context
 from backend.api.routes import lab
-from backend.canon.retrieval import PATH_GRAPH, Passage, Retrieval
+from backend.canon.retrieval import PATH_GRAPH, Anchor, Passage, Retrieval
 
 
 def a_retrieval() -> Retrieval:
     return Retrieval(
         question="q",
+        # A graph-path retrieval with no anchors is impossible -- the path IS
+        # "a name resolved" -- and the fixture said so for a while, which meant
+        # nothing seeded the subgraph from it.
+        anchors=(
+            Anchor(
+                entity_id="cos:blood-of-the-vine-tavern",
+                name="Blood of the Vine Tavern",
+                labels=("LOCATION",),
+                rung="SITE",
+                surface="tavern",
+            ),
+        ),
         passages=(
             Passage(
                 section_id="cos:the-village-of-barovia#5",
@@ -139,20 +151,31 @@ class TestChat:
         )
         assert response.status_code == 422
 
-    def test_history_survives_a_model_switch(self, client):
+    def test_the_thread_survives_a_model_switch(self, client):
         """The one comparison this lab exists for: same conversation, different
-        model."""
-        client.post("/api/lab/chat", json={"message": "first", "model": "gpt-4o-mini"})
-        client.post("/api/lab/chat", json={"message": "second", "model": "gpt-4o"})
-        sent = [m["content"] for m in client.completions.calls[-1]["messages"]]
-        assert any("first" in c for c in sent)
+        model.
 
-    def test_reset_drops_the_history(self, client):
+        Asserted on the SUBGRAPH rather than on the transcript. The transcript
+        is now bounded to the current question -- it is no longer the memory --
+        so what has to survive a rebuilt agent is what the conversation is
+        about, as entities. This used to look for the literal word "first" in
+        the messages, which stopped being the mechanism rather than stopping
+        being important."""
+        client.post("/api/lab/chat", json={"message": "first", "model": "gpt-4o-mini"})
+        before = dict(lab._SESSIONS["lab"].subgraph.nodes)
+        client.post("/api/lab/chat", json={"message": "second", "model": "gpt-4o"})
+        after = lab._SESSIONS["lab"].subgraph
+
+        assert before, "the fixture retrieval must anchor something to test this"
+        assert set(before) <= set(after.nodes)
+
+    def test_reset_drops_the_thread(self, client):
+        """Reset has to clear the subgraph too, or a "new" conversation starts
+        holding the last one's entities."""
         client.post("/api/lab/chat", json={"message": "first"})
         client.post("/api/lab/reset", params={"session_id": "lab"})
         client.post("/api/lab/chat", json={"message": "second"})
-        sent = [m["content"] for m in client.completions.calls[-1]["messages"]]
-        assert not any("first" in c for c in sent)
+        assert lab._SESSIONS["lab"].subgraph.turn == 1
 
 
 class TestGenerate:

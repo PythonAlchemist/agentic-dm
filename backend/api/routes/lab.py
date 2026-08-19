@@ -44,7 +44,6 @@ class Depth(BaseModel):
     passages: int = Field(default=canon_context.Depth.passages, ge=0, le=20)
     max_edges: int = Field(default=12, ge=0, le=50)
     include_proposed: bool = True
-    history_turns: int = Field(default=6, ge=0, le=20)
     passage_width: Literal["sentence", "section"] = "section"
 
     def to_domain(self) -> canon_context.Depth:
@@ -52,7 +51,6 @@ class Depth(BaseModel):
             passages=self.passages,
             max_edges=self.max_edges,
             include_proposed=self.include_proposed,
-            history_turns=self.history_turns,
             passage_width=self.passage_width,
         )
 
@@ -152,10 +150,14 @@ def _agent_for(session_id: str, model: str, depth: canon_context.Depth) -> DMAge
     """The session's agent, rebuilt when a knob it was built with has changed.
 
     Model and passage count are fixed at construction -- the retriever carries
-    the limit -- so a changed knob needs a new agent. The CONVERSATION is
-    carried across, because losing the thread every time somebody switches model
-    would defeat the one comparison this lab is for: same conversation, different
-    model.
+    the limit -- so a changed knob needs a new agent. The CONVERSATION AND THE
+    SUBGRAPH are carried across, because losing the thread every time somebody
+    switches model would defeat the one comparison this lab is for: same
+    conversation, different model.
+
+    The subgraph especially, now that the transcript is bounded to the current
+    question: it IS the memory, so a rebuilt agent that dropped it would forget
+    who the conversation was about the moment a slider moved.
     """
     existing = _SESSIONS.get(session_id)
     if existing is not None and existing.model == model and existing.depth == depth:
@@ -168,5 +170,6 @@ def _agent_for(session_id: str, model: str, depth: canon_context.Depth) -> DMAge
     )
     if existing is not None:
         rebuilt.conversation = existing.conversation
+        rebuilt.subgraph = existing.subgraph
     _SESSIONS[session_id] = rebuilt
     return rebuilt
