@@ -19,6 +19,16 @@
 #   must      strings a correct answer HAS to contain. Names and numbers only --
 #             never a phrasing, because a model is free to word things its own
 #             way and a suite that pins prose measures style.
+#
+#             THE AUTHOR'S BIAS, RECORDED BECAUSE IT RECURRED THREE TIMES: it
+#             is easy to write down what a GOOD answer ought to mention instead
+#             of what a CORRECT one cannot omit. a02 demanded `padlock` and
+#             failed seven correct answers that said "chain"; a05 demanded the
+#             lich's name from a section whose point is that he has forgotten
+#             it; a09 demanded a refusal to a question the book answers. Every
+#             one was the suite being wrong, and every one looked like a model
+#             failure until somebody read the text. If a check fails, read the
+#             answer before believing it.
 #   must_not  strings that, appearing at all, mean something went wrong. These
 #             are TRIPWIRES, NOT PROOF: a trip means read the answer, not that
 #             the answer is definitely bad. Each one names why it is here.
@@ -47,13 +57,17 @@ questions:
 
   - id: a02
     question: "How do the characters open the trapdoor in the church?"
-    must: ["padlock"]
+    must: ["chain", "12"]
     cites: true
     note: >-
-      The padlocked chain comes off, then a DC 12 Strength check. Checked on
-      `padlock` alone rather than on the DC as well: the number lives in a
-      sentence the section width may cut, and this question is here to test the
-      answer, not the truncation.
+      The chain comes off, then a DC 12 Strength check against a door swollen in
+      its frame.
+
+      *Corrected after measuring.* This required `padlock` and scored 3/10. All
+      ten answers were RIGHT -- "remove the chain that holds it shut, then a DC
+      12 Strength check" -- and seven of them simply did not use the word, which
+      describes the chain rather than the procedure. The two steps a DM performs
+      are the chain and the check, and every answer had both.
 
   - id: a03
     question: "What guards the madhouse at the abbey?"
@@ -72,19 +86,26 @@ questions:
 
   - id: a05
     question: "Where in the Amber Temple do the characters meet a lich?"
-    must: ["Exethanter"]
+    must: ["X27"]
     cites: true
     note: >-
-      Exethanter, in the lich's lair, area X27.
+      The lich's lair, area X27. Exethanter, though the section withholds that.
 
-      *Corrected on its first run.* This required the string `X27`, and failed
-      an answer that named the Lich's Lair, described the skeleton, quoted "Do
-      I know you?", named Exethanter and cited its section -- a completely
-      correct answer. The check was wrong, not the answer, and by this file's
-      own rule: `must` is for facts, and requiring an area code demands a
-      FORMAT. Exethanter's name is the fact, and it is the more discriminating
-      one -- a model answering from memory of the module is likelier to produce
-      a room description than the name the book withholds until you read it.
+      *CHANGED TWICE, AND THIS RECORDS BOTH.* It began as `X27`, which failed an
+      answer naming the Lich's Lair and describing the skeleton, so I switched
+      it to `Exethanter` on the argument that `must` is for facts and an area
+      code demands a FORMAT.
+
+      That was wrong. The section's whole point is that the lich HAS FORGOTTEN
+      ITS NAME, so a faithful answer written from it says exactly that and
+      cannot produce "Exethanter" -- the model's answer did say it, and was
+      marked failing three runs out of three. An area code is not a format
+      here: it is how this book is navigated and what a DM turns to, and the
+      model produces it unprompted. The first version was right.
+
+      The lesson is about the harness, not the question. A `must` string has to
+      be something a CORRECT answer must contain, and I twice reasoned about
+      what a good answer OUGHT to contain instead.
 
   # -- a broad anchor, and a wall of guesses ------------------------------
   - id: a06
