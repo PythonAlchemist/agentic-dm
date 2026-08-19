@@ -147,6 +147,25 @@ class TestSplitSections:
 
         assert [s.heading for s in sections] == ["Fortunes of Ravenloft"]
 
+    def test_a_bare_letter_is_a_key_too(self):
+        """Chapter 2 is the overland map and keys its regions `A.` to `Z.`,
+        because there are fewer than twenty-six. The pattern used to require a
+        digit -- written to exclude bare NUMBERS, and excluding bare letters
+        with them -- so `the-lands-of-barovia` was the only chapter in the book
+        with zero keyed places, and Madam Eva's camp had no entity."""
+        assert KEYED_HEADING.match("G. Tser Pool Encampment").group("name") == (
+            "Tser Pool Encampment"
+        )
+        assert KEYED_HEADING.match("G. Tser Pool Encampment").group("stem") == "G"
+
+    def test_a_sub_area_letter_needs_a_numbered_parent(self):
+        """`[A-Z]\d*[a-z]?` also matches `St. Andral's Feast` as stem `S`
+        suffix `t` -- the one false positive in the corpus's 1,063 headings.
+        A sub-area letter only means anything under a numbered area."""
+        assert KEYED_HEADING.match("St. Andral's Feast") is None
+        assert KEYED_HEADING.match("Mr. Smith") is None
+        assert KEYED_HEADING.match("E5g. Undercroft").group("suffix") == "g"
+
     def test_a_keyed_heading_ends_the_section_before_it(self):
         """A split point that did not terminate the previous body would leave
         the same prose in two extraction units and double-bill for it."""

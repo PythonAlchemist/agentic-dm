@@ -28,17 +28,28 @@ from backend.canon.models import Chapter, ExtractionUnit, Section
 
 logger = logging.getLogger(__name__)
 
-# "E1. Bildrath's Mercantile", "E5g. Undercroft", "K18a. High Tower Shaft".
-# A letter prefix is required: the book's only bare-number keys are chapter 1's
-# Tarokka card list and Appendix B's Death House rooms, neither of which names a
-# physical room. `stem`/`suffix` split "E5g" into the parent area "E5" and its
-# sub-area letter.
+# "E1. Bildrath's Mercantile", "E5g. Undercroft", "K18a. High Tower Shaft",
+# "G. Tser Pool Encampment". A letter prefix is required: the book's only
+# bare-number keys are chapter 1's Tarokka card list and Appendix B's Death
+# House rooms, neither of which names a physical room. `stem`/`suffix` split
+# "E5g" into the parent area "E5" and its sub-area letter.
 #
-# The depth splitter does NOT use this to find sections -- that coupling is the
-# thing being removed. `structure.py` still uses it twice: to tell a keyed area
-# from a prose heading, and as the correction for sub-areas the book renders at
-# the same depth as their parent.
-KEYED_HEADING = re.compile(r"^(?P<stem>[A-Z]\d+)(?P<suffix>[a-z])?\.\s*(?P<name>.+)$")
+# A BARE LETTER IS A KEY TOO, and requiring a digit silently cost a whole
+# chapter. This read `[A-Z]\d+`, written to exclude bare NUMBERS -- and it
+# excluded bare LETTERS with them. Chapter 2 is the overland map and keys its
+# areas `A.` through `Z.`, one per region, because there are fewer than
+# twenty-six of them; every other chapter maps an interior and keys
+# letter-plus-number. So `the-lands-of-barovia` was the only chapter in the
+# book with ZERO keyed places minted, and `G. Tser Pool Encampment` -- where
+# Madam Eva reads the cards -- had no entity at all.
+#
+# The bare-letter branch requires the dot IMMEDIATELY, via lookahead. Without
+# it `[A-Z]\d*` also matches `St. Andral's Feast` as stem `S` suffix `t`, which
+# is the one false positive in the corpus's 1,063 headings. A sub-area letter
+# only makes sense under a numbered parent, and the lookahead says so.
+KEYED_HEADING = re.compile(
+    r"^(?P<stem>[A-Z]\d+|[A-Z](?=\.))(?P<suffix>[a-z])?\.\s*(?P<name>.+)$"
+)
 
 # H1 to H6. The vision transcription emitted exactly one H5 in the whole corpus
 # and no H6; D&D Beyond emits H5 in four chapters. Neither is ever a keyed
