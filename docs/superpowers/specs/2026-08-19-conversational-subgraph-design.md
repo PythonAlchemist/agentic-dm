@@ -152,11 +152,28 @@ a little; the split costs a little more; neither is the point.
 
 Four invariants, none of which is a prompt instruction:
 
-1. **Read-only, enforced by Neo4j.** `neo4j_session()` currently hands out one
-   full-write session that everything shares; there is no read-only path in the
-   codebase at all. A model composing queries needs a role with `MATCH` and no
-   write privilege. `default_access_mode=READ` is not enough — on a single
-   instance it routes, it does not forbid.
+1. **Read-only, enforced by Neo4j.** *Built and corrected 2026-08-19 —
+   `backend/core/database.read_only_session`.* This section said a model needs
+   a role with `MATCH` and no write privilege, and that
+   `default_access_mode=READ` "routes, it does not forbid". Both claims were
+   wrong, and probing the live database rather than trusting them changed the
+   design:
+
+   - **RBAC is not available.** The instance is 5.26 **Community**, where
+     `CREATE USER ... GRANT MATCH` is an Enterprise feature. A read-only
+     database user was never an option.
+   - **Read access mode DOES forbid.** A write on such a session is rejected
+     server-side with `Neo.ClientError.Statement.AccessMode`, verified across
+     `CREATE`, `MERGE`, `SET`, `DETACH DELETE` and a relationship create.
+   - **But it is a DEFAULT, and `execute_write` overrides it.** On a read-mode
+     session, a write inside `execute_read` is blocked, a write run directly
+     is blocked, and a write inside `execute_write` GOES THROUGH.
+
+   So the control is not a configured session — that is a guarantee with a
+   bypass one method call away. It is a wrapper exposing `run` and nothing
+   else, so `execute_write`, `execute_read` and `begin_transaction` are not
+   reachable at all. Enforcement is the access mode and the API surface
+   together; neither alone is sufficient, and each is mutation-tested.
 2. **`status` on every edge returned, always.** Free-form Cypher can trivially
    return a proposed edge without saying it is a guess. This is the invariant
    defended hardest across this project's history and the easiest to lose here.
