@@ -74,13 +74,40 @@ class GenerateRequest(BaseModel):
 
 @router.get("/config")
 def config() -> dict:
-    """Models on offer, their rates, and how old those rates are."""
+    """Models on offer, their rates, how old those rates are, and what is loaded.
+
+    `chapters` is COUNTED, never written down. The lab header read "3 of 25
+    chapters loaded" long after the whole book was in the graph, and the
+    model's own no-canon instruction carried the same stale sentence -- a
+    number describing the state of a database does not belong in a string
+    somebody has to remember to update.
+    """
     return {
         "models": pricing.models(),
         "default_model": settings.openai_model,
         "kinds": list(generator.KINDS),
         "defaults": Depth().model_dump(),
+        "chapters": _chapters_loaded(),
     }
+
+
+def _chapters_loaded() -> int:
+    """How many chapters the graph holds. 0 if it cannot be reached.
+
+    Degraded rather than fatal: a lab that will not render because the count is
+    unavailable is worse than one that says nothing is loaded, and the chat
+    below it already reports a graph failure honestly.
+    """
+    from backend.core.database import read_only_session
+
+    try:
+        with read_only_session() as session:
+            return session.run(
+                "MATCH (c:Chapter {plane:'canon'}) RETURN count(c) AS n"
+            ).single()["n"]
+    except Exception:  # noqa: BLE001 - a header is not worth failing a page for
+        logger.warning("could not count loaded chapters", exc_info=True)
+        return 0
 
 
 @router.post("/chat")

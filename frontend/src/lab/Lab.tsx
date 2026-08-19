@@ -67,7 +67,7 @@ export function Lab() {
       <header className="border-b border-neutral-800 px-6 py-3 flex items-baseline gap-4">
         <h1 className="text-base font-medium">Agent Lab</h1>
         <p className="text-xs text-neutral-500">
-          Curse of Strahd canon · 3 of 25 chapters loaded
+          Curse of Strahd canon · {config?.chapters ?? '…'} chapters loaded
         </p>
       </header>
 

@@ -39,6 +39,19 @@ class Usage:
     def total(self) -> int:
         return self.input_tokens + self.output_tokens
 
+    def __add__(self, other: "Usage") -> "Usage":
+        """Two calls' usage, summed.
+
+        A turn is no longer one call: the agent may reach into the graph and
+        come back. Reporting only the final call would tell somebody a turn
+        cost a fraction of what it did, and the cost shown beside an answer is
+        the number a person paying for this actually acts on.
+        """
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+        )
+
     @classmethod
     def from_response(cls, response: Any) -> "Usage":
         """Read an OpenAI response's usage block, tolerating its absence.

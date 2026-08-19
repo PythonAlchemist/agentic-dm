@@ -221,3 +221,116 @@ class TestTheReportSaysWhichPathFoundWhat:
         )
         report = await self._report(monkeypatch, text_only)
         assert report["passages_by_path"] == {PATH_GRAPH: 0, PATH_TEXT: 3}
+
+
+class _Call:
+    """One tool call, shaped as the OpenAI client returns it."""
+
+    def __init__(self, name, arguments, call_id="c1"):
+        self.id = call_id
+        self.function = SimpleNamespace(name=name, arguments=arguments)
+
+
+class ScriptedCompletions:
+    """Returns each scripted response in turn, recording what it was sent."""
+
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def create(self, **kw):
+        self.calls.append(kw)
+        content, tool_calls = self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content, tool_calls=tool_calls)
+            )],
+            usage=SimpleNamespace(prompt_tokens=100, completion_tokens=10),
+        )
+
+
+@pytest.mark.asyncio
+class TestTheToolLoop:
+    """A turn may reach into the graph before answering. What it finds goes
+    into the subgraph; the transcript of finding it does not."""
+
+    async def _agent(self, monkeypatch, completions):
+        monkeypatch.setattr(
+            "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
+        )
+        built = DMAgent(canon=FakeRetriever(a_retrieval()))
+        built.openai = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+        return built
+
+    async def test_a_turn_with_no_tool_calls_is_one_call(self, monkeypatch):
+        """The common case must not have become more expensive."""
+        completions = ScriptedCompletions(("an answer", None))
+        agent = await self._agent(monkeypatch, completions)
+        await agent.process_message("q", use_rag=False, use_canon=True)
+        assert len(completions.calls) == 1
+
+    async def test_a_tool_call_is_run_and_the_model_asked_again(self, monkeypatch):
+        completions = ScriptedCompletions(
+            (None, [_Call("resolve", '{"name": "Rictavio"}')]),
+            ("an answer", None),
+        )
+        agent = await self._agent(monkeypatch, completions)
+        result = await agent.process_message("q", use_rag=False, use_canon=True)
+        assert result.message == "an answer"
+        assert len(completions.calls) == 2
+
+    async def test_usage_accumulates_across_the_rounds(self, monkeypatch):
+        """Reporting only the final call would tell somebody a turn cost a
+        fraction of what it did."""
+        completions = ScriptedCompletions(
+            (None, [_Call("resolve", '{"name": "Rictavio"}')]),
+            ("an answer", None),
+        )
+        agent = await self._agent(monkeypatch, completions)
+        result = await agent.process_message("q", use_rag=False, use_canon=True)
+        assert result.usage["input"] == 200
+        assert result.usage["output"] == 20
+
+    async def test_the_tool_transcript_never_enters_the_conversation(self, monkeypatch):
+        """THE WHOLE POINT. Forty edges fetched on turn three must not be
+        re-sent on turn four, or forty."""
+        completions = ScriptedCompletions(
+            (None, [_Call("expand", '{"entity_id": "cos:rictavio"}')]),
+            ("an answer", None),
+        )
+        agent = await self._agent(monkeypatch, completions)
+        await agent.process_message("q", use_rag=False, use_canon=True)
+        roles = [m["role"] for m in agent.conversation.get_context()]
+        assert "tool" not in roles
+
+    async def test_a_failing_tool_is_reported_back_rather_than_raised(self, monkeypatch):
+        """A malformed argument is something the model can correct next round.
+        Raising would fail the whole turn over a recoverable mistake."""
+        completions = ScriptedCompletions(
+            (None, [_Call("no_such_tool", "{}")]),
+            ("an answer", None),
+        )
+        agent = await self._agent(monkeypatch, completions)
+        result = await agent.process_message("q", use_rag=False, use_canon=True)
+        assert result.message == "an answer"
+        sent = completions.calls[-1]["messages"]
+        assert any(m.get("role") == "tool" and "error" in m["content"] for m in sent)
+
+    async def test_a_model_that_never_stops_asking_is_answered_anyway(self, monkeypatch):
+        """Bounded: a model still asking after three rounds is not converging,
+        and a DM mid-session gets a degraded answer rather than a hang."""
+        completions = ScriptedCompletions(
+            (None, [_Call("resolve", '{"name": "Rictavio"}')]),
+        )
+        agent = await self._agent(monkeypatch, completions)
+        await agent.process_message("q", use_rag=False, use_canon=True)
+        assert len(completions.calls) == 4  # three rounds, then one without tools
+
+    async def test_the_final_call_offers_no_tools(self, monkeypatch):
+        """Otherwise it would ask again and the cap would not be a cap."""
+        completions = ScriptedCompletions(
+            (None, [_Call("resolve", '{"name": "Rictavio"}')]),
+        )
+        agent = await self._agent(monkeypatch, completions)
+        await agent.process_message("q", use_rag=False, use_canon=True)
+        assert "tools" not in completions.calls[-1]

@@ -297,3 +297,27 @@ def seed(graph: Subgraph, retrieval, *, status_of=None) -> None:
                 source, target = target, source
             graph.touch_edge(source, edge.get("relationship", "?"), target,
                              edge.get("status", status))
+
+
+def note_named(graph: Subgraph, answer: str, resolver) -> None:
+    """Record the entities an ANSWER named. The third way in, and the one the
+    other two cannot cover.
+
+    Asked "who owns the tavern", retrieval anchors NOTHING -- `tavern` is a
+    common noun and refused, and the question never spells out "Blood of the
+    Vine Tavern". The text path answers it correctly anyway. Then "describe it"
+    has nothing to resolve through and searches Lucene for `describe`, which
+    returns sections headed `Details`, `Age`, `Light`, `Humor` and `The
+    Unknown`, and the model says the canon does not cover it.
+
+    The conversation was demonstrably about the tavern: THE ANSWER SAID SO. So
+    the answer is scanned for recorded names, with the same matcher retrieval
+    uses on a question -- whole-word, apostrophe-folded, and refusing the
+    common nouns that `anchorable_forms` refuses. Deterministic, no model, and
+    it costs one pass over about two hundred tokens of prose.
+
+    `resolver` is injected rather than imported so this stays testable without
+    a database, the same reason `plan_write` takes its seeds.
+    """
+    for entity_id, name, labels in resolver(answer):
+        graph.touch_node(entity_id, name, labels, how=NAMED)

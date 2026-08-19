@@ -12,7 +12,9 @@ from backend.agents import canon_context
 from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
 from backend.agents.conversation import ConversationManager, MessageRole
 from backend.agents.prompts import SYSTEM_PROMPT
-from backend.agents.subgraph import Subgraph, seed as seed_subgraph
+from backend.agents import graph_tools
+from backend.agents import subgraph as subgraph_module
+from backend.agents.subgraph import Subgraph, note_named, seed as seed_subgraph
 from backend.canon.retrieval import (
     PATH_GRAPH,
     PATH_TEXT,
@@ -22,6 +24,13 @@ from backend.canon.retrieval import (
 from backend.core.pricing import Usage, estimate
 
 logger = logging.getLogger(__name__)
+
+
+#: How many times a turn may go back to the graph before answering with what
+#: it has. A model still asking after three rounds is not converging, and each
+#: round is another call, another few seconds, and another chance to be
+#: inconsistent -- this model already varies run to run on whether it cites.
+_TOOL_ROUNDS = 3
 
 
 class DMResponse(BaseModel):
@@ -163,6 +172,13 @@ class DMAgent:
         # Generate response
         response = await self._generate_response(user_input, rag_response, retrieval)
 
+        # What the ANSWER named. Retrieval's anchors are what the QUESTION
+        # resolved, and a question often names nothing while its answer names
+        # the subject -- "who owns the tavern" anchors nothing and is answered
+        # about the Blood of the Vine Tavern.
+        note_named(self.subgraph, response.message, self._names_in)
+        self.subgraph.evict(self.depth.subgraph_budget)
+
         # Add to history
         self.conversation.add_assistant_message(
             response.message,
@@ -293,6 +309,43 @@ class DMAgent:
 
         return DMResponse(message="Command processed.")
 
+    def _names_in(self, text: str) -> list[tuple[str, str, tuple[str, ...]]]:
+        """Every canon entity a piece of prose names, as `(id, name, labels)`.
+
+        The retriever's own machinery, so an answer is read exactly as a
+        question is: whole-word, apostrophe-folded, and refusing the common
+        nouns `anchorable_forms` refuses. A second matcher here would be free
+        to disagree with the first about what counts as a name.
+
+        Degrades to nothing if the graph is unreachable, for the same reason
+        `_retrieve_canon` returns an empty retrieval: a DM mid-session gets a
+        thinner memory, never a stack trace.
+        """
+        from backend.canon.aliases import normalize
+        from backend.canon.retrieval import (
+            ALL_ALIASES,
+            BY_ALIAS,
+            anchorable_forms,
+            find_names,
+        )
+        from backend.canon.lookup import type_labels
+
+        try:
+            with self.canon._session() as session:
+                forms = anchorable_forms(self.canon._rows(session, ALL_ALIASES))
+                found: list[tuple[str, str, tuple[str, ...]]] = []
+                for surface in find_names(text, forms):
+                    for row in self.canon._rows(
+                        session, BY_ALIAS, {"normalized": normalize(surface)}
+                    ):
+                        found.append(
+                            (row["id"], row["name"], tuple(type_labels(row["labels"])))
+                        )
+                return found
+        except Exception:  # noqa: BLE001 - a thinner memory beats a crash
+            logger.warning("could not read names out of the answer", exc_info=True)
+            return []
+
     def _retrieve_canon(self, user_input: str) -> Retrieval:
         """Canon for this question. An EMPTY retrieval if the graph is unreachable.
 
@@ -398,16 +451,12 @@ class DMAgent:
             }
             context.insert(1, context_note)  # After system prompt
 
-        # Generate response
-        response = await self.openai.chat.completions.create(
-            model=self.model,
-            messages=self._trim(context),
-            temperature=0.5,
-            max_tokens=1000,
-        )
-
-        message = response.choices[0].message.content
-        usage = Usage.from_response(response)
+        # Generate response, letting the model reach into the graph first.
+        response, usage = await self._answer_with_tools(self._trim(context))
+        # `or ""` because a model that used its last round on a tool call can
+        # come back with no content at all. An empty answer is honest; `None`
+        # reaches `DMResponse` and fails the turn on a validation error.
+        message = response.choices[0].message.content or ""
         cost = estimate(self.model, usage)
 
         # Always generate suggestions
@@ -426,6 +475,113 @@ class DMAgent:
             cost=cost.as_dict(),
             retrieval=retrieval_report,
         )
+
+    async def _answer_with_tools(self, messages: list[dict]):
+        """Call the model, run any graph tools it asks for, call it again.
+
+        THE TOOL TRANSCRIPT IS DISCARDED. Tool calls and their results are
+        appended to THIS list -- a local copy, rebuilt from `self.conversation`
+        every turn -- and never to the conversation itself. So forty edges
+        fetched on turn three are not re-sent on turn four, or forty, which is
+        the accumulation that makes a long campaign chat expensive and mostly
+        irrelevant. What survives a turn is the SUBGRAPH: what was found, not
+        the transcript of finding it.
+
+        BOUNDED. `_TOOL_ROUNDS` caps the loop, because a model that keeps
+        asking is a model that is not converging, and each round is another
+        call and another chance to be inconsistent. On exhausting the rounds it
+        answers from what it has rather than failing the turn -- a DM mid
+        session gets a degraded answer, never a stack trace.
+
+        Usage ACCUMULATES across the rounds. Reporting only the final call
+        would tell somebody a turn cost a third of what it did.
+        """
+        total = Usage()
+        for _ in range(_TOOL_ROUNDS):
+            response = await self.openai.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.5,
+                max_tokens=1000,
+                tools=graph_tools.SCHEMA,
+            )
+            total = total + Usage.from_response(response)
+            choice = response.choices[0].message
+            calls = getattr(choice, "tool_calls", None)
+            if not calls:
+                return response, total
+
+            messages.append(
+                {"role": "assistant", "content": choice.content or "",
+                 "tool_calls": [
+                     {"id": c.id, "type": "function",
+                      "function": {"name": c.function.name,
+                                   "arguments": c.function.arguments}}
+                     for c in calls
+                 ]}
+            )
+            for tool_call in calls:
+                messages.append(self._run_tool(tool_call))
+
+        # Rounds exhausted: ask once more with no tools, so the model answers
+        # from what it gathered instead of asking again forever.
+        response = await self.openai.chat.completions.create(
+            model=self.model, messages=messages, temperature=0.5, max_tokens=1000,
+        )
+        return response, total + Usage.from_response(response)
+
+    def _run_tool(self, tool_call) -> dict:
+        """One tool call, and its result as a message.
+
+        A FAILURE IS REPORTED TO THE MODEL, not raised. A malformed argument or
+        an unknown tool is something the model can correct on the next round;
+        raising would fail the whole turn over a recoverable mistake. What it
+        must never do is return an empty result, which would read as "the graph
+        holds nothing".
+        """
+        import json
+
+        name = tool_call.function.name
+        try:
+            arguments = json.loads(tool_call.function.arguments or "{}")
+            result = graph_tools.call(name, arguments)
+            self._fold_tool_result(name, result)
+            payload = result.as_dict
+        except Exception as exc:  # noqa: BLE001 - handed back for a retry
+            logger.warning("graph tool %s failed", name, exc_info=True)
+            payload = {"error": f"{type(exc).__name__}: {exc}"}
+
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": json.dumps(payload, default=str),
+        }
+
+    def _fold_tool_result(self, name: str, result) -> None:
+        """Put what a tool found into the subgraph, marked as EXPANDED.
+
+        Marked apart from `seeded` because it is weaker evidence: a seeded node
+        is one a question resolved by name, an expanded one is somewhere a
+        model chose to look. `touch_node` keeps the stronger of the two when
+        both happen, so expanding into a node the question already named does
+        not demote it.
+        """
+        for row in result.rows:
+            if name == "resolve":
+                self.subgraph.touch_node(
+                    row["entity_id"], row["name"], row.get("labels", ()),
+                    how=subgraph_module.EXPANDED,
+                )
+            elif name == "expand":
+                source, target = row.get("entity"), row.get("other")
+                if row.get("direction") == "in":
+                    source, target = target, source
+                self.subgraph.touch_edge(
+                    source, row.get("relationship", "?"), target,
+                    row.get("status", "proposed"), how=subgraph_module.EXPANDED,
+                )
+            elif name == "passages":
+                self.subgraph.touch_passage(row["section_id"])
 
     def _trim(self, context: list[dict]) -> list[dict]:
         """The system messages, plus the current question. THE TRANSCRIPT IS

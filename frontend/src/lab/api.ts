@@ -17,6 +17,9 @@ export interface ModelInfo {
 }
 
 export interface LabConfig {
+  /** Counted from the graph on every request, never written down. The header
+   *  read "3 of 25 chapters loaded" long after the whole book was in. */
+  chapters: number
   models: ModelInfo[]
   default_model: string
   kinds: string[]

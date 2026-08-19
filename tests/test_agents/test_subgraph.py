@@ -8,7 +8,14 @@ Lucene for `him, makes, special` -- which is what it did, returning the heading
 
 import pytest
 
-from backend.agents.subgraph import EXPANDED, SEEDED, Subgraph, seed
+from backend.agents.subgraph import (
+    EXPANDED,
+    NAMED,
+    SEEDED,
+    Subgraph,
+    note_named,
+    seed,
+)
 
 
 def held(graph: Subgraph) -> list[str]:
@@ -325,3 +332,47 @@ class TestSeedingIsSelective:
         seed(graph, self._text_path_retrieval())
         graph.evict(budget=1, estimate=lambda text: len(text.splitlines()))
         assert "cos:rictavio" in graph.nodes
+
+
+class TestWhatTheAnswerNamed:
+    """The third way in, and the one the other two cannot cover.
+
+    Asked "who owns the tavern", retrieval anchors NOTHING -- `tavern` is a
+    common noun and refused, and the question never spells out "Blood of the
+    Vine Tavern". The text path answers it correctly anyway. Then "describe it"
+    had nothing to resolve through and searched Lucene for `describe`, getting
+    sections headed `Details`, `Age`, `Light`, `Humor` and `The Unknown`.
+    """
+
+    @staticmethod
+    def _resolver(pairs):
+        return lambda text: [p for p in pairs if p[1] in text]
+
+    def test_an_entity_the_answer_named_becomes_a_subject(self):
+        graph = Subgraph()
+        note_named(
+            graph,
+            "The Blood of the Vine Tavern is owned by three Vistani.",
+            self._resolver([("cos:tavern", "Blood of the Vine Tavern", ("LOCATION",))]),
+        )
+        assert [h.name for h in graph.subjects()] == ["Blood of the Vine Tavern"]
+
+    def test_it_is_marked_as_named_rather_than_seeded(self):
+        """Weaker evidence than a question resolving a name, and a reader of
+        the subgraph should be able to tell which."""
+        graph = Subgraph()
+        note_named(graph, "Rictavio smiles.",
+                   self._resolver([("cos:rictavio", "Rictavio", ("NPC",))]))
+        assert graph.nodes["cos:rictavio"].how == NAMED
+
+    def test_it_does_not_demote_something_the_question_resolved(self):
+        graph = Subgraph()
+        graph.touch_node("cos:rictavio", "Rictavio", ("NPC",), how=SEEDED)
+        note_named(graph, "Rictavio smiles.",
+                   self._resolver([("cos:rictavio", "Rictavio", ("NPC",))]))
+        assert graph.nodes["cos:rictavio"].how == SEEDED
+
+    def test_an_answer_naming_nothing_adds_nothing(self):
+        graph = Subgraph()
+        note_named(graph, "The canon does not cover that.", self._resolver([]))
+        assert graph.nodes == {}
