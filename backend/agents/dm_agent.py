@@ -12,7 +12,12 @@ from backend.agents import canon_context
 from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
 from backend.agents.conversation import ConversationManager, MessageRole
 from backend.agents.prompts import SYSTEM_PROMPT
-from backend.canon.retrieval import CanonRetriever, Retrieval
+from backend.canon.retrieval import (
+    PATH_GRAPH,
+    PATH_TEXT,
+    CanonRetriever,
+    Retrieval,
+)
 from backend.core.pricing import Usage, estimate
 
 logger = logging.getLogger(__name__)
@@ -335,7 +340,23 @@ class DMAgent:
             # to see that 30 proposed edges existed and were withheld, not that
             # there were none.
             retrieval_report = {
+                # How the QUESTION resolved -- on a name, or on nothing. This
+                # says nothing about which path produced any given passage.
                 "path": retrieval.path,
+                # WHICH PATH PUT EACH PASSAGE THERE. A result that anchored on a
+                # name now also carries text passages, because `TEXT_SLOTS`
+                # reserves room for them, so `path` alone reported `graph` for a
+                # mixed result and the panel showed "by name" over passages
+                # Lucene had found. The same mislabelling was fixed in
+                # `canon_context.sources` and in the evaluation harness, which
+                # had been crediting a resolved name for answers a keyword
+                # match earned; this was the third copy of it.
+                "passages_by_path": {
+                    PATH_GRAPH: sum(
+                        1 for p in shown.passages if p.path == PATH_GRAPH
+                    ),
+                    PATH_TEXT: sum(1 for p in shown.passages if p.path == PATH_TEXT),
+                },
                 "anchors": [f"{a.surface} → {a.name}" for a in retrieval.anchors],
                 "passages": len(shown.passages),
                 "dropped": retrieval.dropped,

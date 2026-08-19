@@ -47,7 +47,14 @@ export interface Cost {
 }
 
 export interface RetrievalReport {
+  /** How the QUESTION resolved: on a name, or on nothing. */
   path: string
+  /**
+   * Which path put each passage there. A result that anchored on a name also
+   * carries text passages, so `path` alone described a mixed result as
+   * entirely by-name.
+   */
+  passages_by_path: Record<string, number>
   anchors: string[]
   passages: number
   dropped: number

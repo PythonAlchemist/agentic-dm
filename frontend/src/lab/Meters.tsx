@@ -77,6 +77,11 @@ export function SessionMeter({ running, onReset }: { running: Running; onReset: 
 export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
   if (!report) return null
   const byText = report.path === 'text'
+  // Per PASSAGE, not per question. A question that resolved a name still gets
+  // text passages -- `TEXT_SLOTS` reserves room for them -- and this panel used
+  // to label the whole result "by name" over passages Lucene had found.
+  const byName = report.passages_by_path?.graph ?? 0
+  const byKeyword = report.passages_by_path?.text ?? 0
   return (
     <div className="rounded border border-neutral-700 p-3 text-xs space-y-1">
       <div className="flex justify-between">
@@ -102,6 +107,7 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
 
       <p className="text-neutral-400">
         {report.passages} passage{report.passages === 1 ? '' : 's'}
+        {byName > 0 && byKeyword > 0 && ` (${byName} by name, ${byKeyword} by keyword)`}
         {report.dropped > 0 && `, ${report.dropped} cut by the budget`}
       </p>
       <p className="text-neutral-400">
