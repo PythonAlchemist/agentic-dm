@@ -64,7 +64,15 @@ export function GeneratePane({
         <input
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && run()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') return run()
+            // Same rule as the chat input: fill only when empty, so Tab goes
+            // on moving focus once something is typed.
+            if (e.key === 'Tab' && !subject) {
+              e.preventDefault()
+              setSubject(placeholder)
+            }
+          }}
           placeholder={placeholder}
           className="flex-1 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
         />

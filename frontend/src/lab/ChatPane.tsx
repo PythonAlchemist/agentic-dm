@@ -9,6 +9,10 @@ interface Turn {
 }
 
 /** Use case one: general chat about the setting, grounded in canon. */
+/** The example question, shown as a placeholder and filled in by Tab. One
+ *  constant so the two cannot drift into suggesting different things. */
+const SUGGESTION = 'Who owns the Blood of the Vine Tavern?'
+
 export function ChatPane({
   model,
   depth,
@@ -96,8 +100,17 @@ export function ChatPane({
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && ask()}
-          placeholder="Who owns the Blood of the Vine Tavern?"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') return ask()
+            // Tab fills the suggestion, but ONLY into an empty field -- with
+            // anything typed, Tab has to go on moving focus or the form
+            // becomes unnavigable by keyboard.
+            if (e.key === 'Tab' && !draft) {
+              e.preventDefault()
+              setDraft(SUGGESTION)
+            }
+          }}
+          placeholder={SUGGESTION}
           className="flex-1 bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm"
         />
         <button
