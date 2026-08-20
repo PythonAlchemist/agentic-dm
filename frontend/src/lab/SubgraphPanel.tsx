@@ -53,6 +53,13 @@ function useMeasured() {
 export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
   const { ref, width, height } = useMeasured()
   const graph = useRef<any>(null)
+
+  // A gentler repulsion than the default, because this graph is mostly
+  // UNCONNECTED: the entities a conversation holds usually have no edge
+  // between them, and the default charge pushes those to the far corners.
+  useEffect(() => {
+    graph.current?.d3Force('charge')?.strength(-90)
+  })
   // Keyed on the node ids so the layout is not thrown away and re-simulated on
   // every turn -- a graph that jumps each time you speak is unreadable.
   const data = useMemo(() => {
@@ -99,7 +106,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
         <span className="text-neutral-500">turn {view.turn}</span>
       </div>
 
-      <div ref={ref} className="flex-1 min-h-[320px]">
+      <div ref={ref} className="h-[380px] shrink-0">
         {width > 0 && (
         <ForceGraph2D
           ref={graph}
@@ -108,7 +115,20 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
           height={height}
           // Asked for once the simulation settles, with a margin, so a node on
           // the edge of the layout is inside the viewport rather than clipped.
-          onEngineStop={() => graph.current?.zoomToFit(400, 24)}
+          onEngineStop={() => {
+            const fg = graph.current
+            if (!fg) return
+            // Instant, so the zoom can be read back and clamped. Animated, the
+            // getter still returns the old value and the clamp does nothing.
+            fg.zoomToFit(0, 24)
+            // DISCONNECTED NODES FLY APART. Nine held entities with three
+            // drawable links is the normal case here, not an edge case -- most
+            // of what a conversation holds has no edge to anything else it
+            // holds. `zoomToFit` then zooms out until every node is a
+            // sub-pixel dot and the panel looks empty. Better to show the
+            // middle of the layout at a legible scale and let the reader pan.
+            if (fg.zoom() < 0.7) fg.zoom(0.7, 200)
+          }}
           backgroundColor="transparent"
           nodeRelSize={6}
           nodeColor={(n: any) => HOW_COLOUR[n.how] ?? '#a3a3a3'}
