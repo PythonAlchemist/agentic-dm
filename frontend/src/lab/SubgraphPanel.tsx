@@ -50,7 +50,15 @@ function useMeasured() {
   return { ref, ...size }
 }
 
-export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
+export function SubgraphPanel({
+  view,
+  expanded,
+  onToggle,
+}: {
+  view: SubgraphView | null
+  expanded: boolean
+  onToggle: () => void
+}) {
   const { ref, width, height } = useMeasured()
   const graph = useRef<any>(null)
 
@@ -86,27 +94,45 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
     }
   }, [view])
 
-  if (!view || view.nodes.length === 0) {
-    return (
-      <div className="text-xs text-neutral-500 p-3">
-        Nothing held yet. Ask something and what the conversation is about will
-        appear here.
-      </div>
-    )
-  }
-
-  const undrawn = view.edges.length - data.links.length
+  const undrawn = view ? view.edges.length - data.links.length : 0
+  const empty = !view || view.nodes.length === 0
 
   return (
     <div className="text-xs flex flex-col h-full">
-      <div className="flex justify-between items-baseline px-3 pt-3">
+      {/* The header, and the toggle with it, render even when nothing is held
+          -- expanding and then resetting the session would otherwise leave no
+          way back to the transcript. */}
+      <div className="flex justify-between items-baseline px-3 pt-3 shrink-0">
         <span className="uppercase tracking-wide text-neutral-400">
           In this conversation
         </span>
-        <span className="text-neutral-500">turn {view.turn}</span>
+        <div className="flex gap-3 items-baseline">
+          {view && <span className="text-neutral-500">turn {view.turn}</span>}
+          {/* A working set of nine mostly-unconnected entities needs room. The
+              sidebar is the default because the transcript is what you are
+              usually reading; this is for when the graph is. */}
+          <button
+            onClick={onToggle}
+            className="text-neutral-400 hover:text-neutral-200 underline"
+          >
+            {expanded ? 'shrink' : 'expand'}
+          </button>
+        </div>
       </div>
 
-      <div ref={ref} className="h-[380px] shrink-0">
+      {empty && (
+        <p className="text-neutral-500 p-3">
+          Nothing held yet. Ask something and what the conversation is about
+          will appear here.
+        </p>
+      )}
+
+      <div
+        ref={ref}
+        className={
+          empty ? 'hidden' : expanded ? 'flex-1 min-h-0' : 'h-[420px] shrink-0'
+        }
+      >
         {width > 0 && (
         <ForceGraph2D
           ref={graph}
@@ -175,24 +201,24 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
       </div>
 
       <ul className="px-3 pb-2 space-y-1 shrink-0 max-h-52 overflow-y-auto">
-        {view.nodes.slice(0, 12).map((n) => (
+        {(view?.nodes ?? []).slice(0, 12).map((n) => (
           <li key={n.id} className="flex gap-2 items-baseline">
             <span style={{ color: HOW_COLOUR[n.how] ?? '#a3a3a3' }}>●</span>
             <span className="text-neutral-300">{n.name}</span>
             <span className="text-neutral-600">{n.labels.join('/')}</span>
           </li>
         ))}
-        {view.nodes.length > 12 && (
-          <li className="text-neutral-600">…and {view.nodes.length - 12} more</li>
+        {(view?.nodes.length ?? 0) > 12 && (
+          <li className="text-neutral-600">…and {view!.nodes.length - 12} more</li>
         )}
       </ul>
 
-      <p className="px-3 pb-3 text-neutral-500 shrink-0">
-        {view.edges.length} relationship{view.edges.length === 1 ? '' : 's'}
+      <p className={empty ? 'hidden' : 'px-3 pb-3 text-neutral-500 shrink-0'}>
+        {view?.edges.length ?? 0} relationship{view?.edges.length === 1 ? '' : 's'}
         {/* Counted rather than hidden: a line to an evicted node cannot be
             drawn, and silently drawing fewer would misreport what is held. */}
-        {undrawn > 0 && `, ${undrawn} not drawn`} · {view.passages} section
-        {view.passages === 1 ? '' : 's'} read
+        {undrawn > 0 && `, ${undrawn} not drawn`} · {view?.passages ?? 0} section
+        {view?.passages === 1 ? '' : 's'} read
       </p>
     </div>
   )

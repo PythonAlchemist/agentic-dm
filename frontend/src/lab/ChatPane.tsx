@@ -28,6 +28,7 @@ export function ChatPane({
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [expanded, setExpanded] = useState(false)
 
   const ask = async () => {
     const question = draft.trim()
@@ -54,7 +55,7 @@ export function ChatPane({
 
   return (
     <div className="flex gap-4 h-full">
-      <div className="flex flex-col h-full flex-1 min-w-0">
+      <div className={expanded ? "flex flex-col h-full w-[420px] shrink-0" : "flex flex-col h-full flex-1 min-w-0"}>
       <div className="flex-1 overflow-y-auto space-y-6 pr-1">
         {turns.length === 0 && (
           <p className="text-sm text-neutral-500">
@@ -130,8 +131,18 @@ export function ChatPane({
       </div>
       </div>
 
-      <aside className="w-[420px] shrink-0 border-l border-neutral-800 overflow-hidden">
-        <SubgraphPanel view={held} />
+      <aside
+        className={
+          expanded
+            ? 'flex-1 min-w-0 border-l border-neutral-800 overflow-hidden'
+            : 'w-[520px] shrink-0 border-l border-neutral-800 overflow-hidden'
+        }
+      >
+        <SubgraphPanel
+          view={held}
+          expanded={expanded}
+          onToggle={() => setExpanded((e) => !e)}
+        />
       </aside>
     </div>
   )
