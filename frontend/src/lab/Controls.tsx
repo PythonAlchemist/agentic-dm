@@ -1,4 +1,5 @@
 import type { Depth, ModelInfo } from './api'
+import { Slider } from './ui'
 
 /**
  * Model and context depth. The two things this lab exists to vary.
@@ -123,40 +124,6 @@ export function Controls({
           </span>
         </label>
       </section>
-    </div>
-  )
-}
-
-function Slider({
-  label,
-  hint,
-  value,
-  min,
-  max,
-  onChange,
-}: {
-  label: string
-  hint: string
-  value: number
-  min: number
-  max: number
-  onChange: (v: number) => void
-}) {
-  return (
-    <div className="mb-3">
-      <div className="flex justify-between text-sm">
-        <span>{label}</span>
-        <span className="tabular-nums text-neutral-300">{value}</span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-amber-500"
-      />
-      <p className="text-xs text-neutral-500">{hint}</p>
     </div>
   )
 }

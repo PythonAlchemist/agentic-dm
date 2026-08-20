@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { labAPI, type Cost, type Depth, type LabConfig, type Usage } from './api'
 import { ChatPane } from './ChatPane'
-import { SubgraphPanel } from './SubgraphPanel'
 import { Controls } from './Controls'
+import { TabBar, TooltipProvider } from './ui'
 import { GeneratePane } from './GeneratePane'
 import { accumulate, SessionMeter, ZERO, type Running } from './Meters'
 
@@ -64,6 +64,9 @@ export function Lab() {
   }
 
   return (
+    // One provider at the root, so every `Explain` shares a delay and a portal
+    // rather than each mounting its own.
+    <TooltipProvider>
     <div className="min-h-screen bg-neutral-950 text-neutral-200">
       <header className="border-b border-neutral-800 px-6 py-3 flex items-baseline gap-4">
         <h1 className="text-base font-medium">Agent Lab</h1>
@@ -85,20 +88,15 @@ export function Lab() {
         </aside>
 
         <main className="min-h-[70vh] flex flex-col">
-          <div className="flex gap-2 mb-4">
-            {(['chat', 'generate'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-4 py-1.5 rounded text-sm border ${
-                  t === tab
-                    ? 'border-amber-500 bg-amber-500/10'
-                    : 'border-neutral-700 hover:border-neutral-600'
-                }`}
-              >
-                {t === 'chat' ? 'Setting chat' : 'Generate'}
-              </button>
-            ))}
+          <div className="mb-4">
+            <TabBar
+              tabs={[
+                { id: 'chat' as const, label: 'Setting chat' },
+                { id: 'generate' as const, label: 'Generate' },
+              ]}
+              active={tab}
+              onChange={setTab}
+            />
           </div>
 
           {/* Both panes stay MOUNTED. Switching tabs must not throw away a
@@ -118,5 +116,6 @@ export function Lab() {
         </main>
       </div>
     </div>
+    </TooltipProvider>
   )
 }

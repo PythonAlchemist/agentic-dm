@@ -1,4 +1,5 @@
 import type { Cost, RetrievalReport, Usage } from './api'
+import { Explain } from './ui'
 
 export interface Running {
   calls: number
@@ -36,7 +37,11 @@ export function CallMeter({ usage, cost }: { usage: Usage; cost: Cost }) {
         {usage.input.toLocaleString()} in / {usage.output.toLocaleString()} out
       </span>
       <span className="tabular-nums">{money(cost)}</span>
-      <span>{age(cost)}</span>
+      {age(cost) && (
+        <Explain text="Every rate in this table is a claim about the outside world that this repository cannot check. An unverified one is arithmetic on a number nobody has confirmed — correct it in backend/core/pricing.yaml and set last_verified.">
+          <span>{age(cost)}</span>
+        </Explain>
+      )}
     </div>
   )
 }
@@ -91,7 +96,17 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
             byText ? 'text-amber-400' : report.path ? 'text-emerald-400' : 'text-neutral-500'
           }
         >
-          {byText ? 'keyword match' : report.path ? 'by name' : 'nothing'}
+          <Explain
+            text={
+              byText
+                ? 'Nothing in the question resolved to a canon entity, so the sections were chosen by a full-text score. They share words with the question and may be about something else.'
+                : report.path
+                  ? 'A name in the question resolved through the alias graph, so these sections are ones the book actually links to that entity.'
+                  : 'Retrieval returned nothing at all.'
+            }
+          >
+            {byText ? 'keyword match' : report.path ? 'by name' : 'nothing'}
+          </Explain>
         </span>
       </div>
 
@@ -102,10 +117,18 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
         <p className="text-neutral-400">searched: {report.terms.join(', ')}</p>
       )}
       {report.loose && (
-        <p className="text-neutral-500">matched with relaxed capitalisation</p>
+        <p className="text-neutral-500">
+          <Explain text="Nothing matched under the scan's own casing rule, so a case-folded pass was used. Weaker evidence than an exact match, which is why it is shown.">
+            matched with relaxed capitalisation
+          </Explain>
+        </p>
       )}
       {report.carried && (
-        <p className="text-neutral-500">carried from the conversation</p>
+        <p className="text-neutral-500">
+          <Explain text="This question resolved no name of its own, so it was anchored on what the conversation was already about. A question that names something is never overridden this way.">
+            carried from the conversation
+          </Explain>
+        </p>
       )}
 
       <p className="text-neutral-400">
@@ -114,7 +137,9 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
         {report.dropped > 0 && `, ${report.dropped} cut by the budget`}
       </p>
       <p className="text-neutral-400">
-        {report.accepted_edges} derived · {report.proposed_edges} guessed
+        <Explain text="Derived relationships come from the book's own structure and are reliable. Guessed ones come from an extractor and roughly a third are wrong — treat each as a lead to check.">
+          {report.accepted_edges} derived · {report.proposed_edges} guessed
+        </Explain>
         {report.proposed_withheld && ' (withheld)'}
       </p>
       {report.miss_reason && <p className="text-amber-400/80">{report.miss_reason}</p>}

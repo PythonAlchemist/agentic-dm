@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { labAPI, type ChatReply, type Depth } from './api'
 import { CallMeter, RetrievalPanel } from './Meters'
+import { Group, Panel, Separator } from 'react-resizable-panels'
 import { SubgraphPanel } from './SubgraphPanel'
 
 interface Turn {
@@ -28,7 +29,6 @@ export function ChatPane({
   const [turns, setTurns] = useState<Turn[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [expanded, setExpanded] = useState(false)
 
   const ask = async () => {
     const question = draft.trim()
@@ -54,8 +54,12 @@ export function ChatPane({
   const held = [...turns].reverse().find((turn) => turn.reply)?.reply?.subgraph ?? null
 
   return (
-    <div className="flex gap-4 h-full">
-      <div className={expanded ? "flex flex-col h-full w-[420px] shrink-0" : "flex flex-col h-full flex-1 min-w-0"}>
+    // A DRAG HANDLE RATHER THAN A TOGGLE. Two hardcoded widths were two
+    // guesses at what someone wanted to read, and both were wrong -- the
+    // reader knows whether they are looking at the answer or at the graph.
+    <Group orientation="horizontal" className="h-full">
+      <Panel defaultSize="62%" minSize="30%">
+        <div className="flex flex-col h-full pr-1">
       <div className="flex-1 overflow-y-auto space-y-6 pr-1">
         {turns.length === 0 && (
           <p className="text-sm text-neutral-500">
@@ -129,21 +133,16 @@ export function ChatPane({
           Ask
         </button>
       </div>
-      </div>
+        </div>
+      </Panel>
 
-      <aside
-        className={
-          expanded
-            ? 'flex-1 min-w-0 border-l border-neutral-800 overflow-hidden'
-            : 'w-[520px] shrink-0 border-l border-neutral-800 overflow-hidden'
-        }
-      >
-        <SubgraphPanel
-          view={held}
-          expanded={expanded}
-          onToggle={() => setExpanded((e) => !e)}
-        />
-      </aside>
-    </div>
+      <Separator className="w-1.5 mx-1 rounded bg-neutral-800 hover:bg-amber-600/60 transition-colors" />
+
+      <Panel defaultSize="38%" minSize="20%">
+        <div className="h-full overflow-hidden">
+          <SubgraphPanel view={held} />
+        </div>
+      </Panel>
+    </Group>
   )
 }

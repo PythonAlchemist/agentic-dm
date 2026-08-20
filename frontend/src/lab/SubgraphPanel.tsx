@@ -50,15 +50,7 @@ function useMeasured() {
   return { ref, ...size }
 }
 
-export function SubgraphPanel({
-  view,
-  expanded,
-  onToggle,
-}: {
-  view: SubgraphView | null
-  expanded: boolean
-  onToggle: () => void
-}) {
+export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
   const { ref, width, height } = useMeasured()
   const graph = useRef<any>(null)
 
@@ -106,18 +98,7 @@ export function SubgraphPanel({
         <span className="uppercase tracking-wide text-neutral-400">
           In this conversation
         </span>
-        <div className="flex gap-3 items-baseline">
-          {view && <span className="text-neutral-500">turn {view.turn}</span>}
-          {/* A working set of nine mostly-unconnected entities needs room. The
-              sidebar is the default because the transcript is what you are
-              usually reading; this is for when the graph is. */}
-          <button
-            onClick={onToggle}
-            className="text-neutral-400 hover:text-neutral-200 underline"
-          >
-            {expanded ? 'shrink' : 'expand'}
-          </button>
-        </div>
+        {view && <span className="text-neutral-500">turn {view.turn}</span>}
       </div>
 
       {empty && (
@@ -129,9 +110,7 @@ export function SubgraphPanel({
 
       <div
         ref={ref}
-        className={
-          empty ? 'hidden' : expanded ? 'flex-1 min-h-0' : 'h-[420px] shrink-0'
-        }
+        className={empty ? 'hidden' : 'flex-1 min-h-[240px]'}
       >
         {width > 0 && (
         <ForceGraph2D
