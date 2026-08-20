@@ -9,6 +9,7 @@ Both the graph and the model are fakes. What is asserted is the messages the
 agent would send.
 """
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from dataclasses import replace
@@ -16,7 +17,14 @@ from dataclasses import replace
 import pytest
 
 from backend.agents.dm_agent import DMAgent
+from backend.canon.ontology import Ontology
 from backend.canon.retrieval import PATH_GRAPH, PATH_TEXT, Passage, Retrieval
+
+
+@contextmanager
+def _no_session():
+    """A read-only session that reaches no database."""
+    yield None
 
 #: Only the rendered block says this; the SYSTEM_PROMPT's guidance says "CANON"
 #: on its own, so a bare substring check would pass on the prompt alone.
@@ -334,3 +342,76 @@ class TestTheToolLoop:
         agent = await self._agent(monkeypatch, completions)
         await agent.process_message("q", use_rag=False, use_canon=True)
         assert "tools" not in completions.calls[-1]
+
+
+@pytest.mark.asyncio
+class TestTheGraphVocabularyReachesTheModel:
+    """Before this, nothing told the model what kinds of thing the graph holds.
+    It read the schema off whatever instances a result happened to contain --
+    `Strahd von Zarovich (LORE/MONSTER/NPC)` and one arrow -- from a sample it
+    did not choose.
+
+    Wiring again, not rendering: `test_canon/test_ontology.py` checks what the
+    block says.
+    """
+
+    @staticmethod
+    def _speaking(monkeypatch, found: Ontology) -> None:
+        """Make the vocabulary deterministic and hit no database."""
+        monkeypatch.setattr(
+            "backend.agents.dm_agent.read_only_session", _no_session
+        )
+        monkeypatch.setattr(
+            "backend.agents.dm_agent.ontology.read", lambda session, **kw: found
+        )
+
+    async def test_the_vocabulary_is_in_the_messages_sent(self, agent, monkeypatch):
+        self._speaking(monkeypatch, Ontology(entity_types=("NPC",), guessed=("SERVES",)))
+        await agent.process_message("Who is Ismark?", use_rag=False)
+        assert "Entity types: NPC" in system_text(agent)
+        assert "SERVES" in system_text(agent)
+
+    async def test_it_comes_before_the_canon_block(self, agent, monkeypatch):
+        """Static contract first, then the evidence. A vocabulary read after
+        the passages is a vocabulary read after the model has already decided
+        what the passages mean."""
+        self._speaking(monkeypatch, Ontology(entity_types=("NPC",)))
+        await agent.process_message("Who is Ismark?", use_rag=False)
+        sent = agent.openai.chat.completions.messages
+        vocabulary_at = next(
+            i for i, m in enumerate(sent) if "Entity types:" in m["content"]
+        )
+        canon_at = next(i for i, m in enumerate(sent) if BLOCK_MARK in m["content"])
+        assert vocabulary_at < canon_at
+
+    async def test_it_is_sent_even_when_canon_is_off(self, agent, monkeypatch):
+        """The tools are offered on every call, so the vocabulary describing
+        them belongs on every call. A question that retrieved nothing is
+        exactly when the model goes looking through them."""
+        self._speaking(monkeypatch, Ontology(entity_types=("NPC",)))
+        await agent.process_message("Who is Ismark?", use_rag=False, use_canon=False)
+        assert "Entity types: NPC" in system_text(agent)
+
+    async def test_an_unreadable_graph_omits_it_rather_than_failing_the_turn(
+        self, agent, monkeypatch
+    ):
+        """Empty here, unlike the canon block, which must be present and say it
+        covers nothing. Silence returns the model to reading the schema off
+        instances -- degraded, but not misleading. An invented vocabulary would
+        be misleading."""
+
+        def boom(*_args, **_kw):
+            raise RuntimeError("neo4j is down")
+
+        monkeypatch.setattr("backend.agents.dm_agent.read_only_session", boom)
+        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        assert response.message == "an answer"
+        assert "Entity types:" not in system_text(agent)
+
+    async def test_an_empty_graph_sends_no_block_at_all(self, agent, monkeypatch):
+        self._speaking(monkeypatch, Ontology())
+        await agent.process_message("Who is Ismark?", use_rag=False)
+        assert "Entity types:" not in system_text(agent)
+        # ...and the canon block is still where it was, rather than shifted by
+        # an empty string inserted ahead of it.
+        assert BLOCK_MARK in system_text(agent)

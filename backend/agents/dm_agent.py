@@ -15,6 +15,8 @@ from backend.agents.prompts import SYSTEM_PROMPT
 from backend.agents import graph_tools
 from backend.agents import subgraph as subgraph_module
 from backend.agents.subgraph import Subgraph, note_named, seed as seed_subgraph
+from backend.canon import ontology
+from backend.core.database import read_only_session
 from backend.canon.retrieval import (
     PATH_GRAPH,
     PATH_TEXT,
@@ -353,6 +355,24 @@ class DMAgent:
             logger.warning("could not read names out of the answer", exc_info=True)
             return []
 
+    def _ontology(self) -> str:
+        """The graph's vocabulary, or nothing at all if it cannot be read.
+
+        Empty on failure, unlike `_retrieve_canon`, and the asymmetry is
+        deliberate. A missing canon block has to be replaced by an explicit
+        "the canon covers nothing", because silence there lets the model answer
+        from its own memory of the published adventure. Silence HERE returns
+        the model to exactly where it was before this existed -- reading the
+        schema off whatever instances come back -- which is degraded but not
+        misleading. Inventing a vocabulary to fill the gap would be.
+        """
+        try:
+            with read_only_session() as session:
+                return ontology.read(session).render()
+        except Exception:  # noqa: BLE001 - a vocabulary must not fail a turn
+            logger.warning("could not read the graph vocabulary", exc_info=True)
+            return ""
+
     def _retrieve_canon(self, user_input: str) -> Retrieval:
         """Canon for this question. An EMPTY retrieval if the graph is unreachable.
 
@@ -403,22 +423,29 @@ class DMAgent:
         # rather than after its own previous answers.
         canon_sources: list[dict] = []
         retrieval_report: Optional[dict] = None
+
+        # Ordered blocks rather than three hardcoded indices, which had to
+        # agree with each other by hand and would silently reorder the moment a
+        # fourth one appeared -- as it just did.
+        #
+        # The vocabulary comes FIRST and is not conditional on retrieval: it
+        # describes the tools, which are offered on every call, and a question
+        # that retrieved nothing is exactly when the model is most likely to go
+        # looking through them.
+        blocks = [self._ontology()]
         if retrieval is not None:
             shown = canon_context.apply(retrieval, self.depth)
-            context.insert(
-                1,
-                {
-                    "role": "system",
-                    "content": canon_context.render(shown, max_edges=self.depth.max_edges),
-                },
+            blocks.append(
+                canon_context.render(shown, max_edges=self.depth.max_edges)
             )
             # AFTER the canon block, so the model reads the book's words
             # first and then what the conversation has been about -- the same
             # ordering argument as inserting canon before the question.
-            summary = self.subgraph.render(self.depth.include_proposed)
-            if summary:
-                context.insert(2, {"role": "system", "content": summary})
+            blocks.append(self.subgraph.render(self.depth.include_proposed))
+        for offset, block in enumerate(b for b in blocks if b):
+            context.insert(1 + offset, {"role": "system", "content": block})
 
+        if retrieval is not None:
             canon_sources = canon_context.sources(shown)
             # Reported off the UNFILTERED retrieval on purpose: a reader needs
             # to see that 30 proposed edges existed and were withheld, not that
