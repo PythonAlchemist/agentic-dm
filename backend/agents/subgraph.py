@@ -212,6 +212,42 @@ class Subgraph:
             dropped += 1
         return dropped
 
+    def as_dict(self) -> dict:
+        """The working set, for a reader rather than for the model.
+
+        Carries `how` and `turn` on every item, which `render` deliberately
+        does not: the model needs to know WHAT the conversation is about, and a
+        person watching it needs to know how each thing got there and when. A
+        node that arrived because an answer happened to name it is weaker
+        evidence than one a question resolved, and a panel that showed them
+        alike would hide the difference the whole `how` field exists to record.
+        """
+        return {
+            "nodes": [
+                {
+                    "id": held.id,
+                    "name": held.name,
+                    "labels": list(held.labels),
+                    "how": held.how,
+                    "turn": held.turn,
+                }
+                for held in self.subjects(limit=len(self.nodes))
+            ],
+            "edges": [
+                {
+                    "source": edge.source,
+                    "rel_type": edge.rel_type,
+                    "target": edge.target,
+                    "status": edge.status,
+                    "how": edge.how,
+                    "turn": edge.turn,
+                }
+                for edge in sorted(self.edges.values(), key=lambda e: e.key)
+            ],
+            "passages": len(self.passages),
+            "turn": self.turn,
+        }
+
     # -- what the model sees -----------------------------------------------
 
     def render(self, include_proposed: bool = True) -> str:

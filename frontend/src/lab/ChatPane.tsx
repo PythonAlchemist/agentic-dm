@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { labAPI, type ChatReply, type Depth } from './api'
 import { CallMeter, RetrievalPanel } from './Meters'
+import { SubgraphPanel } from './SubgraphPanel'
 
 interface Turn {
   question: string
@@ -46,13 +47,19 @@ export function ChatPane({
     }
   }
 
+  // The LAST turn's subgraph, because it is cumulative -- every turn carries
+  // the whole working set, so the newest reply is the current state rather
+  // than a delta to be merged.
+  const held = [...turns].reverse().find((turn) => turn.reply)?.reply?.subgraph ?? null
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex gap-4 h-full">
+      <div className="flex flex-col h-full flex-1 min-w-0">
       <div className="flex-1 overflow-y-auto space-y-6 pr-1">
         {turns.length === 0 && (
           <p className="text-sm text-neutral-500">
-            Ask about the setting. Answers are grounded in the loaded chapters —
-            currently the foreword, the introduction, and chapter 3.
+            Ask about the setting. Answers are grounded in the chapters loaded
+            into the graph, and every one is cited.
           </p>
         )}
 
@@ -121,6 +128,11 @@ export function ChatPane({
           Ask
         </button>
       </div>
+      </div>
+
+      <aside className="w-[300px] shrink-0 border-l border-neutral-800 overflow-y-auto">
+        <SubgraphPanel view={held} />
+      </aside>
     </div>
   )
 }

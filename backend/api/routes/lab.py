@@ -133,6 +133,7 @@ async def chat(request: ChatRequest) -> dict:
         "usage": result.usage,
         "cost": result.cost,
         "retrieval": result.retrieval,
+        "subgraph": result.subgraph,
         "model": model,
     }
 

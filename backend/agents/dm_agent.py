@@ -51,6 +51,11 @@ class DMResponse(BaseModel):
     #: budget cut. The dashboard shows it beside the answer so a thin answer can
     #: be traced to thin context rather than blamed on the model.
     retrieval: Optional[dict] = None
+    #: What the CONVERSATION is holding, after this turn. Sent every turn
+    #: rather than only when it changes: a panel that updated on some turns and
+    #: not others would leave a reader unsure whether nothing changed or
+    #: nothing was sent.
+    subgraph: Optional[dict] = None
 
 
 class DMAgent:
@@ -481,6 +486,7 @@ class DMAgent:
                    "total": usage.total},
             cost=cost.as_dict(),
             retrieval=retrieval_report,
+            subgraph=self.subgraph.as_dict(),
         )
 
     async def _answer_with_tools(self, messages: list[dict]):

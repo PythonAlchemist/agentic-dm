@@ -48,6 +48,21 @@ export interface Cost {
   unpriced: boolean
 }
 
+/** What the conversation is holding, after a turn. */
+export interface SubgraphView {
+  nodes: { id: string; name: string; labels: string[]; how: string; turn: number }[]
+  edges: {
+    source: string
+    rel_type: string
+    target: string
+    status: string
+    how: string
+    turn: number
+  }[]
+  passages: number
+  turn: number
+}
+
 export interface RetrievalReport {
   /** How the QUESTION resolved: on a name, or on nothing. */
   path: string
@@ -85,6 +100,7 @@ export interface ChatReply {
   usage: Usage
   cost: Cost
   retrieval: RetrievalReport | null
+  subgraph: SubgraphView | null
   model: string
 }
 

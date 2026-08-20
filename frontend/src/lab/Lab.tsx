@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { labAPI, type Cost, type Depth, type LabConfig, type Usage } from './api'
 import { ChatPane } from './ChatPane'
+import { SubgraphPanel } from './SubgraphPanel'
 import { Controls } from './Controls'
 import { GeneratePane } from './GeneratePane'
 import { accumulate, SessionMeter, ZERO, type Running } from './Meters'

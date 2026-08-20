@@ -376,3 +376,44 @@ class TestWhatTheAnswerNamed:
         graph = Subgraph()
         note_named(graph, "The canon does not cover that.", self._resolver([]))
         assert graph.nodes == {}
+
+
+class TestTheViewForAReader:
+    """`as_dict` is for the panel, `render` is for the model, and they carry
+    different things on purpose."""
+
+    @staticmethod
+    def _held() -> Subgraph:
+        graph = Subgraph()
+        graph.turn = 2
+        graph.touch_node("cos:tavern", "Blood of the Vine Tavern", ("LOCATION",))
+        graph.touch_node("cos:alenka", "Alenka", ("NPC",), how=NAMED)
+        graph.touch_edge("Alenka", "OWNS", "Blood of the Vine Tavern", "accepted")
+        graph.touch_passage("cos:x#1")
+        return graph
+
+    def test_it_carries_how_each_thing_got_here(self):
+        """The model does not need this; a person watching does. A node an
+        answer happened to name is weaker than one a question resolved."""
+        hows = {n["name"]: n["how"] for n in self._held().as_dict()["nodes"]}
+        assert hows["Blood of the Vine Tavern"] == SEEDED
+        assert hows["Alenka"] == NAMED
+
+    def test_edges_keep_their_status(self):
+        assert self._held().as_dict()["edges"][0]["status"] == "accepted"
+
+    def test_passages_are_counted_not_listed(self):
+        """A panel wants the number; the ids would be noise beside a picture."""
+        assert self._held().as_dict()["passages"] == 1
+
+    def test_an_empty_conversation_views_as_empty(self):
+        view = Subgraph().as_dict()
+        assert view["nodes"] == [] and view["edges"] == []
+
+    def test_the_view_and_the_render_do_not_have_to_agree_on_shape(self):
+        """One is JSON for a browser, the other is prose for a model. Asserted
+        so a later refactor does not quietly make `render` the source of the
+        panel and lose `how` from it."""
+        view = self._held().as_dict()
+        assert "how" in view["nodes"][0]
+        assert "how" not in self._held().render()
