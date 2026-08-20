@@ -34,7 +34,26 @@ and each is a claim somebody measured rather than decoration.
   about the outside world this repository cannot check, and a total built from
   unchecked rates says so.
 - **Provenance colour in the working set** — green for a name a question
-  resolved, amber for one an answer used, blue for one a tool fetched.
+  resolved, amber for one an answer used, blue for one a tool fetched. Grey is
+  a fourth state: a name the agent knows only through a relationship line, not
+  an entity it holds. "It never knew" looks grey; "it forgot" looks like a name
+  that used to have a colour and is gone.
+
+## The working set is a ledger, not a picture
+
+It was a force graph, twice patched and still wrong, because the data is not a
+network. A typical turn holds ~9 entities with ~3 edges between them — the
+simulation scattered the disconnected majority and autofit zoomed until nodes
+were sub-pixel. Worse, most held edges point at a name that is NOT a held node
+(76 edges against 3 nodes on a real turn), and a node-and-edge drawing can
+only show the node-to-node minority; it drew 4 of those 76 and counted the
+rest "not drawn", which is to say it hid most of the memory.
+
+The panel now mirrors `Subgraph.render()` — the exact text the model reads —
+one entity per block, most recently touched first (which is reverse eviction
+order), relationships grouped by type and direction, derived bright and
+guessed dim. What the developer sees is what the model was shown, not a
+projection of it.
 
 Terse labels with the full reason one hover away. Terse is only honest when the
 long version is reachable.

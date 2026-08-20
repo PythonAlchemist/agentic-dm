@@ -1,22 +1,30 @@
 'use client'
 
-import dynamic from 'next/dynamic'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import type { SubgraphView } from '@/lib/api'
 import { Explain } from './ui'
 
 /**
- * What the conversation is holding, as a picture.
+ * What the conversation is holding, as a ledger rather than a picture.
  *
- * Not the whole graph -- the working set, which is why it is small enough to
- * draw. It is also the MEMORY now that the transcript is bounded to the current
- * question, so seeing it is the only way to tell "the agent forgot" apart from
- * "the agent never knew".
+ * Not the whole graph -- the working set, which is the MEMORY now that the
+ * transcript is bounded to the current question. Seeing it is the only way to
+ * tell "the agent forgot" apart from "the agent never knew".
  *
- * Loaded with `ssr: false` because the force layout wants a canvas and a
- * window, neither of which exists while Next renders on the server.
+ * This replaced a force layout, which could not do that job for two measured
+ * reasons. First, the working set is mostly DISCONNECTED -- a typical turn
+ * holds ~9 entities with ~3 edges between them -- so the simulation scattered
+ * unrelated components and autofit zoomed out until every node was sub-pixel.
+ * Second, and worse: most held edges point at a name that is NOT a held node
+ * (76 edges against 3 nodes on a real turn), and a node-and-edge drawing can
+ * only show the node-to-node minority. It drew 4 of those 76 and counted the
+ * rest as "not drawn" -- which is to say it hid most of the memory.
+ *
+ * What the model actually reads each turn is `Subgraph.render()`: the held
+ * entities, then every relationship line, split derived/guessed. This panel
+ * mirrors that rendering one-to-one, so what the developer sees IS what the
+ * model was shown, not a projection of it.
  */
-const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false })
 
 /** How a thing got here. The colours carry the same distinction `how` does. */
 const HOW_COLOUR: Record<string, string> = {
@@ -25,80 +33,123 @@ const HOW_COLOUR: Record<string, string> = {
   expanded: '#60a5fa',
 }
 
-/**
- * What this component puts ON a node and a link.
- *
- * The library types its accessors against its own loose object -- everything
- * optional, `[others: string]: any` -- so these are cast at the boundary
- * rather than threaded through `dynamic()`, which erases generics anyway. The
- * cast is honest: `data` below is the only thing that ever builds these.
- */
-type GraphNode = { id: string; name: string; how: string; labels: string; x: number; y: number }
-type GraphLink = { status: string; rel: string }
-
-const asNode = (n: unknown) => n as GraphNode
-const asLink = (l: unknown) => l as GraphLink
-
 const HOW_LABEL: Record<string, string> = {
   seeded: 'resolved from a question',
   named: 'named in an answer',
   expanded: 'fetched by a tool',
 }
 
-function useMeasured() {
-  const ref = useRef<HTMLDivElement>(null)
-  const [size, setSize] = useState({ width: 0, height: 0 })
+/** A name the agent knows OF but is not holding: it appears only inside a
+ *  relationship line, has no id here, and a follow-up cannot resolve through
+ *  it. Grey is that claim. */
+const NOT_HELD = '#737373'
 
-  useEffect(() => {
-    const element = ref.current
-    if (!element) return
-    const observer = new ResizeObserver(([entry]) => {
-      const { width, height } = entry.contentRect
-      setSize({ width, height })
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
+type Edge = SubgraphView['edges'][number]
 
-  return { ref, ...size }
+/** One rendered relationship line: every far end an entity shares a direction,
+ *  type and status with, on one line. Grouping is what keeps a hub readable --
+ *  Strahd alone carried ~40 edges on a real turn, which grouped to ~20 lines
+ *  and would otherwise have been 40. */
+type Group = {
+  dir: 'out' | 'in'
+  rel: string
+  status: string
+  others: string[]
+}
+
+function groupEdges(name: string, edges: Edge[]): Group[] {
+  const groups = new Map<string, Group>()
+  for (const edge of edges) {
+    const dir = edge.source === name ? 'out' : 'in'
+    const other = dir === 'out' ? edge.target : edge.source
+    // `::` rather than a NUL separator. NUL cannot appear in the data either,
+    // but two of them made git treat this SOURCE FILE as binary -- no diff,
+    // no review. `dir` is in/out, `rel_type` is SCREAMING_SNAKE and `status`
+    // is accepted/proposed, so no colon can collide.
+    const key = `${dir}::${edge.rel_type}::${edge.status}`
+    const group = groups.get(key)
+    if (group) group.others.push(other)
+    else groups.set(key, { dir, rel: edge.rel_type, status: edge.status, others: [other] })
+  }
+  // Derived before guessed, mirroring the two headings `Subgraph.render()`
+  // puts in front of the model; alphabetical within, so re-asking a question
+  // does not reshuffle the panel.
+  return [...groups.values()].sort(
+    (a, b) =>
+      Number(a.status !== 'accepted') - Number(b.status !== 'accepted') ||
+      a.rel.localeCompare(b.rel) ||
+      a.dir.localeCompare(b.dir),
+  )
+}
+
+function EndpointName({ name, held }: { name: string; held: Map<string, SubgraphView['nodes'][number]> }) {
+  const node = held.get(name)
+  return (
+    <span style={{ color: node ? (HOW_COLOUR[node.how] ?? '#d4d4d4') : NOT_HELD }}>
+      {name}
+    </span>
+  )
+}
+
+function GroupLine({ group, held }: { group: Group; held: Map<string, SubgraphView['nodes'][number]> }) {
+  const guessed = group.status !== 'accepted'
+  return (
+    <li className="pl-4 leading-relaxed">
+      {/* No per-line Explain: forty dotted underlines drowned the panel. The
+          bright/dim encoding is explained once, on the footer's counts. Kept
+          hue-free deliberately -- colour already means how a NODE got here,
+          and a green rel label would read as "seeded". */}
+      <span className={guessed ? 'text-neutral-500' : 'font-medium text-neutral-200'}>
+        {group.dir === 'out' ? `${group.rel} →` : `← ${group.rel}`}
+      </span>{' '}
+      {group.others.map((other, i) => (
+        <span key={`${other}-${i}`} className={guessed ? 'opacity-80' : ''}>
+          {i > 0 && <span className="text-neutral-700"> · </span>}
+          <EndpointName name={other} held={held} />
+        </span>
+      ))}
+    </li>
+  )
 }
 
 export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
-  const { ref, width, height } = useMeasured()
-  const graph = useRef<{ zoomToFit: (ms: number, pad: number) => void; zoom: (k?: number, ms?: number) => number; d3Force: (name: string) => { strength: (v: number) => void } | undefined } | null>(null)
-
-  // A gentler repulsion than the default, because this graph is mostly
-  // UNCONNECTED: the entities a conversation holds usually have no edge between
-  // them, and the default charge pushes those to the far corners.
-  useEffect(() => {
-    graph.current?.d3Force('charge')?.strength(-90)
-  })
-
-  const data = useMemo(() => {
-    if (!view) return { nodes: [], links: [] }
-    const byName = new Map(view.nodes.map((n) => [n.name, n.id]))
+  const shaped = useMemo(() => {
+    if (!view) return null
+    const held = new Map(view.nodes.map((n) => [n.name, n]))
+    // Every edge is shown under exactly ONE held endpoint -- the source when
+    // it is held, else the target. Under both, each node-to-node edge would
+    // appear twice and the counts in the footer would stop matching the list.
+    const byOwner = new Map<string, Edge[]>()
+    const orphans: Edge[] = []
+    for (const edge of view.edges) {
+      const owner = held.has(edge.source)
+        ? edge.source
+        : held.has(edge.target)
+          ? edge.target
+          : null
+      if (owner === null) {
+        orphans.push(edge)
+      } else {
+        const list = byOwner.get(owner)
+        if (list) list.push(edge)
+        else byOwner.set(owner, [edge])
+      }
+    }
+    const notHeld = new Set<string>()
+    for (const edge of view.edges) {
+      if (!held.has(edge.source)) notHeld.add(edge.source)
+      if (!held.has(edge.target)) notHeld.add(edge.target)
+    }
     return {
-      nodes: view.nodes.map((n) => ({
-        id: n.id,
-        name: n.name,
-        how: n.how,
-        labels: n.labels.join('/'),
-      })),
-      // Only edges whose BOTH ends are held can be drawn: one to an evicted
-      // node would render as a line to nowhere.
-      links: view.edges
-        .map((e) => ({
-          source: byName.get(e.source),
-          target: byName.get(e.target),
-          status: e.status,
-          rel: e.rel_type,
-        }))
-        .filter((l) => l.source && l.target),
+      held,
+      byOwner,
+      orphans,
+      notHeld: notHeld.size,
+      guessed: view.edges.filter((e) => e.status !== 'accepted').length,
     }
   }, [view])
 
   const empty = !view || view.nodes.length === 0
-  const undrawn = view ? view.edges.length - data.links.length : 0
 
   return (
     <div className="flex h-full flex-col">
@@ -116,89 +167,83 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
         </p>
       )}
 
-      <div ref={ref} className={empty ? 'hidden' : 'min-h-0 flex-1'}>
-        {width > 0 && (
-          <ForceGraph2D
-            ref={graph as never}
-            graphData={data}
-            width={width}
-            height={height}
-            onEngineStop={() => {
-              const fg = graph.current
-              if (!fg) return
-              // Instant, so the zoom can be read back and clamped. Animated,
-              // the getter still returns the old value.
-              fg.zoomToFit(0, 24)
-              // DISCONNECTED NODES FLY APART, and `zoomToFit` then zooms out
-              // until every node is a sub-pixel dot. Most of what a
-              // conversation holds has no edge to the rest of it, so this is
-              // the normal case rather than an edge case.
-              if (fg.zoom() < 0.7) fg.zoom(0.7, 200)
-            }}
-            backgroundColor="transparent"
-            nodeRelSize={6}
-            nodeColor={(n) => HOW_COLOUR[asNode(n).how] ?? '#a3a3a3'}
-            nodeLabel={(n) => {
-              const node = asNode(n)
-              return `${node.name} (${node.labels}) — ${HOW_LABEL[node.how] ?? node.how}`
-            }}
-            // Names are DRAWN, not left to a hover: hovering each circle to
-            // find out what the conversation is about defeats the panel.
-            nodeCanvasObjectMode={() => 'after'}
-            nodeCanvasObject={(n, ctx, scale) => {
-              const node = asNode(n)
-              const size = 11 / scale
-              ctx.font = `${size}px ui-sans-serif, system-ui, sans-serif`
-              ctx.textAlign = 'center'
-              ctx.textBaseline = 'top'
-              const lines: string[] = []
-              let line = ''
-              for (const word of String(node.name).split(' ')) {
-                const next = line ? `${line} ${word}` : word
-                if (line && ctx.measureText(next).width > 90 / scale) {
-                  lines.push(line)
-                  line = word
-                } else {
-                  line = next
-                }
-              }
-              if (line) lines.push(line)
-              lines.forEach((text, i) => {
-                const y = node.y + 8 / scale + i * size * 1.15
-                ctx.strokeStyle = 'rgba(10,10,10,0.9)'
-                ctx.lineWidth = 3 / scale
-                ctx.strokeText(text, node.x, y)
-                ctx.fillStyle = '#d4d4d4'
-                ctx.fillText(text, node.x, y)
-              })
-            }}
-            linkColor={(l) => (asLink(l).status === 'accepted' ? '#525252' : '#3f3f46')}
-            linkLabel={(l) => `${asLink(l).rel} · ${asLink(l).status}`}
-            linkWidth={(l) => (asLink(l).status === 'accepted' ? 1.5 : 0.5)}
-            linkDirectionalArrowLength={3}
-            cooldownTicks={60}
-          />
-        )}
-      </div>
+      {!empty && shaped && (
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 text-xs">
+          {/* API order is kept: most recently touched first, which is also
+              reverse eviction order -- the list reads top-to-bottom as
+              "safest to next out the door". */}
+          {view.nodes.map((n) => {
+            const groups = groupEdges(n.name, shaped.byOwner.get(n.name) ?? [])
+            const stale = n.turn < view.turn
+            return (
+              <div key={n.id}>
+                <div className="flex items-baseline gap-2">
+                  <Explain text={HOW_LABEL[n.how] ?? n.how}>
+                    <span style={{ color: HOW_COLOUR[n.how] ?? '#a3a3a3' }}>●</span>
+                  </Explain>
+                  <span className="font-medium text-neutral-200">{n.name}</span>
+                  <span className="truncate text-neutral-600">{n.labels.join('/')}</span>
+                  <span className="ml-auto shrink-0">
+                    <Explain
+                      text={
+                        stale
+                          ? `Last touched on turn ${n.turn}; the current turn is ${view.turn}. Eviction drops the oldest-touched first, so this is aging out.`
+                          : 'Touched this turn, so pinned: the current subject cannot be evicted to make room for itself.'
+                      }
+                    >
+                      <span className={stale ? 'text-amber-600/80' : 'text-neutral-600'}>
+                        t{n.turn}
+                      </span>
+                    </Explain>
+                  </span>
+                </div>
+                {groups.length === 0 ? (
+                  <p className="pl-4 text-neutral-600">no relationships held</p>
+                ) : (
+                  <ul>
+                    {groups.map((g, i) => (
+                      <GroupLine key={i} group={g} held={shaped.held} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )
+          })}
 
-      <ul className="max-h-56 shrink-0 space-y-1 overflow-y-auto px-3 py-2 text-xs">
-        {(view?.nodes ?? []).map((n) => (
-          <li key={n.id} className="flex items-baseline gap-2">
-            <Explain text={HOW_LABEL[n.how] ?? n.how}>
-              <span style={{ color: HOW_COLOUR[n.how] ?? '#a3a3a3' }}>●</span>
-            </Explain>
-            <span className="text-neutral-300">{n.name}</span>
-            <span className="truncate text-neutral-600">{n.labels.join('/')}</span>
-          </li>
-        ))}
-      </ul>
+          {/* Eviction deletes a node's edges with it, so this should stay
+              empty -- but an edge both of whose ends are unheld would
+              otherwise vanish, and silently showing fewer relationships than
+              the model reads is the old panel's sin. */}
+          {shaped.orphans.length > 0 && (
+            <div>
+              <p className="text-neutral-600">between names not held:</p>
+              <ul>
+                {shaped.orphans.map((e, i) => (
+                  <li key={i} className="pl-4 leading-relaxed">
+                    <EndpointName name={e.source} held={shaped.held} />{' '}
+                    <span className={e.status === 'accepted' ? 'font-medium text-neutral-200' : 'text-neutral-500'}>
+                      {e.rel_type} →
+                    </span>{' '}
+                    <EndpointName name={e.target} held={shaped.held} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       <p className={empty ? 'hidden' : 'shrink-0 border-t border-neutral-800 px-3 py-2 text-xs text-neutral-600'}>
-        {view?.edges.length ?? 0} relationship{view?.edges.length === 1 ? '' : 's'}
-        {/* Counted rather than hidden: silently drawing fewer would misreport
-            what the conversation is holding. */}
-        {undrawn > 0 && `, ${undrawn} not drawn`} · {view?.passages ?? 0} section
-        {view?.passages === 1 ? '' : 's'} read
+        <Explain text="Derived relationships (the bright lines) come from the book's own structure and are reliable. Guessed ones (the dim lines) come from an extractor and roughly a third are wrong — leads to check, never facts.">
+          {(view?.edges.length ?? 0) - (shaped?.guessed ?? 0)} derived ·{' '}
+          {shaped?.guessed ?? 0} guessed
+        </Explain>
+        {' · '}
+        <Explain text="Names the agent knows only through a relationship line. It is not holding them: no id, and a follow-up cannot resolve through one. If an answer needed one of these, the agent never knew it -- as opposed to held-then-evicted, which is forgetting.">
+          {shaped?.notHeld ?? 0} named, not held
+        </Explain>
+        {' · '}
+        {view?.passages ?? 0} section{view?.passages === 1 ? '' : 's'} read
       </p>
     </div>
   )
