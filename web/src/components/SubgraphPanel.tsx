@@ -1,48 +1,28 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { SubgraphView } from '@/lib/api'
+import { SubgraphGraph } from './SubgraphGraph'
+import { HOW_COLOUR, HOW_LABEL, NOT_HELD } from './subgraph-legend'
 import { Explain } from './ui'
 
 /**
- * What the conversation is holding, as a ledger rather than a picture.
+ * What the conversation is holding, two ways.
  *
  * Not the whole graph -- the working set, which is the MEMORY now that the
  * transcript is bounded to the current question. Seeing it is the only way to
  * tell "the agent forgot" apart from "the agent never knew".
  *
- * This replaced a force layout, which could not do that job for two measured
- * reasons. First, the working set is mostly DISCONNECTED -- a typical turn
- * holds ~9 entities with ~3 edges between them -- so the simulation scattered
- * unrelated components and autofit zoomed out until every node was sub-pixel.
- * Second, and worse: most held edges point at a name that is NOT a held node
- * (76 edges against 3 nodes on a real turn), and a node-and-edge drawing can
- * only show the node-to-node minority. It drew 4 of those 76 and counted the
- * rest as "not drawn" -- which is to say it hid most of the memory.
+ * The LEDGER (this file) mirrors `Subgraph.render()` one-to-one: held
+ * entities, then every relationship line, split derived/guessed. What the
+ * developer reads IS what the model was shown, not a projection of it. That
+ * exactness is why it is the default.
  *
- * What the model actually reads each turn is `Subgraph.render()`: the held
- * entities, then every relationship line, split derived/guessed. This panel
- * mirrors that rendering one-to-one, so what the developer sees IS what the
- * model was shown, not a projection of it.
+ * The GRAPH (`SubgraphGraph`) shows what the ledger's reading order buries:
+ * which names keep recurring across otherwise unrelated relationships. Its
+ * node set deliberately includes far ends that are NOT held -- see the note
+ * in that file for the measurement that forced it.
  */
-
-/** How a thing got here. The colours carry the same distinction `how` does. */
-const HOW_COLOUR: Record<string, string> = {
-  seeded: '#34d399',
-  named: '#fbbf24',
-  expanded: '#60a5fa',
-}
-
-const HOW_LABEL: Record<string, string> = {
-  seeded: 'resolved from a question',
-  named: 'named in an answer',
-  expanded: 'fetched by a tool',
-}
-
-/** A name the agent knows OF but is not holding: it appears only inside a
- *  relationship line, has no id here, and a follow-up cannot resolve through
- *  it. Grey is that claim. */
-const NOT_HELD = '#737373'
 
 type Edge = SubgraphView['edges'][number]
 
@@ -113,6 +93,7 @@ function GroupLine({ group, held }: { group: Group; held: Map<string, SubgraphVi
 }
 
 export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
+  const [mode, setMode] = useState<'ledger' | 'graph'>('ledger')
   const shaped = useMemo(() => {
     if (!view) return null
     const held = new Map(view.nodes.map((n) => [n.name, n]))
@@ -153,11 +134,31 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-baseline justify-between border-b border-neutral-800 px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
         <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
           In this conversation
         </span>
-        {view && <span className="text-xs text-neutral-600">turn {view.turn}</span>}
+        <div className="flex items-center gap-2">
+          {/* Both views read the same working set, so switching is free and
+              never costs a call -- worth making obvious by keeping the toggle
+              beside the turn counter rather than in the page's tab bar. */}
+          <div className="flex rounded-md border border-neutral-800">
+            {(['ledger', 'graph'] as const).map((id) => (
+              <button
+                key={id}
+                onClick={() => setMode(id)}
+                className={`px-2 py-0.5 text-[11px] first:rounded-l-md last:rounded-r-md ${
+                  mode === id
+                    ? 'bg-amber-500/15 text-amber-200'
+                    : 'text-neutral-500 hover:bg-neutral-800/60'
+                }`}
+              >
+                {id}
+              </button>
+            ))}
+          </div>
+          {view && <span className="text-xs text-neutral-600">turn {view.turn}</span>}
+        </div>
       </div>
 
       {empty && (
@@ -167,8 +168,24 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
         </p>
       )}
 
+      {/* Both stay MOUNTED. The graph keeps each name's position across turns
+          so the picture does not reshuffle under the reader, and that memory
+          lives in the component -- unmounting it on every toggle would throw
+          the layout away and defeat the point. */}
+      {!empty && (
+        <div className={mode === 'graph' ? 'min-h-0 flex-1' : 'hidden'}>
+          <SubgraphGraph view={view} />
+        </div>
+      )}
+
       {!empty && shaped && (
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 text-xs">
+        <div
+          className={
+            mode === 'ledger'
+              ? 'min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 text-xs'
+              : 'hidden'
+          }
+        >
           {/* API order is kept: most recently touched first, which is also
               reverse eviction order -- the list reads top-to-bottom as
               "safest to next out the door". */}
