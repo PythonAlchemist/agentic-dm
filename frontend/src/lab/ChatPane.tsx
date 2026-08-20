@@ -130,7 +130,7 @@ export function ChatPane({
       </div>
       </div>
 
-      <aside className="w-[300px] shrink-0 border-l border-neutral-800 overflow-y-auto">
+      <aside className="w-[420px] shrink-0 border-l border-neutral-800 overflow-hidden">
         <SubgraphPanel view={held} />
       </aside>
     </div>
