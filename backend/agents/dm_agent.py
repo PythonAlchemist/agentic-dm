@@ -143,8 +143,10 @@ class DMAgent:
             DMResponse with the agent's response.
         """
         # A turn is one exchange, and everything touched during it is pinned
-        # against eviction -- see `Subgraph.evict`.
-        self.subgraph.turn += 1
+        # against eviction -- see `Subgraph.evict`. Beginning the turn also
+        # expires the previous answer's unused name-drops; see
+        # `Subgraph.expire` for why that is a turn boundary and not a budget.
+        self.subgraph.begin_turn()
 
         # Add user message to history
         self.conversation.add_user_message(user_input)

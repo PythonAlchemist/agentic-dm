@@ -163,12 +163,93 @@ class Subgraph:
 
     # -- keeping it bounded ------------------------------------------------
 
+    def begin_turn(self) -> int:
+        """Start a turn. Returns how many stale name-drops were expired.
+
+        A method rather than `subgraph.turn += 1` at the call site so the
+        expiry cannot be forgotten: the two belong together, because what
+        expires is defined entirely in terms of the turn that just began.
+        """
+        self.turn += 1
+        return self.expire()
+
+    def expire(self) -> int:
+        """Drop the name-drops the following turn did not pick up.
+
+        `note_named` holds every recorded name an ANSWER used, which is what
+        makes "who owns the tavern" -> "describe it" work: the question
+        resolves nothing, and the tavern is only in the conversation because
+        the answer said so. But that is a bet on the NEXT question, and once
+        the next question has come and gone without touching it, the bet is
+        settled and lost. Nothing checked, so it stayed until the token budget
+        happened to evict it by age.
+
+        Measured on a three-turn session, the working set for "Who owns the
+        Blood of the Vine Tavern?" was the tavern plus SEVEN nodes that were
+        all `named` residue from the previous answer's prose -- Ireena still
+        carrying 22 relationships into a question about a pub. Every one of
+        them was rendered into the prompt.
+
+        One turn of grace, exactly: a node named on turn N survives turn N+1,
+        which is the case this mechanism exists for, and goes on N+2.
+
+        The most recent subject is never expired, for the reason `evict` gives
+        at more length -- an empty subgraph is total amnesia, and that is never
+        the better trade.
+        """
+        subject = self.subjects(limit=1)
+        pinned = {subject[0].id} if subject else set()
+        doomed = [
+            held
+            for held in self.nodes.values()
+            if held.how == NAMED and held.turn < self.turn - 1 and held.id not in pinned
+        ]
+        return sum(self._drop_node(held) for held in doomed)
+
+    def _drop_node(self, held: Held) -> int:
+        """Remove an entity and the edges that mentioned it. Returns the count.
+
+        An edge whose endpoint is gone would render as a dangling claim about a
+        name nothing else explains, so the two can never be separated.
+        """
+        del self.nodes[held.id]
+        dropped = 1
+        for key in [
+            k for k, e in self.edges.items() if held.name in (e.source, e.target)
+        ]:
+            del self.edges[key]
+            dropped += 1
+        return dropped
+
+    def _is_residue(self, item: Held | HeldEdge) -> bool:
+        """A name an answer used, that nothing here explains.
+
+        The weakest thing the working set can hold: it contributes one bare
+        `Rahadin (NPC)` line to the prompt, says nothing the answer did not
+        already say, and is not evidence the conversation is ABOUT it.
+        """
+        return (
+            isinstance(item, Held)
+            and item.how == NAMED
+            and not any(
+                item.name in (e.source, e.target) for e in self.edges.values()
+            )
+        )
+
     def evict(self, budget: int, estimate: Callable[[str], int] = _estimate) -> int:
-        """Drop the oldest-touched items until the rendering fits `budget`.
+        """Drop the weakest items until the rendering fits `budget`.
 
         Returns how many were dropped.
 
-        OLDEST-TOUCHED FIRST, with two things pinned.
+        RESIDUE FIRST, THEN OLDEST-TOUCHED, with two things pinned.
+
+        Age alone got this backwards. On a real session Strahd survived as a
+        bare `Strahd von Zarovich (LORE/NPC)` line with ZERO edges, because he
+        had been re-named on a later turn, while the 51 relationships that
+        actually said something about him were evicted for being older. The
+        structure is the valuable part and it went first. So an edgeless
+        name-drop is spent before anything else, whatever its turn -- see
+        `_is_residue`.
 
         Anything touched on the CURRENT turn: evicting what the conversation is
         talking about right now to make room for what it is talking about right
@@ -196,20 +277,14 @@ class Subgraph:
             ] + [edge for edge in self.edges.values() if edge.turn < self.turn]
             if not stale:
                 return dropped
-            oldest = min(stale, key=lambda item: item.turn)
-            if isinstance(oldest, Held):
-                del self.nodes[oldest.id]
-                # An edge whose endpoint is gone would render as a dangling
-                # claim about a name nothing else explains.
-                for key in [
-                    k for k, e in self.edges.items()
-                    if oldest.name in (e.source, e.target)
-                ]:
-                    del self.edges[key]
-                    dropped += 1
+            weakest = min(
+                stale, key=lambda item: (0 if self._is_residue(item) else 1, item.turn)
+            )
+            if isinstance(weakest, Held):
+                dropped += self._drop_node(weakest)
             else:
-                del self.edges[oldest.key]
-            dropped += 1
+                del self.edges[weakest.key]
+                dropped += 1
         return dropped
 
     def as_dict(self) -> dict:

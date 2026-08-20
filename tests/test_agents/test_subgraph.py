@@ -417,3 +417,148 @@ class TestTheViewForAReader:
         view = self._held().as_dict()
         assert "how" in view["nodes"][0]
         assert "how" not in self._held().render()
+
+
+class TestExpiringNameDrops:
+    """A name an ANSWER used is held on a bet about the NEXT question. Once
+    that question has come and gone without touching it, the bet is settled.
+
+    Before this, nothing checked. Measured on a three-turn session, the working
+    set for "Who owns the Blood of the Vine Tavern?" was the tavern plus seven
+    `named` nodes left over from the previous answer's prose -- Ireena carrying
+    22 relationships into a question about a pub, and Rahadin, who has nothing
+    to do with any of it. All of them rendered into the prompt.
+    """
+
+    @staticmethod
+    def _with_a_newer_subject(graph: Subgraph) -> None:
+        """Something newer, sorting first by name.
+
+        The most recent subject is pinned against expiry, so without this every
+        test below would pass on the pin rather than on the rule -- vacuously.
+        `subjects` orders by (-turn, name), so `AAA` takes the pin.
+        """
+        graph.touch_node("aaa", "AAA", ["NPC"])
+
+    def test_it_survives_the_very_next_turn(self):
+        """The case the whole mechanism exists for: "who owns the tavern"
+        anchors nothing, the answer names the tavern, and "describe it" on the
+        very next turn has to find it."""
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("t", "Blood of the Vine Tavern", ["PLACE"], how=NAMED)
+        self._with_a_newer_subject(graph)
+        graph.begin_turn()
+        assert "Blood of the Vine Tavern" in held(graph)
+
+    def test_it_is_gone_the_turn_after_that(self):
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("r", "Rahadin", ["NPC"], how=NAMED)
+        self._with_a_newer_subject(graph)
+        graph.begin_turn()
+        graph.begin_turn()
+        assert "Rahadin" not in held(graph)
+
+    def test_naming_it_again_renews_the_grace(self):
+        """A conversation that keeps returning to something keeps it."""
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("i", "Ireena", ["NPC"], how=NAMED)
+        self._with_a_newer_subject(graph)
+        graph.begin_turn()
+        graph.touch_node("i", "Ireena", ["NPC"], how=NAMED)
+        graph.begin_turn()
+        assert "Ireena" in held(graph)
+
+    def test_only_name_drops_expire(self):
+        """A resolved name and a deliberate fetch are evidence about what the
+        conversation is about. A name the model happened to utter is not, and
+        that difference is the whole of `how`."""
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("s", "Seeded", ["NPC"], how=SEEDED)
+        graph.touch_node("e", "Expanded", ["NPC"], how=EXPANDED)
+        graph.touch_node("n", "Named", ["NPC"], how=NAMED)
+        self._with_a_newer_subject(graph)
+        graph.begin_turn()
+        graph.begin_turn()
+        assert sorted(held(graph)) == ["AAA", "Expanded", "Seeded"]
+
+    def test_the_edges_go_with_it(self):
+        """An edge whose endpoint is gone is a dangling claim about a name
+        nothing else explains."""
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("g", "Ghost", ["NPC"], how=NAMED)
+        graph.touch_edge("Ghost", "SERVES", "Strahd", "accepted")
+        self._with_a_newer_subject(graph)
+        graph.begin_turn()
+        graph.begin_turn()
+        assert "Ghost" not in graph.render()
+
+    def test_the_last_subject_is_never_expired(self):
+        """An empty subgraph is total amnesia -- the transcript is gone, so
+        this is the only memory. Never the better trade."""
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("t", "Tavern", ["PLACE"], how=NAMED)
+        graph.begin_turn()
+        graph.begin_turn()
+        graph.begin_turn()
+        assert held(graph) == ["Tavern"]
+
+    def test_it_reports_what_it_expired(self):
+        graph = Subgraph()
+        graph.turn = 1
+        graph.touch_node("r", "Rahadin", ["NPC"], how=NAMED)
+        self._with_a_newer_subject(graph)
+        graph.begin_turn()
+        assert graph.begin_turn() == 1
+
+    def test_beginning_a_turn_advances_it(self):
+        graph = Subgraph()
+        graph.begin_turn()
+        assert graph.turn == 1
+
+
+class TestResidueIsSpentFirst:
+    """Age alone got eviction backwards."""
+
+    @staticmethod
+    def _one_token_per_line(text: str) -> int:
+        return len(text.splitlines())
+
+    def _strahd_and_residue(self) -> Subgraph:
+        """The shape measured on a real session: an entity whose relationships
+        are OLD, and a bare name-drop that is younger."""
+        graph = Subgraph()
+        graph.touch_node("s", "Strahd", ["NPC"])
+        graph.touch_edge("Strahd", "ALLIED_WITH", "Rahadin", "accepted")
+        graph.turn = 1
+        graph.touch_node("r", "Residue", ["NPC"], how=NAMED)
+        graph.turn = 2
+        # This turn's own subject, which takes the pin -- otherwise the
+        # name-drop would be the most recent subject and pinned itself.
+        graph.touch_node("q", "Asked", ["PLACE"])
+        return graph
+
+    def test_the_bare_name_goes_before_the_older_relationships(self):
+        """Strahd survived a real session as a bare `Strahd von Zarovich
+        (LORE/NPC)` line with ZERO edges, because he had been re-named on a
+        later turn while the 51 relationships that actually said something
+        about him were evicted for being older."""
+        graph = self._strahd_and_residue()
+        graph.evict(budget=5, estimate=self._one_token_per_line)
+        assert "Residue" not in held(graph)
+        assert "Strahd -ALLIED_WITH-> Rahadin" in graph.render()
+
+    def test_a_name_drop_with_relationships_is_not_residue(self):
+        """`named` is not itself the disqualifier -- carrying no structure is.
+        A name-drop the graph has something to say about is ordinary, and ages
+        out by turn like everything else."""
+        graph = self._strahd_and_residue()
+        graph.touch_edge("Residue", "LIVES_IN", "Barovia", "accepted")
+        graph.turn = 2
+        graph.evict(budget=5, estimate=self._one_token_per_line)
+        assert "Residue" in held(graph)
