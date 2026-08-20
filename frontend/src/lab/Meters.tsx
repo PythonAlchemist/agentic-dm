@@ -104,6 +104,9 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
       {report.loose && (
         <p className="text-neutral-500">matched with relaxed capitalisation</p>
       )}
+      {report.carried && (
+        <p className="text-neutral-500">carried from the conversation</p>
+      )}
 
       <p className="text-neutral-400">
         {report.passages} passage{report.passages === 1 ? '' : 's'}

@@ -360,7 +360,13 @@ class DMAgent:
         production.
         """
         try:
-            return self.canon.retrieve(user_input)
+            # The conversation's own subjects, used ONLY if the question
+            # resolves nothing itself. This is what makes the subgraph reach
+            # RETRIEVAL and not merely the prompt: knowing that "the pub" means
+            # the Blood of the Vine Tavern is no use while the eight sections
+            # in front of the model are `Tyger, Tyger` and `Crypt 10`.
+            carry = [held.id for held in self.subgraph.subjects()]
+            return self.canon.retrieve(user_input, carry=carry)
         except Exception:  # noqa: BLE001 - degraded answer beats a crash mid-session
             logger.warning("canon retrieval failed; answering without it", exc_info=True)
             return Retrieval(question=user_input)
@@ -435,6 +441,7 @@ class DMAgent:
                 "proposed_edges": len(retrieval.proposed),
                 "proposed_withheld": not self.depth.include_proposed,
                 "loose": retrieval.loose,
+                "carried": retrieval.carried,
                 "terms": list(retrieval.terms),
                 "miss_reason": retrieval.miss_reason,
             }

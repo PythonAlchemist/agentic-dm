@@ -41,6 +41,7 @@ church", while a question that names anything properly never reaches it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from backend.canon.aliases import normalize
@@ -284,6 +285,12 @@ class Retrieval:
     #: The terms the text fallback searched on, so a bad text answer can be read
     #: back to the question that produced it.
     terms: tuple[str, ...] = field(default_factory=tuple)
+    #: True when the question resolved NOTHING and the anchors came from the
+    #: conversation's own subjects instead. Surfaced rather than swallowed, for
+    #: the same reason `loose` is: an answer that leant on what was said three
+    #: turns ago is a different kind of answer, and a reader must be able to
+    #: see which they got.
+    carried: bool = False
 
     @property
     def found(self) -> bool:
@@ -477,7 +484,30 @@ class CanonRetriever:
         self.limit = limit
         self.passage_width = passage_width
 
-    def retrieve(self, question: str, *, limit: int | None = None) -> Retrieval:
+    def retrieve(
+        self,
+        question: str,
+        *,
+        limit: int | None = None,
+        carry: Sequence[str] = (),
+    ) -> Retrieval:
+        """Canon for a question, optionally anchored on what came before.
+
+        `carry` is the entity ids a CONVERSATION is already about -- the
+        subgraph's subjects. Used ONLY when the question resolves nothing on
+        its own, so a question that names something is never overridden by
+        what was said three turns ago.
+
+        THE CONVERSATION HAD TO REACH RETRIEVAL, NOT JUST THE PROMPT. Asked
+        "who owns the tavern" and then "give me a list of everyone in the pub",
+        the second question anchors nothing -- `pub` is no alias -- so it
+        searched Lucene for `give, list, everyone, pub` and read `Tyger,
+        Tyger`, `Foreshadowing`, `K81. Tunnel` and `Crypt 10`. The subgraph
+        told the MODEL the subject was the Blood of the Vine Tavern, and the
+        model duly said the canon did not cover who was in it, holding eight
+        sections about something else. The book's E2 section lists exactly who
+        is in that room. Knowing the referent is no use without its prose.
+        """
         limit = self.limit if limit is None else limit
         with self._session() as session:
             # Filtered here rather than in the query, because this is a rule
@@ -501,6 +531,16 @@ class CanonRetriever:
             if not named:
                 named = find_names(question, forms, fold_case=True)
                 loose = bool(named)
+            carried = False
+            if not named and carry:
+                # The conversation's own subjects, as ids rather than as
+                # spellings: no matching to do, no pronoun rule, no guess. A
+                # question that resolved a name never reaches this.
+                anchors = self._anchors_by_id(session, carry)
+                if anchors:
+                    return self._from_anchors(
+                        session, question, anchors, limit, carried=True
+                    )
             if not named:
                 return self._by_text(session, question, limit)
 
@@ -536,59 +576,113 @@ class CanonRetriever:
                     loose=loose,
                 )
 
-            ids = sorted({a.entity_id for a in anchors})
-            # The question's words MINUS the anchors' own. A question naming
-            # Strahd already counts him through his occurrences; letting
-            # `strahd` score again as a content word would count one signal
-            # twice and re-favour exactly the broad sections this is meant to
-            # demote.
-            anchor_words = {word for a in anchors for word in a.surface.lower().split()}
-            terms = [t for t in content_terms(question) if t not in anchor_words]
-            passages = self._passages(session, ids, terms)
-
-            # The text path runs even though a name resolved, and this is the
-            # change that matters most. Anchoring is not the same as anchoring
-            # WELL: `coffin` resolves to an extracted prop in Castle Ravenloft,
-            # and while text ran only on a total anchoring failure, "who is
-            # lying in the coffin in the burgomaster's mansion" had no way back.
-            #
-            # Searched on the question's OWN terms -- `content_terms(question)`,
-            # not `terms` -- because the anchor words are removed only to stop
-            # one signal being counted twice inside the graph's ranking. Lucene
-            # is a separate ordering that never sees those occurrences, so
-            # withholding `strahd` from it would just make it a worse search.
-            text_terms = content_terms(question)
-            text_passages = self._text_passages(session, text_terms, limit)
-            kept = combine_passages(passages, text_passages, limit)
-
-            edges = dedupe_edges(self._rows(session, EDGES, {"ids": ids}))
-            accepted, proposed = split_by_status(edges)
-
-            # Edges stay anchored on the RESOLVED names, and deliberately do not
-            # follow the text passages the reservation added. The text path
-            # gathers entities from the sections it scored because it has no
-            # resolved name to work from; here there is one, and pulling in
-            # relationships about entities the question never named -- chosen by
-            # a Lucene score -- would put guesses under the heading that reads
-            # as what the graph knows about what you asked.
-            return Retrieval(
-                question=question,
-                anchors=tuple(anchors),
-                passages=tuple(kept),
-                accepted=tuple(accepted),
-                proposed=tuple(proposed),
-                # Graph candidates the budget cut, which is what this has always
-                # counted. Text passages are not counted as dropped: the text
-                # path is bounded by `limit` at the query, so it has no tail.
-                dropped=max(0, len(passages) - sum(1 for p in kept if p.path == PATH_GRAPH)),
-                ambiguous=tuple(ambiguous),
-                loose=loose,
-                path=PATH_GRAPH,
-                terms=tuple(text_terms),
-                miss_reason="" if kept else "anchored, but no section mentions the anchors",
+            return self._from_anchors(
+                session, question, anchors, limit,
+                ambiguous=tuple(ambiguous), loose=loose,
             )
 
     # -- internals ---------------------------------------------------------
+
+    def _anchors_by_id(self, session, ids: Sequence[str]) -> list[Anchor]:
+        """Anchors for entity ids the conversation already holds.
+
+        No matching, because there is nothing to match: the subgraph holds ids,
+        not spellings. `surface` is the entity's own name, since no wording in
+        THIS question produced it -- and that is what the panel shows, so a
+        reader can see the anchor came from the conversation rather than from
+        anything they just typed.
+        """
+        rows = self._rows(
+            session,
+            """
+            MATCH (e:Entity {plane:$plane}) WHERE e.id IN $ids
+            RETURN e.id AS id, e.name AS name, labels(e) AS labels,
+                   e.status AS node_status
+            ORDER BY e.id
+            """,
+            {"ids": list(ids)},
+        )
+        return [
+            Anchor(
+                entity_id=row["id"],
+                name=row["name"],
+                labels=tuple(type_labels(row["labels"])),
+                rung=rung_of(row["labels"]),
+                surface=row["name"],
+                node_status=row["node_status"],
+            )
+            for row in rows
+        ]
+
+    def _from_anchors(
+        self,
+        session,
+        question: str,
+        anchors: list[Anchor],
+        limit: int,
+        *,
+        ambiguous: tuple[str, ...] = (),
+        loose: bool = False,
+        carried: bool = False,
+    ) -> Retrieval:
+        """Everything downstream of having anchors, whatever produced them.
+
+        Shared by the two ways a question gets them -- resolving a name in the
+        question, or inheriting the conversation's subjects -- so the ranking,
+        the text reservation and the edge rules cannot differ between them.
+        """
+        ids = sorted({a.entity_id for a in anchors})
+        # The question's words MINUS the anchors' own. A question naming
+        # Strahd already counts him through his occurrences; letting
+        # `strahd` score again as a content word would count one signal
+        # twice and re-favour exactly the broad sections this is meant to
+        # demote.
+        anchor_words = {word for a in anchors for word in a.surface.lower().split()}
+        terms = [t for t in content_terms(question) if t not in anchor_words]
+        passages = self._passages(session, ids, terms)
+
+        # The text path runs even though a name resolved, and this is the
+        # change that matters most. Anchoring is not the same as anchoring
+        # WELL: `coffin` resolves to an extracted prop in Castle Ravenloft,
+        # and while text ran only on a total anchoring failure, "who is
+        # lying in the coffin in the burgomaster's mansion" had no way back.
+        #
+        # Searched on the question's OWN terms -- `content_terms(question)`,
+        # not `terms` -- because the anchor words are removed only to stop
+        # one signal being counted twice inside the graph's ranking. Lucene
+        # is a separate ordering that never sees those occurrences, so
+        # withholding `strahd` from it would just make it a worse search.
+        text_terms = content_terms(question)
+        text_passages = self._text_passages(session, text_terms, limit)
+        kept = combine_passages(passages, text_passages, limit)
+
+        edges = dedupe_edges(self._rows(session, EDGES, {"ids": ids}))
+        accepted, proposed = split_by_status(edges)
+
+        # Edges stay anchored on the RESOLVED names, and deliberately do not
+        # follow the text passages the reservation added. The text path
+        # gathers entities from the sections it scored because it has no
+        # resolved name to work from; here there is one, and pulling in
+        # relationships about entities the question never named -- chosen by
+        # a Lucene score -- would put guesses under the heading that reads
+        # as what the graph knows about what you asked.
+        return Retrieval(
+            question=question,
+            anchors=tuple(anchors),
+            passages=tuple(kept),
+            accepted=tuple(accepted),
+            proposed=tuple(proposed),
+            # Graph candidates the budget cut, which is what this has always
+            # counted. Text passages are not counted as dropped: the text
+            # path is bounded by `limit` at the query, so it has no tail.
+            dropped=max(0, len(passages) - sum(1 for p in kept if p.path == PATH_GRAPH)),
+            ambiguous=ambiguous,
+            loose=loose,
+            carried=carried,
+            path=PATH_GRAPH,
+            terms=tuple(text_terms),
+            miss_reason="" if kept else "anchored, but no section mentions the anchors",
+        )
 
     def _text_passages(self, session, terms: list[str], limit: int) -> list[Passage]:
         """The prose search itself, with no opinion about why it was called.

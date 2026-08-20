@@ -64,6 +64,8 @@ export interface RetrievalReport {
   proposed_edges: number
   proposed_withheld: boolean
   loose: boolean
+  /** The question resolved nothing; the anchors came from the conversation. */
+  carried: boolean
   terms: string[]
   miss_reason: string
 }

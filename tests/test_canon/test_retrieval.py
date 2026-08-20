@@ -768,3 +768,63 @@ class TestRetrievingFromTheGraph:
     def test_a_passage_is_derived_prose_not_an_id(self, written):
         result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
         assert named("Donavich") in result.passages[0].text
+
+
+@pytest.mark.neo4j
+class TestCarryingTheConversation:
+    """A question that resolves nothing can still be about something.
+
+    "Who owns the tavern" then "give me a list of everyone in the pub": the
+    second anchors nothing -- `pub` is no alias -- so it searched Lucene for
+    `give, list, everyone, pub` and read `Tyger, Tyger`, `Foreshadowing`,
+    `K81. Tunnel` and `Crypt 10`. The model had been TOLD the subject was the
+    Blood of the Vine Tavern and duly answered that the canon does not cover
+    who is in it, while holding eight sections about something else. The book's
+    E2 section lists exactly who is in that room.
+    """
+
+    #: The tavern is a KEYED place, so its id is chapter-scoped. A guess at
+    #: the global form resolves to nothing and the carry silently does not
+    #: fire -- which is what the first version of this test asserted against.
+    TAVERN = "cos:the-village-of-barovia:e2-blood-of-the-vine-tavern"
+
+    def test_a_question_resolving_nothing_uses_what_came_before(self, written):
+        result = CanonRetriever().retrieve(
+            "give me a list of everyone in the pub", carry=[self.TAVERN]
+        )
+        assert result.carried is True
+        assert self.TAVERN in {a.entity_id for a in result.anchors}
+
+    def test_it_reaches_the_section_the_answer_is_in(self, written):
+        result = CanonRetriever().retrieve(
+            "give me a list of everyone in the pub", carry=[self.TAVERN]
+        )
+        assert "cos:the-village-of-barovia#5" in result.section_ids
+
+    def test_a_question_that_names_something_is_never_overridden(self, written):
+        """What was said three turns ago must not outrank what was just asked."""
+        result = CanonRetriever().retrieve(
+            "Who is Madam Eva?", carry=[self.TAVERN]
+        )
+        assert result.carried is False
+        assert self.TAVERN not in {a.entity_id for a in result.anchors}
+
+    def test_without_a_conversation_it_still_falls_through_to_text(self, written):
+        result = CanonRetriever().retrieve("give me a list of everyone in the pub")
+        assert result.carried is False
+        assert result.path == PATH_TEXT
+
+    def test_carrying_ids_that_no_longer_exist_falls_through_to_text(self, written):
+        """An evicted or deleted entity must not dead-end the turn."""
+        result = CanonRetriever().retrieve(
+            "give me a list of everyone in the pub", carry=["cos:nothing-here"]
+        )
+        assert result.carried is False
+        assert result.path == PATH_TEXT
+
+    def test_the_anchor_surface_is_the_entitys_own_name(self, written):
+        """No wording in THIS question produced it, so the panel shows the name
+        rather than implying the reader typed something that matched."""
+        result = CanonRetriever().retrieve("describe it", carry=[self.TAVERN])
+        anchor = next(a for a in result.anchors if a.entity_id == self.TAVERN)
+        assert anchor.surface == anchor.name
