@@ -17,11 +17,11 @@ WHAT THIS MODULE READS, and every clause of it is load-bearing::
 
     (:Book)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section {heading, index, key, text})
     (:Section)-[:DESCRIBES]->(:Entity:LOCATION)
-    (:Entity)<-[:REFERS_TO]-(:Mention {offset})-[:IN_SECTION]->(:Section)
+    (:Entity)<-[:REFERS_TO]-(:Mention {offsets})-[:IN_SECTION]->(:Section)
     (:Entity)<-[:ALIAS_OF]-(:Alias)<-[:USES_ALIAS]-(:Mention)
 
 The passage a DM reads is DERIVED from the last two of those -- `section.text`
-sliced around `mention.offset` and trimmed to the sentence, by
+sliced around `mention.offsets[0]` and trimmed to the sentence, by
 `backend/canon/passage.py`. The mention used to store its own copy, which was
 35,383 characters of prose the graph already had.
 
@@ -245,7 +245,7 @@ RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
 #: says which spellings it used there -- itself story information, since the
 #: party meets `Strahd` well before `Strahd von Zarovich`.
 #:
-#: THE PASSAGE IS DERIVED, NOT STORED. `s.text` and `m.offset` come back and
+#: THE PASSAGE IS DERIVED, NOT STORED. `s.text` and `m.offsets[0]` come back and
 #: `passage.derive_passage` turns them into the sentence; the mention no longer
 #: carries a copy of the prose its section already holds. The section text is
 #: consumed in `lookup` and never reaches a caller -- shipping it would put the
@@ -270,7 +270,7 @@ OPTIONAL MATCH (m)-[:USES_ALIAS]->(a:Alias)
 WITH n, m, c, s, collect(DISTINCT a.name) AS aliases
 RETURN n.id AS entity_id, m.id AS mention_id, c.slug AS chapter, c.index AS chapter_index,
        s.heading AS section, s.index AS section_index, s.key AS section_key,
-       aliases AS aliases, s.text AS section_text, m.offset AS offset,
+       aliases AS aliases, s.text AS section_text, m.offsets[0] AS offset,
        m.occurrences AS occurrences
 ORDER BY chapter_index, section_index, mention_id
 """

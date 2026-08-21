@@ -68,7 +68,7 @@ WHERE e.name IS NOT NULL AND trim(e.name) <> ''
 RETURN elementId(m) AS eid, m.id AS id, e.id AS entity_id, e.name AS entity_name,
        s.heading AS section_heading,
        m.chapter_slug AS chapter_slug, m.occurrences AS occurrences,
-       m.offset AS offset, m.display_name AS current
+       m.offsets[0] AS offset, m.display_name AS current
 """
 
 _SET = "MATCH (n) WHERE elementId(n) = $eid SET n.display_name = $value"

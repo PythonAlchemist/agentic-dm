@@ -279,21 +279,44 @@ class TestDeterminism:
         assert first == sorted(first, key=lambda c: (c.mention_id, c.entity_id))
 
 
-class TestOffsetIsTheFirstOccurrence:
-    """A stated limitation rather than a defect to paper over.
+class TestEveryOccurrenceCounts:
+    """This was a stated limitation, and the statement understated it.
 
-    A `:Mention` stores ONE offset -- where the section first says the name --
-    so an entity named in sentences 1 and 5 is anchored in sentence 1 and its
-    later appearances are invisible here. Widening this needs every span, which
-    is a change to what a mention stores, not to this rule.
+    A `:Mention` used to store ONE offset -- where the section first says the
+    name -- so an entity named in sentences 1 and 5 anchored in sentence 1 and
+    its later appearances were invisible. That hid 2,970 of the corpus's 6,966
+    spans and left 478 of 907 entities co-occurring with nothing, including
+    every entity in "Three Vistani spies named Alenka, Mirabel, and Sorvia" --
+    four names in ONE sentence, no pairs, because `Vistani` had been anchored
+    3,300 characters earlier.
     """
 
-    def test_a_shared_later_sentence_is_not_seen(self):
+    def test_a_shared_LATER_sentence_is_seen(self):
+        """Ireena is named in both sentences; Ismark only in the second. The
+        pairing lives entirely in her second span."""
         assert pairs(
             "Ireena arrives first. Ismark greets Ireena warmly.",
             "Ireena",
             "Ismark",
+        ) != []
+
+    def test_the_sentence_rule_itself_did_not_widen(self):
+        """The old note was right that a rule swallowing a paragraph would
+        square the graph. What widened is what the window may look at."""
+        assert pairs(
+            "Ireena arrives first. Ismark waits outside.",
+            "Ireena",
+            "Ismark",
         ) == []
+
+    def test_the_tavern_sentence_pairs_all_four(self):
+        """The measured case, in the book's own words."""
+        text = (
+            "Three Vistani spies (N female humans) named Alenka, Mirabel, and "
+            "Sorvia sit at a table near the front door."
+        )
+        for other in ("Alenka", "Mirabel", "Sorvia"):
+            assert pairs(text, "Vistani", other) != [], other
 
 
 class TestAMentionMustHaveItsSection:

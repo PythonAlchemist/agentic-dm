@@ -321,12 +321,20 @@ class TestTheScan:
         assert not hasattr(mentions[0], "evidence")
 
     def test_the_facts_about_the_mention_survive_the_deletion(self):
-        """`occurrences` and `offset` are NOT copies -- they are what the scan
-        learned, and `offset` is what the passage is derived from."""
+        """`occurrences` and `offsets` are NOT copies -- they are what the scan
+        learned, and the first offset is what the passage is derived from."""
         spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays. Donavich weeps.")])
         mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
         assert mentions[0].properties["occurrences"] == 2
-        assert mentions[0].properties["offset"] == 0
+        assert mentions[0].properties["offsets"] == [0, 16]
+
+    def test_every_span_is_stored_not_just_the_first(self):
+        """The second `Donavich` is what co-occurrence needs to pair on. Storing
+        only the first hid 2,970 of the corpus's 6,966 spans."""
+        spine = spine_of([sec("E5f. Chapel", 14, "Donavich prays. Donavich weeps.")])
+        mentions = scan_mentions(spine.sections, [EntityNames("cos:donavich", "Donavich")], CHAPTER)
+        assert mentions[0].offsets == (0, 16)
+        assert mentions[0].offset == 0  # still the anchor to quote from
 
     def test_the_offset_and_the_section_together_still_give_a_passage(self):
         """The replacement, end to end: nothing is stored, and a reader still
@@ -795,11 +803,11 @@ def test_a_mention_is_comparable_by_value():
     the writer, both of which need value equality rather than identity."""
     a = WriteMention(
         id="x", entity_id="e", section_id="s", chapter_slug=CHAPTER,
-        occurrences=1, offset=0, entity_name="Entity", section_heading="S",
+        occurrences=1, offsets=(0,), entity_name="Entity", section_heading="S",
     )
     b = WriteMention(
         id="x", entity_id="e", section_id="s", chapter_slug=CHAPTER,
-        occurrences=1, offset=0, entity_name="Entity", section_heading="S",
+        occurrences=1, offsets=(0,), entity_name="Entity", section_heading="S",
     )
     assert a == b
 

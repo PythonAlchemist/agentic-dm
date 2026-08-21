@@ -1074,7 +1074,7 @@ class TestMentionsInTheGraph:
         row = graph.run(
             """
             MATCH (e:Entity {id:$id})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
-            RETURN properties(m) AS props, m.offset AS offset, m.occurrences AS occurrences,
+            RETURN properties(m) AS props, m.offsets[0] AS offset, m.occurrences AS occurrences,
                    m.chapter_slug AS chapter, m.plane AS plane,
                    s.id AS section, s.text AS text
             """,
@@ -1100,7 +1100,7 @@ class TestMentionsInTheGraph:
         rows = graph.run(
             """
             MATCH (m:Mention {chapter_slug:$slug})-[:IN_SECTION]->(s:Section)
-            RETURN m.offset AS offset, s.text AS text
+            RETURN m.offsets[0] AS offset, s.text AS text
             """,
             {"slug": CHAPTER_A},
         ).data()
@@ -1247,7 +1247,7 @@ class TestSilentNoOpsRaise:
             section_id=section_id(CHAPTER_A, 0),
             chapter_slug=CHAPTER_A,
             occurrences=1,
-            offset=0,
+            offsets=(0,),
             entity_name=named("Nobody"),
             section_heading="A Section",
         )
@@ -1388,7 +1388,7 @@ class TestCoOccurrenceInTheGraph:
             f"""
             MATCH (m:Mention {{chapter_slug:$slug}})-[:{CO_OCCURS_WITH}]->(dst:Entity),
                   (m)-[:IN_SECTION]->(s:Section), (m)-[:REFERS_TO]->(src:Entity)
-            RETURN s.text AS text, m.offset AS offset, src.name AS src, dst.name AS dst
+            RETURN s.text AS text, m.offsets[0] AS offset, src.name AS src, dst.name AS dst
             """,
             {"slug": CHAPTER_A},
         ):
@@ -1485,7 +1485,7 @@ def _scan(graph, chapter_slug: str):
             section_id=r["section"],
             chapter_slug=chapter_slug,
             occurrences=r["occurrences"],
-            offset=r["offset"],
+            offsets=tuple(r["offsets"]),
             entity_name=r["entity_name"],
             section_heading=r["section_heading"],
         )
@@ -1494,7 +1494,7 @@ def _scan(graph, chapter_slug: str):
             MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention {chapter_slug:$slug})
                   -[:IN_SECTION]->(s:Section)
             RETURN m.id AS id, e.id AS entity, s.id AS section,
-                   m.occurrences AS occurrences, m.offset AS offset,
+                   m.occurrences AS occurrences, m.offsets AS offsets,
                    e.name AS entity_name, s.heading AS section_heading
             """,
             {"slug": chapter_slug},

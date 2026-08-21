@@ -343,7 +343,7 @@ class TestTheSchemaTheseQueriesTarget:
             {"id": DONAVICH.id},
         ).single()
         assert "evidence" not in row["props"]
-        assert row["props"]["offset"] >= 0
+        assert row["props"]["offsets"][0] >= 0
         assert DONAVICH.name in row["text"]
         assert row["heading"]
 

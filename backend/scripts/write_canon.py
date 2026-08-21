@@ -341,9 +341,12 @@ def format_co_occurrence(summary: dict) -> str:
     naming n entities is n(n-1) edges, so the total is quadratic in the widest
     span the boundary rule admits -- and a rule that quietly swallowed a
     paragraph would show up here as a "sentence" naming eight things long before
-    it showed up as a slow query. The three loaded chapters run 0.65 edges per
-    mention with a widest sentence of three; a chapter that reports several
-    edges per mention is telling you the span rule has come loose.
+    READ THE WIDEST SENTENCE, NOT THE RATIO. The ratio moved from 0.65 to 1.97
+    edges per mention the day a `:Mention` began storing every span instead of
+    the first, and nothing had come loose -- three times as many spans were
+    simply visible to the same one-sentence window. What would say the rule HAS
+    come loose is the width: three entities when only the first span counted,
+    five now, and a "sentence" naming eight is the alarm.
 
     A ranking too, for the same reason the mention census has one: nothing
     filters junk out of the scan, so a common noun promoted to an entity

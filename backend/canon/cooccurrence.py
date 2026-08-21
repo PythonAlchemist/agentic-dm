@@ -5,7 +5,7 @@
 Two mentions sharing a `:Section` is weak evidence -- a section is often a whole
 room description, and chapter 3's longest runs to several thousand characters.
 Two entities named in the same SENTENCE is strong, and the offsets to compute it
-are already on the nodes: a `:Mention` carries `offset`, its `:Section` carries
+are already on the nodes: a `:Mention` carries `offsets`, its `:Section` carries
 `text`.
 
 **THE SPAN RULE IS IMPORTED, NOT RESTATED.** `passage.sentence_bounds` is what
@@ -36,18 +36,25 @@ EXTRACTED rather than where it appears -- so the peers are named above as the
 graph actually holds them. Same side, edges that are still here.)
 
 **THE COUNT IS THE THING TO WATCH.** A sentence naming n entities produces
-n(n-1) pairs, so a rule that swallowed a paragraph would square the graph. On
-the three loaded chapters -- 153 mentions, 58 entities -- it produces 100 edges,
-0.65 per mention, and the worst single sentence names three entities. That is
-the measurement the design asked for, and it says the sentence rule is tight
-enough to keep.
+n(n-1) pairs, so the total is quadratic in the widest span the boundary rule
+admits, and a rule that quietly swallowed a paragraph would show up here as a
+"sentence" naming eight things long before it showed up as a slow query. Every
+write prints the ratio and the widest sentence; `widest_sentence` says what
+those two numbers are worth and how one of them once lied.
 
-**WHAT IT CANNOT SEE.** A `:Mention` stores ONE offset, where the section first
-says the name. An entity named in sentences 1 and 5 is therefore anchored in
-sentence 1, and a pairing it makes only in sentence 5 is invisible -- which is
-why 83 of the 153 mentions co-occur with nothing. Widening that means storing
-every span rather than the first, a change to what a mention IS, and it is not
-made here.
+**WHAT IT COULD NOT SEE, AND NOW CAN.** A `:Mention` used to store ONE offset,
+where the section first says the name, so an entity named in sentences 1 and 5
+was anchored in sentence 1 and any pairing it made in sentence 5 was invisible.
+That cost more than it looked: 2,970 of the corpus's 6,966 spans were unstored,
+and 478 of 907 entities co-occurred with nothing at all. The measured case is
+the tavern -- "Three Vistani spies named Alenka, Mirabel, and Sorvia" names
+four entities in ONE sentence and produced no pairs, because `Vistani` had been
+anchored 3,300 characters earlier.
+
+A `:Mention` now stores every span, and this pairs on all of them. THE SENTENCE
+RULE IS UNCHANGED: the old note was right that a rule swallowing a paragraph
+would square the graph, and the window is still one sentence. What widened is
+what the window may look at, not the window.
 """
 
 from __future__ import annotations
@@ -128,25 +135,53 @@ def plan_co_occurrences(
     planned: list[CoOccurrence] = []
     for section_id, here in sorted(in_section.items()):
         text = text_by_section[section_id]
-        # Once per mention rather than once per pair: the span depends only on
+        # Once per OFFSET rather than once per pair: the span depends only on
         # the offset, and computing it inside the inner loop would run the
         # boundary scan n times for the same answer.
-        spans = {mention.id: sentence_bounds(text, mention.offset) for mention in here}
+        spans = {
+            mention.id: [sentence_bounds(text, o) for o in mention.offsets]
+            for mention in here
+        }
         ordered = sorted(here, key=lambda m: m.id)
         for mention in ordered:
-            low, high = spans[mention.id]
             for other in ordered:
                 if other.entity_id == mention.entity_id:
                     continue
-                other_low, other_high = spans[other.id]
-                if (
-                    low <= other.offset < high
-                    or other_low <= mention.offset < other_high
+                if _share_a_sentence(
+                    spans[mention.id], mention.offsets,
+                    spans[other.id], other.offsets,
                 ):
                     planned.append(
                         CoOccurrence(mention_id=mention.id, entity_id=other.entity_id)
                     )
     return planned
+
+
+def _share_a_sentence(
+    spans: list[tuple[int, int]],
+    offsets: tuple[int, ...],
+    other_spans: list[tuple[int, int]],
+    other_offsets: tuple[int, ...],
+) -> bool:
+    """Does ANY sentence of one hold ANY naming of the other?
+
+    ANY, and still at most one pair per (mention, entity): two entities named
+    together in three sentences of a section have the same two mentions to hang
+    an edge off as if they were named together once, and emitting it three
+    times would make the count a count of sentences wearing the name of a count
+    of pairs. That invariant is why this returns a bool rather than the spans
+    that matched.
+
+    Mutual, for the reason `plan` gives at length: above `PASSAGE_MAX` a long
+    sentence can put B inside A's window without putting A inside B's, and a
+    rendering budget may not decide which direction of a symmetric fact the
+    graph records.
+    """
+    return any(
+        low <= other < high for low, high in spans for other in other_offsets
+    ) or any(
+        low <= own < high for low, high in other_spans for own in offsets
+    )
 
 
 def co_occurrence_counts(
@@ -196,25 +231,47 @@ def widest_sentence(
 ) -> WidestSentence | None:
     """The densest sentence in this chapter, or None if nothing paired.
 
-    DERIVED FROM THE PLAN rather than re-scanning the spans. The widest sentence
-    is the mention with the most partners, plus itself -- so this figure cannot
-    disagree with the edge count printed beside it, which a second traversal of
-    the boundary rule eventually would.
-    """
-    partners: dict[str, list[str]] = {}
-    for pair in planned:
-        partners.setdefault(pair.mention_id, []).append(pair.entity_id)
-    if not partners:
-        return None
+    THIS USED TO BE DERIVED FROM THE PLAN -- the mention with the most partners,
+    plus itself -- on the reasoning that a figure computed from the edges cannot
+    disagree with the edge count printed beside it. That held only while a
+    mention had ONE offset, which made "this mention's partners" and "the
+    entities in this sentence" the same set.
 
-    widest = max(partners, key=lambda mention_id: (len(partners[mention_id]), mention_id))
-    by_id = {mention.id: mention for mention in mentions}
+    They are not the same set now. A mention has an offset in every sentence
+    that names it, so its partners are the UNION across all of them, while the
+    quoted passage is still one sentence. On the village chapter that reported
+    "widest sentence: 10 entities (90 edges)" above a sentence naming three --
+    a watchdog that cried wolf about the one thing it exists to watch, which is
+    worse than no watchdog.
+
+    So this re-scans, per SENTENCE. It is the same boundary rule and the same
+    offsets `plan` pairs on -- `sentence_bounds` either way -- so the second
+    traversal the old note feared cannot drift from the first without
+    `sentence_bounds` itself changing under both.
+    """
     text_by_section = {section.id: section.text for section in sections}
-    mention = by_id[widest]
-    names = [names_by_id.get(mention.entity_id, mention.entity_id)]
-    names += [names_by_id.get(entity_id, entity_id) for entity_id in partners[widest]]
-    return WidestSentence(
-        entities=len(names),
-        passage=derive_passage(text_by_section[mention.section_id], mention.offset),
-        names=tuple(sorted(names)),
-    )
+    in_section: dict[str, list[WriteMention]] = {}
+    for mention in mentions:
+        in_section.setdefault(mention.section_id, []).append(mention)
+
+    best: WidestSentence | None = None
+    for section_id, here in sorted(in_section.items()):
+        text = text_by_section[section_id]
+        for mention in sorted(here, key=lambda m: m.id):
+            for offset in mention.offsets:
+                low, high = sentence_bounds(text, offset)
+                named = {
+                    other.entity_id
+                    for other in here
+                    if any(low <= o < high for o in other.offsets)
+                }
+                if len(named) < 2 or (best and len(named) <= best.entities):
+                    continue
+                best = WidestSentence(
+                    entities=len(named),
+                    passage=derive_passage(text, offset),
+                    names=tuple(sorted(
+                        names_by_id.get(entity_id, entity_id) for entity_id in named
+                    )),
+                )
+    return best

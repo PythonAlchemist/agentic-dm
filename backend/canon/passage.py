@@ -1,6 +1,6 @@
 """The sentence a mention sits in, derived rather than stored.
 
-A `:Mention` carries `offset`; its `:Section` carries the full `text`. Between
+A `:Mention` carries `offsets`; its `:Section` carries the full `text`. Between
 them the passage is already in the graph, so storing a copy of it on the mention
 was a second copy of prose the graph had -- and a paragraph naming three
 entities stored that paragraph three times. Measured on chapter 3, the

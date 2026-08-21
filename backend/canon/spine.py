@@ -264,8 +264,20 @@ class WriteMention:
     pair this node and its section already hold.
 
     What remains are FACTS rather than copies. `occurrences` is what the scan
-    counted; `offset` is where the section first says the name, and it is the
-    anchor the derivation expands from.
+    counted; `offsets` is where the section says the name, EVERY time, and the
+    first of them is the anchor the derivation expands from.
+
+    EVERY SPAN, NOT THE FIRST. Storing one offset lost the other 2,970 of the
+    corpus's 6,966 -- 30% of mentions name their entity more than once -- and
+    co-occurrence could only pair on what was stored. So the sentence "Three
+    Vistani spies named Alenka, Mirabel, and Sorvia", which names four entities
+    at once, produced no pairs at all: `Vistani` had been anchored 3,300
+    characters earlier at its first mention, in a different sentence. 478 of
+    907 entities co-occurred with nothing.
+
+    The sentence rule itself is unchanged and still tight -- see
+    `cooccurrence`, which was right that widening the WINDOW would square the
+    graph. This widens what the window is allowed to look at.
     """
 
     id: str
@@ -276,8 +288,9 @@ class WriteMention:
     #: text once however many recorded forms match it. The mention is still one
     #: node; this says how loudly the section says it.
     occurrences: int
-    #: Character offset of the FIRST occurrence, into the section's own text.
-    offset: int
+    #: Character offset of EVERY occurrence, into the section's own text, in
+    #: reading order.
+    offsets: tuple[int, ...]
     #: The name of the entity this mention refers to. REQUIRED rather than
     #: defaulted to `""`, because a defaulted caption is the silent-zero shape
     #: this module exists to remove -- it would render as a blank circle and
@@ -291,6 +304,16 @@ class WriteMention:
     #: Which surface forms did the naming, most-used first. Empty is impossible
     #: for a scanned mention -- something matched, or there would be no mention.
     uses: tuple[AliasUse, ...] = ()
+
+    @property
+    def offset(self) -> int:
+        """Where to start quoting: the first time the section says the name.
+
+        Derived rather than stored beside `offsets`, for the reason `layer` is
+        derived from `LAYER_MAP` -- a second field saying the same thing is a
+        second field free to disagree.
+        """
+        return self.offsets[0]
 
     @property
     def properties(self) -> dict:
@@ -339,7 +362,10 @@ class WriteMention:
             "plane": CANON_PLANE,
             "chapter_slug": self.chapter_slug,
             "occurrences": self.occurrences,
-            "offset": self.offset,
+            # A list, not the first of them. The read path takes `offsets[0]`
+            # where it wants an anchor to quote from; co-occurrence reads all
+            # of them, which is the whole point of keeping them.
+            "offsets": list(self.offsets),
             "display_name": f"{self.section_heading}{loud}",
         }
 
@@ -645,7 +671,6 @@ def scan_mentions(
             spans = attribute_spans(section.text, folded, entity.forms)
             if not spans:
                 continue
-            start, _, _ = spans[0]
             used = Counter(form for _, _, form in spans)
             mentions.append(
                 WriteMention(
@@ -654,7 +679,7 @@ def scan_mentions(
                     section_id=section.id,
                     chapter_slug=chapter_slug,
                     occurrences=len(spans),
-                    offset=start,
+                    offsets=tuple(start for start, _, _ in spans),
                     entity_name=entity.name,
                     section_heading=section.heading,
                     # Most-used first, ties by name: a stable order, and the
