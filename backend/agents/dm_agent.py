@@ -35,6 +35,20 @@ logger = logging.getLogger(__name__)
 #: inconsistent -- this model already varies run to run on whether it cites.
 _TOOL_ROUNDS = 3
 
+#: How the agent samples in normal use. A DM asking the same question twice
+#: wants two readings rather than the same sentence back, so this is not 0.
+_TEMPERATURE = 0.5
+
+#: Pinned by the evaluation harness and by nothing else -- see `eval_answers`.
+#: `temperature=0` plus a fixed `seed` is what the extraction path already uses
+#: (`EXTRACTION_SEED`) and for the same reason: a measurement whose inputs move
+#: between runs cannot say whether its output moved because of a change.
+#:
+#: Best-effort, not a guarantee. OpenAI documents the seed that way, and
+#: `system_fingerprint` is how a caller learns the backend changed underneath
+#: it. Reducing the noise is not the same as removing it, and the harness
+#: reports what is left rather than assuming there is none.
+
 
 class DMResponse(BaseModel):
     """Response from the DM Agent."""
@@ -71,6 +85,8 @@ class DMAgent:
         canon: Optional[CanonRetriever] = None,
         model: Optional[str] = None,
         depth: Optional[canon_context.Depth] = None,
+        temperature: float = _TEMPERATURE,
+        seed: Optional[int] = None,
     ):
         """Initialize the DM Agent.
 
@@ -86,6 +102,12 @@ class DMAgent:
         # Initialize components
         self.openai = AsyncOpenAI(api_key=settings.openai_api_key)
         self.model = model or settings.openai_model
+        # Injected rather than read from settings: only the evaluation harness
+        # pins these, and a global that changed sampling for every DM in order
+        # to make a measurement repeatable would be the measurement altering
+        # the thing measured.
+        self.temperature = temperature
+        self.seed = seed
         self.depth = depth or canon_context.Depth()
         self.rag_pipeline = HybridRAGPipeline()
         self.tools = DMTools()
@@ -551,6 +573,19 @@ class DMAgent:
             subgraph=self._subgraph_view(),
         )
 
+    @property
+    def _sampling(self) -> dict:
+        """Temperature, and a seed only when one was asked for.
+
+        `seed=None` is NOT the same as omitting it for every provider, and this
+        code runs against more than one endpoint, so the key is absent unless
+        it carries a value.
+        """
+        options: dict = {"temperature": self.temperature}
+        if self.seed is not None:
+            options["seed"] = self.seed
+        return options
+
     async def _answer_with_tools(self, messages: list[dict]):
         """Call the model, run any graph tools it asks for, call it again.
 
@@ -576,9 +611,9 @@ class DMAgent:
             response = await self.openai.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=0.5,
                 max_tokens=1000,
                 tools=graph_tools.SCHEMA,
+                **self._sampling,
             )
             total = total + Usage.from_response(response)
             choice = response.choices[0].message
@@ -601,7 +636,7 @@ class DMAgent:
         # Rounds exhausted: ask once more with no tools, so the model answers
         # from what it gathered instead of asking again forever.
         response = await self.openai.chat.completions.create(
-            model=self.model, messages=messages, temperature=0.5, max_tokens=1000,
+            model=self.model, messages=messages, max_tokens=1000, **self._sampling,
         )
         return response, total + Usage.from_response(response)
 

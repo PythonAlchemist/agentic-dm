@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import math
 from pathlib import Path
 
 import yaml
@@ -111,6 +113,117 @@ def why(row: dict) -> str:
     return "; ".join(reasons) or "-"
 
 
+def compare(before: dict, after: dict) -> str:
+    """Two saved runs, and whether the difference is bigger than the noise.
+
+    THE POINT OF THE WHOLE FILE. A prompt change was made, two runs were read,
+    a regression was reported, the change was reverted, and the baseline came
+    back at the same number -- the suite had never had the power to see it.
+    This says so before a reader draws the same wrong conclusion.
+
+    A two-proportion interval rather than a p-value: the question is not "is
+    there any effect" but "how big could it be", and an interval that spans
+    zero answers both.
+    """
+    a_pass, a_n = before["passes"], before["samples"]
+    b_pass, b_n = after["passes"], after["samples"]
+    a_rate, b_rate = a_pass / max(1, a_n), b_pass / max(1, b_n)
+    delta = b_rate - a_rate
+    # Standard error of a difference of proportions, then a 95% band.
+    spread = 1.96 * math.sqrt(
+        a_rate * (1 - a_rate) / max(1, a_n) + b_rate * (1 - b_rate) / max(1, b_n)
+    )
+    low, high = delta - spread, delta + spread
+
+    lines = [
+        f"  before   {a_pass}/{a_n} = {a_rate:.0%}   {before.get('label', '')}",
+        f"  after    {b_pass}/{b_n} = {b_rate:.0%}   {after.get('label', '')}",
+        "",
+        f"  change   {delta:+.0%}   95% CI {low:+.0%} to {high:+.0%}",
+    ]
+    if low <= 0 <= high:
+        lines.append("")
+        lines.append("  ZERO IS INSIDE THE INTERVAL. This run does not show a change.")
+        lines.append("  It does not show the absence of one either -- a real effect")
+        lines.append(f"  smaller than {max(abs(low), abs(high)):.0%} would look exactly like this.")
+    else:
+        lines.append("")
+        lines.append(
+            f"  Zero is outside the interval: a {'gain' if delta > 0 else 'loss'} "
+            "this run can actually support."
+        )
+
+    # Per question, so a moved number can be traced to what moved it.
+    lines += ["", f"  {'id':<5} before  after   moved"]
+    for qid in sorted(set(before["by_id"]) | set(after["by_id"])):
+        was = before["by_id"].get(qid)
+        now = after["by_id"].get(qid)
+        if was is None or now is None:
+            lines.append(f"  {qid:<5} {'--' if was is None else was:<7} "
+                         f"{'--' if now is None else now:<7} only in one run")
+            continue
+        mark = "" if was == now else "  <-"
+        lines.append(f"  {qid:<5} {was:<7} {now:<7}{mark}")
+    return "\n".join(lines)
+
+
+def summarise(rows: list[dict], label: str) -> dict:
+    """A run, reduced to what `compare` needs. Small enough to commit."""
+    by_id: dict[str, list[dict]] = {}
+    for row in rows:
+        by_id.setdefault(row["id"], []).append(row)
+    scored = {k: v for k, v in by_id.items() if not v[0]["refusal_expected"]}
+    samples = [r for rs in scored.values() for r in rs]
+    return {
+        "label": label,
+        "samples": len(samples),
+        "passes": sum(1 for r in samples if verdict(r) == "pass"),
+        "by_id": {
+            qid: f"{sum(1 for r in rs if verdict(r) == 'pass')}/{len(rs)}"
+            for qid, rs in scored.items()
+        },
+    }
+
+
+def wilson(passes: int, total: int, z: float = 1.96) -> tuple[float, float]:
+    """A 95% interval for a pass rate. Wilson, not passes/total +- 1.96*sqrt(...).
+
+    The normal approximation is wrong exactly where this suite lives -- small
+    n, rates near 0 and 1 -- where it produces intervals running below 0 or
+    above 1 and is far too narrow at the ends. Wilson stays inside [0, 1] and
+    is honest at 45 samples, which is what a repeat-5 run of nine scored
+    questions actually has.
+    """
+    if total == 0:
+        return (0.0, 1.0)
+    rate = passes / total
+    denominator = 1 + z * z / total
+    centre = (rate + z * z / (2 * total)) / denominator
+    spread = (
+        z
+        * math.sqrt(rate * (1 - rate) / total + z * z / (4 * total * total))
+        / denominator
+    )
+    return (max(0.0, centre - spread), min(1.0, centre + spread))
+
+
+def resolvable(total: int, rate: float = 0.8) -> float:
+    """Roughly the smallest change in pass rate this many samples can see.
+
+    The half-width of the interval on the DIFFERENCE between two runs, which is
+    about sqrt(2) times one run's half-width. Printed because the number a
+    reader needs is not "how wide is my error bar" but "was I entitled to
+    believe that prompt change did anything" -- and at 45 samples the answer is
+    usually no.
+
+    Stated for a rate near 0.8, where this suite sits. Near 0.5 it is wider.
+    """
+    if total == 0:
+        return 1.0
+    low, high = wilson(round(rate * total), total)
+    return math.sqrt(2) * (high - low) / 2
+
+
 def render(rows: list[dict], *, repeat: int = 1) -> str:
     """A pass RATE per question, not a verdict.
 
@@ -139,16 +252,48 @@ def render(rows: list[dict], *, repeat: int = 1) -> str:
         out.append(f"  {qid:<5} {passed}/{len(runs):<7} {why(worst)}{flag}")
 
     scored = [rs for rs in by_id.values() if not rs[0]["refusal_expected"]]
-    always = sum(1 for rs in scored if all(verdict(r) == "pass" for r in rs))
-    ever = sum(1 for rs in scored if any(verdict(r) == "pass" for r in rs))
+    samples = [r for rs in scored for r in rs]
+    passes = sum(1 for r in samples if verdict(r) == "pass")
+    low, high = wilson(passes, len(samples))
+    margin = resolvable(len(samples))
+
     out.append("")
-    out.append(f"  passed every run     {always}/{len(scored)}")
-    out.append(f"  passed at least one  {ever}/{len(scored)}   (the gap is flakiness)")
+    # THE HEADLINE IS A RATE OVER SAMPLES, not a count of questions that passed
+    # every run. That count was a MINIMUM: it can only fall as repeats are
+    # added, and one flaky question sets it for the whole suite -- so it read
+    # 6/9 and 5/9 on runs of identical code and could not have told anyone
+    # apart. A rate over every (question, repeat) sample is what carries an
+    # interval, and the interval is what makes two runs comparable.
+    out.append(
+        f"  pass rate            {passes}/{len(samples)} = {passes / max(1, len(samples)):.0%}"
+        f"   95% CI {low:.0%}-{high:.0%}"
+    )
+    out.append(
+        f"  can resolve          a change of about {margin:.0%} or more"
+        f"   ({len(samples)} samples)"
+    )
+    if margin > 0.10:
+        # Said out loud, because the failure this suite had was somebody --
+        # me -- reading two runs and reporting a regression it had no power to
+        # see.
+        out.append(
+            "  A SMALLER DIFFERENCE THAN THAT IS NOISE. Raise --repeat, or add"
+        )
+        out.append("  questions, before believing a change moved this number.")
+    always = sum(1 for rs in scored if all(verdict(r) == "pass" for r in rs))
+    out.append(f"  passed every run     {always}/{len(scored)}   (a minimum, not a score)")
     out.append(f"  needing a reading    {len(by_id) - len(scored)}")
     return "\n".join(out)
 
 
-async def _answer(question: str, model: str | None) -> tuple[str, dict | None]:
+#: The base draw. Repeat i uses ANSWER_SEED + i, so the SET of draws is fixed
+#: across runs while the draws within a run stay different from each other.
+#: Any constant works; this one is pinned so a result is reproducible by
+#: someone who was not here when it was measured.
+ANSWER_SEED = 20260821
+
+
+async def _answer(question: str, model: str | None, attempt: int = 0) -> tuple[str, dict | None]:
     """One grounded turn from a FRESH agent.
 
     Fresh per question, never a shared session: history would let question four
@@ -158,7 +303,14 @@ async def _answer(question: str, model: str | None) -> tuple[str, dict | None]:
     """
     from backend.agents.dm_agent import DMAgent
 
-    agent = DMAgent(model=model)
+    # temperature 0 and a seed that VARIES BY REPEAT. Pinning both would make
+    # every repeat the same draw, which reads as perfect stability and measures
+    # nothing; leaving both loose is what made a10 read 5/5, 4/5, 3/5, 1/5 and
+    # 0/5 on identical questions in one afternoon. Repeat i is a different
+    # DRAW, deliberately, and the same draw as repeat i of any other run -- so
+    # two runs are compared sample against matching sample rather than as two
+    # clouds.
+    agent = DMAgent(model=model, temperature=0.0, seed=ANSWER_SEED + attempt)
     response = await agent.process_message(
         user_input=question, use_rag=False, use_canon=True
     )
@@ -181,35 +333,51 @@ def spend_of(cost: dict | None) -> float | None:
     return cost.get("usd")
 
 
+#: Calls in flight. The suite needs a couple of hundred samples to resolve
+#: anything (see `resolvable`), and 220 sequential calls took eighteen minutes
+#: -- long enough that the honest answer to "just raise --repeat" was "nobody
+#: will". Each sample builds its OWN agent over its own question, so there is
+#: no shared state to race; the cap is the provider's rate limit, not
+#: correctness. `extract.py` bounds its fan-out the same way and for the same
+#: reason.
+CONCURRENCY = 8
+
+
 async def run(
     questions: list[dict], model: str | None, *, show: bool, repeat: int = 1
 ) -> list[dict]:
-    rows: list[dict] = []
-    spent = 0.0
-    unpriced = 0
-    for attempt in range(1, repeat + 1):
-        for question in questions:
-            answer, cost = await _answer(question["question"], model)
-            usd = spend_of(cost)
-            if usd is None:
-                unpriced += 1
-            else:
-                spent += usd
-            row = check(question, answer)
-            row["answer"] = answer
-            row["attempt"] = attempt
-            rows.append(row)
-            running = (
-                f"${spent:.4f}" if not unpriced else f"${spent:.4f} + {unpriced} unpriced"
-            )
-            run_of = f" ({attempt}/{repeat})" if repeat > 1 else ""
-            print(f"  {row['id']:<5} {verdict(row):<9}{run_of} {running} so far")
-            # Printed whenever a human has to judge, and whenever something
-            # failed. A failing answer nobody reads is a number with no defect
-            # attached to it.
-            if show or row["refusal_expected"] or verdict(row) == "FAIL":
-                print(f"        {answer.strip()[:600]}")
-                print()
+    semaphore = asyncio.Semaphore(CONCURRENCY)
+    done = 0
+    total = len(questions) * repeat
+
+    async def one(question: dict, attempt: int) -> dict:
+        nonlocal done
+        async with semaphore:
+            answer, cost = await _answer(question["question"], model, attempt)
+        row = check(question, answer)
+        row["answer"] = answer
+        row["attempt"] = attempt
+        row["usd"] = spend_of(cost)
+        done += 1
+        print(f"  [{done}/{total}] {row['id']:<5} {verdict(row)}")
+        return row
+
+    # Gathered, so results come back in a FIXED order however they finished.
+    # A summary whose rows depended on which call the network returned first
+    # would differ between two runs of identical code, which is the whole
+    # defect this file is being repaired for.
+    rows = list(
+        await asyncio.gather(
+            *(one(q, a) for a in range(1, repeat + 1) for q in questions)
+        )
+    )
+
+    spent = sum(r["usd"] for r in rows if r["usd"] is not None)
+    unpriced = sum(1 for r in rows if r["usd"] is None)
+    for row in rows:
+        if show or row["refusal_expected"] or verdict(row) == "FAIL":
+            print(f"\n  {row['id']} ({row['attempt']}) {verdict(row)}")
+            print(f"        {row['answer'].strip()[:600]}")
     print(f"\n  total spent          ${spent:.4f}")
     if unpriced:
         # Never folded into the total as zero. A run that cannot price itself
@@ -226,7 +394,17 @@ def main() -> int:
     parser.add_argument("--show", action="store_true", help="print every answer")
     parser.add_argument(
         "--repeat", type=int, default=3,
-        help="runs per question. 1 reports a coin toss as a fact",
+        help="runs per question. 1 reports a coin toss as a fact; "
+             "45 samples resolve about 16 points, 200 about 8",
+    )
+    parser.add_argument(
+        "--save", type=Path, help="write this run's summary, for --compare"
+    )
+    parser.add_argument("--label", default="", help="what this run is testing")
+    parser.add_argument(
+        "--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"),
+        help="two saved runs: is the difference bigger than the noise? "
+             "Spends nothing.",
     )
     parser.add_argument(
         "--dry-run",
@@ -234,6 +412,11 @@ def main() -> int:
         help="print what would be asked and spend nothing",
     )
     args = parser.parse_args()
+
+    if args.compare:
+        before, after = (json.loads(path.read_text()) for path in args.compare)
+        print(compare(before, after))
+        return 0
 
     questions = yaml.safe_load(args.questions.read_text())["questions"]
     if args.only:
@@ -256,6 +439,9 @@ def main() -> int:
     )
     print()
     print(render(rows, repeat=args.repeat))
+    if args.save:
+        args.save.write_text(json.dumps(summarise(rows, args.label), indent=2))
+        print(f"\n  saved to {args.save}")
     return 0
 
 

@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from backend.scripts.eval_answers import check, render, spend_of, verdict
+from backend.scripts.eval_answers import compare, resolvable, wilson
 
 ANSWERS = Path("evals/canon-answers.yaml")
 
@@ -114,7 +115,12 @@ class TestRepeatedRuns:
         assert "INCONSISTENT" not in out
         assert "0/2" in out
 
-    def test_the_gap_between_always_and_ever_is_the_flakiness(self):
+    def test_the_headline_is_a_rate_over_samples(self):
+        """`passed every run` was the headline and is a MINIMUM: it can only
+        fall as repeats are added, and one flaky question sets it for the whole
+        suite. It read 6/9 and 5/9 on runs of identical code, which is how a
+        prompt change came to be reported as a regression it had no power to
+        see. Three of four samples passing is 75%, and that is the number."""
         solid = {"id": "a1", "must": ["x"]}
         flaky = {"id": "a2", "must": ["y"]}
         rows = [
@@ -122,8 +128,17 @@ class TestRepeatedRuns:
             check(flaky, "y"), check(flaky, "nope"),
         ]
         out = render(rows, repeat=2)
-        assert "passed every run     1/2" in out
-        assert "passed at least one  2/2" in out
+        assert "pass rate            3/4 = 75%" in out
+        # Kept, but demoted and labelled, so nobody reads it as a score again.
+        assert "passed every run     1/2   (a minimum, not a score)" in out
+
+    def test_it_says_what_it_cannot_resolve(self):
+        """Four samples resolve nothing, and the report has to say so rather
+        than leave a reader to infer it from a wide interval."""
+        q = {"id": "a1", "must": ["x"]}
+        out = render([check(q, "x"), check(q, "nope")], repeat=2)
+        assert "can resolve" in out
+        assert "A SMALLER DIFFERENCE THAN THAT IS NOISE" in out
 
     def test_the_reason_shown_is_from_a_failing_run_not_a_passing_one(self):
         """A flaky question reporting its passing run's reason would print `-`
@@ -185,3 +200,77 @@ class TestTheAuthoredSet:
         """`refuses` and `must` together would be incoherent: an answer cannot
         both decline and state the fact."""
         assert not [q["id"] for q in questions if q.get("refuses") and q.get("must")]
+
+
+class TestTheIntervalOnARate:
+    """Wilson, not the normal approximation, because this suite lives at small
+    n and rates near 1 -- where the approximation runs outside [0, 1]."""
+
+    def test_it_never_leaves_the_unit_interval(self):
+        low, high = wilson(20, 20)
+        assert 0.0 <= low <= high <= 1.0
+        assert low > 0.8  # and it is not vacuous
+
+    def test_a_perfect_score_still_carries_doubt(self):
+        """20/20 is not proof of 100%. The normal approximation says +-0."""
+        low, _ = wilson(20, 20)
+        assert low < 1.0
+
+    def test_more_samples_narrow_it(self):
+        narrow = wilson(80, 100)
+        wide = wilson(8, 10)
+        assert (narrow[1] - narrow[0]) < (wide[1] - wide[0])
+
+    def test_no_samples_is_total_ignorance(self):
+        assert wilson(0, 0) == (0.0, 1.0)
+
+
+class TestSayingWhatCanBeSeen:
+    def test_the_suite_as_it_was_could_not_see_a_ten_point_change(self):
+        """45 samples is a repeat-5 run of nine scored questions -- the shape
+        that was used to judge a prompt change."""
+        assert resolvable(45) > 0.10
+
+    def test_two_hundred_samples_can(self):
+        assert resolvable(200) < 0.10
+
+    def test_more_samples_see_more(self):
+        assert resolvable(500) < resolvable(200) < resolvable(45)
+
+
+class TestComparingTwoRuns:
+    @staticmethod
+    def _run(passes: int, samples: int, label: str = "") -> dict:
+        return {"label": label, "passes": passes, "samples": samples, "by_id": {}}
+
+    def test_a_difference_inside_the_noise_is_reported_as_no_finding(self):
+        """The exact shape of the mistake this exists to prevent: two runs a
+        few points apart, read as a regression."""
+        out = compare(self._run(38, 45), self._run(36, 45))
+        assert "ZERO IS INSIDE THE INTERVAL" in out
+
+    def test_and_it_does_not_claim_the_absence_of_an_effect(self):
+        """"No change detected" and "no change" are different claims, and only
+        the first one is supported."""
+        out = compare(self._run(38, 45), self._run(36, 45))
+        assert "does not show the absence of one either" in out
+
+    def test_a_difference_beyond_the_noise_is_reported_as_real(self):
+        """The measured case: removing the citation instruction moved 198
+        samples from 140 passes to 118."""
+        out = compare(self._run(140, 198), self._run(118, 198))
+        assert "Zero is outside the interval" in out
+        assert "loss" in out
+
+    def test_a_gain_is_named_as_a_gain(self):
+        out = compare(self._run(118, 198), self._run(140, 198))
+        assert "gain" in out
+
+    def test_the_per_question_table_marks_what_moved(self):
+        before = {"label": "", "passes": 1, "samples": 2, "by_id": {"a1": "1/1", "a2": "0/1"}}
+        after = {"label": "", "passes": 2, "samples": 2, "by_id": {"a1": "1/1", "a2": "1/1"}}
+        out = compare(before, after)
+        moved = [ln for ln in out.splitlines() if ln.strip().startswith("a2")]
+        assert moved and "<-" in moved[0]
+        unmoved = [ln for ln in out.splitlines() if ln.strip().startswith("a1")]
+        assert unmoved and "<-" not in unmoved[0]
