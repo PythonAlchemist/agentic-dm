@@ -228,6 +228,20 @@ function ringIsolated(nodes: Node[]): void {
   place(loose, reach + 34, cx, cy)
 }
 
+/** What one line says, in as few characters as fit on it.
+ *
+ *  UNLABELLED LINES ARE WHY THIS EXISTS. Asked to list the Vistani, a reader
+ *  looked at Vistani's hub -- 25 lines to 25 names -- and reasonably read it as
+ *  25 members. Four were `MEMBER_OF`. Rictavio and Rudolph van Richten are
+ *  HOSTILE_TO and ENEMY_OF: the picture was drawing "enemy" and "member" as the
+ *  same grey line and leaving the difference on hover, where nobody scanning a
+ *  hub is looking. */
+function linkLabel(link: Link): string {
+  if (link.rels.length === 0) return 'together'
+  const first = link.rels[0].type
+  return link.rels.length === 1 ? first : `${first} +${link.rels.length - 1}`
+}
+
 function radius(node: Node): number {
   // Held nodes read as anchors whatever their degree; unheld ones grow with
   // recurrence, because a name three relationships land on is the signal.
@@ -327,6 +341,39 @@ export function SubgraphGraph({ view }: { view: SubgraphView }) {
     [],
   )
 
+  const paintLink = useCallback(
+    (link: Link, ctx: CanvasRenderingContext2D, scale: number) => {
+      // Zoom-gated: at a distance the labels overlap into a smear and the
+      // shape of the neighbourhood is what is worth seeing. They appear as
+      // soon as you lean in, which is when the question becomes "how".
+      if (scale < 1.1) return
+      const a = link.source as unknown as Node
+      const b = link.target as unknown as Node
+      if (typeof a?.x !== 'number' || typeof b?.x !== 'number') return
+
+      const text = linkLabel(link)
+      const font = 8 / scale
+      ctx.font = `${font}px ui-sans-serif, system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      const x = ((a.x ?? 0) + (b.x ?? 0)) / 2
+      const y = ((a.y ?? 0) + (b.y ?? 0)) / 2
+
+      // Knocked out of the line rather than drawn over it: a label with the
+      // edge running through it is harder to read than no label.
+      const width = ctx.measureText(text).width
+      ctx.fillStyle = '#0a0a0a'
+      ctx.fillRect(x - width / 2 - 1 / scale, y - font / 2, width + 2 / scale, font)
+      ctx.fillStyle = link.rels.length === 0
+        ? '#5b7fa8'
+        : link.accepted > 0
+          ? '#c8c8c8'
+          : '#6b6b6b'
+      ctx.fillText(text, x, y)
+    },
+    [],
+  )
+
   const paintPointerArea = useCallback(
     (node: Node, hitColour: string, ctx: CanvasRenderingContext2D) => {
       ctx.beginPath()
@@ -406,6 +453,8 @@ export function SubgraphGraph({ view }: { view: SubgraphView }) {
                   : '#3f3f3f'
             }
             linkLineDash={(link: Link) => (link.rels.length === 0 ? [3, 3] : null)}
+            linkCanvasObjectMode={() => 'after'}
+            linkCanvasObject={paintLink}
             linkWidth={(link: Link) =>
               link.rels.length === 0
                 ? Math.min(0.5 + link.sentences * 0.35, 2)
