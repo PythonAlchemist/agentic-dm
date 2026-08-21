@@ -90,6 +90,9 @@ export interface SubgraphView {
     how: string
     turn: number
   }[]
+  /** Pairs of held entities the book names in ONE SENTENCE. A reader's layer,
+   *  never sent to the model -- see `lookup.TOGETHER` for why. */
+  together?: { source: string; target: string; sentences: number }[]
   passages: number
   turn: number
 }

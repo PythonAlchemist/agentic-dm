@@ -259,6 +259,14 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
         <Explain text="Names the agent knows only through a relationship line. It is not holding them: no id, and a follow-up cannot resolve through one. If an answer needed one of these, the agent never knew it -- as opposed to held-then-evicted, which is forgetting.">
           {shaped?.notHeld ?? 0} named, not held
         </Explain>
+        {(view?.together?.length ?? 0) > 0 && (
+          <>
+            {' · '}
+            <Explain text="Pairs of held entities the book names in ONE SENTENCE. Not a relationship — the graph records that they were named together and nothing about what it means. Shown as dashed lines in the graph view, and never sent to the model, which would read a relationship into it.">
+              {view?.together?.length} named together
+            </Explain>
+          </>
+        )}
         {' · '}
         {view?.passages ?? 0} section{view?.passages === 1 ? '' : 's'} read
       </p>

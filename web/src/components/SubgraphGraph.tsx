@@ -52,9 +52,17 @@ type Link = {
   target: string
   /** Every relationship between this pair, collapsed. Five parallel edges drawn
    *  on top of each other look like one line, so they are one line -- with the
-   *  count in its width, and the detail on hover. */
+   *  count in its width, and the detail on hover. EMPTY for a pair the book
+   *  only names together. */
   rels: { type: string; status: string; from: string }[]
   accepted: number
+  /** How many sentences name both. 0 when the graph never puts them in one.
+   *
+   *  A pair with typed relationships draws as a typed line even when it also
+   *  co-occurs: the relationship is the stronger statement, and the sentence
+   *  count joins it on hover. The dashed line is reserved for the case that
+   *  carries information -- named together, and that is ALL that is known. */
+  sentences: number
 }
 
 /** Unordered pair key: A→B and B→A are one line on the canvas, and splitting
@@ -95,6 +103,28 @@ function build(
         target: edge.target,
         rels: [rel],
         accepted: edge.status === 'accepted' ? 1 : 0,
+        sentences: 0,
+      })
+    }
+  }
+
+  // The sentence layer, folded onto the pairs that already exist and added as
+  // new ones where they do not. Both ends are held by construction -- the query
+  // requires it -- so this never introduces a node.
+  for (const pair of view.together ?? []) {
+    const key = pairKey(pair.source, pair.target)
+    const existing = pairs.get(key)
+    if (existing) {
+      existing.sentences += pair.sentences
+    } else {
+      bump(pair.source)
+      bump(pair.target)
+      pairs.set(key, {
+        source: pair.source,
+        target: pair.target,
+        rels: [],
+        accepted: 0,
+        sentences: pair.sentences,
       })
     }
   }
@@ -364,8 +394,23 @@ export function SubgraphGraph({ view }: { view: SubgraphView }) {
             nodePointerAreaPaint={paintPointerArea}
             onNodeHover={(node: Node | null) => setHover({ node, link: null })}
             onLinkHover={(link: Link | null) => setHover({ node: null, link })}
-            linkColor={(link: Link) => (link.accepted > 0 ? '#8a8a8a' : '#3f3f3f')}
-            linkWidth={(link: Link) => Math.min(0.6 + link.rels.length * 0.55, 4)}
+            // Three classes, and the dashed one is not a relationship. A
+            // solid line is something the graph asserts about the pair; a
+            // dashed one is only "the book named these in one sentence", which
+            // `cooccurrence` is emphatic must not be read as more than that.
+            linkColor={(link: Link) =>
+              link.rels.length === 0
+                ? '#5b7fa8'
+                : link.accepted > 0
+                  ? '#8a8a8a'
+                  : '#3f3f3f'
+            }
+            linkLineDash={(link: Link) => (link.rels.length === 0 ? [3, 3] : null)}
+            linkWidth={(link: Link) =>
+              link.rels.length === 0
+                ? Math.min(0.5 + link.sentences * 0.35, 2)
+                : Math.min(0.6 + link.rels.length * 0.55, 4)
+            }
             // Long enough that a hub's neighbours ring it rather than pile on
             // top of the label, which is most of what made the old one a blob.
             linkDirectionalArrowLength={0}
@@ -407,6 +452,15 @@ function nodeDetail(node: Node): string {
 }
 
 function linkDetail(link: Link): string {
+  const sentences =
+    link.sentences === 0
+      ? ''
+      : `named together in ${link.sentences} sentence${link.sentences === 1 ? '' : 's'}`
+  if (link.rels.length === 0) {
+    // No relationship type at all. Say exactly that, because the whole risk of
+    // showing this layer is it being read as one.
+    return `${link.source} / ${link.target}:  ${sentences} — no relationship recorded`
+  }
   const shown = link.rels
     .slice(0, 6)
     .map((r) => `${r.from === link.source ? '→' : '←'} ${r.type}${r.status === 'accepted' ? '' : '?'}`)
@@ -414,5 +468,6 @@ function linkDetail(link: Link): string {
   const more = link.rels.length > 6 ? `  +${link.rels.length - 6} more` : ''
   // `?` marks a guessed relationship, matching the ledger's dim styling; a
   // third of them are wrong and the picture must not imply otherwise.
-  return `${link.source} / ${link.target}:  ${shown}${more}`
+  const also = sentences ? `;  ${sentences}` : ''
+  return `${link.source} / ${link.target}:  ${shown}${more}${also}`
 }

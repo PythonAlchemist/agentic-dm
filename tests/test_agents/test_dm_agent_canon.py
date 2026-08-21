@@ -415,3 +415,47 @@ class TestTheGraphVocabularyReachesTheModel:
         # ...and the canon block is still where it was, rather than shifted by
         # an empty string inserted ahead of it.
         assert BLOCK_MARK in system_text(agent)
+
+
+@pytest.mark.asyncio
+class TestTheSentenceLayerIsForTheReaderOnly:
+    """`CO_OCCURS_WITH` records that the book named two entities in one
+    sentence, and `cooccurrence` is emphatic that inferring a relationship from
+    that is a judgment this project has failed to automate four separate ways.
+
+    So it travels to the PANEL and never into the prompt. 5,490 untyped "named
+    together" pairs offered to a model as relationships would outnumber the 957
+    typed ones six to one, and the model has no way to treat them differently
+    from the typed ones it is also given.
+    """
+
+    TOGETHER = [{"source": "Alenka", "target": "Vistani", "sentences": 1}]
+
+    @staticmethod
+    def _speaking(agent, monkeypatch, rows) -> None:
+        monkeypatch.setattr(
+            type(agent), "_named_together", lambda self, view: rows
+        )
+
+    async def test_it_reaches_the_reader(self, agent, monkeypatch):
+        self._speaking(agent, monkeypatch, self.TOGETHER)
+        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        assert response.subgraph["together"] == self.TOGETHER
+
+    async def test_it_does_NOT_reach_the_model(self, agent, monkeypatch):
+        self._speaking(agent, monkeypatch, self.TOGETHER)
+        await agent.process_message("Who is Ismark?", use_rag=False)
+        sent = system_text(agent)
+        # Neither endpoint is in the fixture's passage or the vocabulary, so
+        # either name appearing means the layer leaked.
+        assert "Alenka" not in sent
+        assert "Vistani" not in sent
+
+    async def test_a_graph_that_cannot_be_read_still_answers(self, agent, monkeypatch):
+        def boom(*_args, **_kw):
+            raise RuntimeError("neo4j is down")
+
+        monkeypatch.setattr("backend.agents.dm_agent.read_only_session", boom)
+        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        assert response.message == "an answer"
+        assert response.subgraph["together"] == []

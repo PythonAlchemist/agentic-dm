@@ -16,6 +16,7 @@ from backend.agents import graph_tools
 from backend.agents import subgraph as subgraph_module
 from backend.agents.subgraph import Subgraph, note_named, seed as seed_subgraph
 from backend.canon import ontology
+from backend.canon.lookup import CANON_PLANE, TOGETHER
 from backend.core.database import read_only_session
 from backend.canon.retrieval import (
     PATH_GRAPH,
@@ -373,6 +374,38 @@ class DMAgent:
             logger.warning("could not read the graph vocabulary", exc_info=True)
             return ""
 
+    def _named_together(self, view: dict) -> list[dict]:
+        """Which held entities the book names in one sentence.
+
+        Attached to the view a READER gets and never to `Subgraph.render()`,
+        which is what the model reads -- see `lookup.TOGETHER` for why that
+        line is drawn where it is.
+
+        Degrades to nothing, like `_ontology`: this is an extra way of looking
+        at what the panel already shows, and a panel missing one of its layers
+        beats a turn that failed.
+        """
+        ids = [node["id"] for node in view["nodes"]]
+        if len(ids) < 2:
+            return []
+        try:
+            with read_only_session() as session:
+                return [
+                    dict(record)
+                    for record in session.run(
+                        TOGETHER, {"ids": ids, "plane": CANON_PLANE}
+                    )
+                ]
+        except Exception:  # noqa: BLE001 - a panel layer must not fail a turn
+            logger.warning("could not read what was named together", exc_info=True)
+            return []
+
+    def _subgraph_view(self) -> dict:
+        """The working set as a reader sees it, with the sentence layer on top."""
+        view = self.subgraph.as_dict()
+        view["together"] = self._named_together(view)
+        return view
+
     def _retrieve_canon(self, user_input: str) -> Retrieval:
         """Canon for this question. An EMPTY retrieval if the graph is unreachable.
 
@@ -515,7 +548,7 @@ class DMAgent:
                    "total": usage.total},
             cost=cost.as_dict(),
             retrieval=retrieval_report,
-            subgraph=self.subgraph.as_dict(),
+            subgraph=self._subgraph_view(),
         )
 
     async def _answer_with_tools(self, messages: list[dict]):

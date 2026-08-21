@@ -279,6 +279,32 @@ ORDER BY chapter_index, section_index, mention_id
 #: longer carries a chapter at all -- and because the write path creates the
 #: chapter node in the same transaction as its canon, so one cannot exist
 #: without the other.
+#: Which of these entities the book NAMES IN ONE SENTENCE, projected from the
+#: mention-level `CO_OCCURS_WITH` up to the entities themselves.
+#:
+#: FOR A READER, NOT FOR THE MODEL. `cooccurrence` is emphatic that this is raw
+#: material and that inferring a relationship from it is a judgment this project
+#: has failed to automate four separate ways. Handing 5,490 untyped "named
+#: together" edges to a model as relationships is exactly that inference, and
+#: they would outnumber the 957 typed ones six to one. Drawn on a panel a DM is
+#: looking at, the same fact is what it claims to be: these were named together,
+#: make of it what you like.
+#:
+#: BOTH ENDS MUST BE HELD. Strahd is named in a sentence with 153 other
+#: entities and Vistani with 66, so an open neighbourhood is not a picture. The
+#: working set bounds it to what the conversation already has in front of it,
+#: which is also the only question worth asking here: how do THESE things relate.
+#:
+#: `a.id < b.id` because the edge exists from both mentions -- a pair in one
+#: sentence writes (mention_a, b) and (mention_b, a) -- and drawing it twice
+#: would put two identical lines between the same two dots.
+TOGETHER = """
+MATCH (a:Entity {plane:$plane})<-[:REFERS_TO]-(m:Mention)-[:CO_OCCURS_WITH]->(b:Entity {plane:$plane})
+WHERE a.id IN $ids AND b.id IN $ids AND a.id < b.id
+RETURN a.name AS source, b.name AS target, count(DISTINCT m) AS sentences
+ORDER BY sentences DESC, source, target
+"""
+
 CHAPTERS = """
 MATCH (c:Chapter {plane:$plane}) RETURN c.slug AS slug ORDER BY c.index
 """
