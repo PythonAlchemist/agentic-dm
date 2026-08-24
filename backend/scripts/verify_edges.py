@@ -46,8 +46,17 @@ _EDGES = """
 MATCH (a:Entity {plane:'canon'})-[r]->(b:Entity {plane:'canon'})
 WHERE a.id STARTS WITH $prefix AND r.status <> 'accepted'
   AND r.evidence IS NOT NULL AND r.evidence <> ''
-RETURN a.name AS source, type(r) AS rel_type, b.name AS target,
+RETURN elementId(r) AS eid, a.name AS source, type(r) AS rel_type, b.name AS target,
        r.evidence AS evidence, coalesce(r.votes, 0) AS votes
+"""
+
+#: The verdict, stamped on the edge it is about. ADDITIVE: nothing is deleted
+#: and nothing is hidden here, so a wrong verdict costs a property and not an
+#: edge. What the read path does with it is a separate decision, made after
+#: somebody has looked at the numbers.
+_STAMP = """
+MATCH ()-[r]->() WHERE elementId(r) = $eid
+SET r.evidence_check = $verdict, r.evidence_check_why = $why
 """
 
 
@@ -87,6 +96,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--book", required=True)
     parser.add_argument("--per-stratum", type=int, default=40)
+    parser.add_argument(
+        "--all", action="store_true",
+        help="judge every proposed edge rather than a stratified sample",
+    )
+    parser.add_argument(
+        "--write", action="store_true",
+        help="stamp each verdict on its edge. Additive -- nothing is deleted.",
+    )
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
 
@@ -101,11 +118,14 @@ def main() -> int:
 
     # Seeded, so two runs judge the same edges and a change in the rate is a
     # change in the edges rather than in which ones got looked at.
-    rng = random.Random(SEED)
-    sample = []
-    for votes in sorted(by_votes):
-        group = by_votes[votes]
-        sample.extend(rng.sample(group, min(args.per_stratum, len(group))))
+    if args.all:
+        sample = edges
+    else:
+        rng = random.Random(SEED)
+        sample = []
+        for votes in sorted(by_votes):
+            group = by_votes[votes]
+            sample.extend(rng.sample(group, min(args.per_stratum, len(group))))
 
     print(f"{len(edges)} proposed edges in {args.book}")
     for votes in sorted(by_votes):
@@ -133,6 +153,24 @@ def main() -> int:
     rate = f"{overall['supported_rate']:.0%}" if overall["supported_rate"] is not None else "--"
     print(f"\n  overall supported: {rate} of {overall['decided']} decided "
           f"({overall['unclear']} unclear, excluded)")
+
+    if args.write:
+        from backend.core.database import neo4j_session
+
+        with neo4j_session() as session:
+            for verdict in verdicts:
+                session.run(_STAMP, {
+                    "eid": by_key[verdict.key]["eid"],
+                    "verdict": verdict.verdict,
+                    "why": verdict.why,
+                })
+        print(f"\nstamped {len(verdicts)} edges with `evidence_check`")
+        unjudged = len(sample) - len(verdicts)
+        if unjudged:
+            # Left unstamped rather than defaulted: an edge nobody judged is
+            # not an edge that passed, and a reader must be able to tell those
+            # apart.
+            print(f"  {unjudged} edge(s) got no verdict and were left unstamped")
 
     if args.out:
         args.out.write_text(json.dumps(
