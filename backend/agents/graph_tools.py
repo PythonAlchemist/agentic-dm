@@ -81,7 +81,8 @@ def resolve(name: str, plane: str = CANON_PLANE) -> Result:
         found = [
             dict(record)
             for record in session.run(
-                BY_ALIAS, {"normalized": normalize(name), "plane": plane}
+                BY_ALIAS,
+                {"normalized": normalize(name), "plane": plane, "book": None}
             )
         ]
     # `BY_ALIAS` rather than `aliases.RESOLVE_BY_NAME`: that one returns ids
@@ -134,7 +135,9 @@ def passages(entity_id: str, limit: int = DEFAULT_LIMIT, plane: str = CANON_PLAN
     with read_only_session() as session:
         found = [
             dict(record)
-            for record in session.run(MENTIONS, {"ids": [entity_id], "plane": plane})
+            for record in session.run(
+                MENTIONS, {"ids": [entity_id], "plane": plane, "book_slug": None}
+            )
         ]
     rows = [
         {

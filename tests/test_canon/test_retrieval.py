@@ -24,7 +24,14 @@ from backend.canon.retrieval import (
     is_common_noun,
 )
 from backend.canon.spine import ChapterSpine, WriteSection
-from backend.canon.writer import WriteNode, ensure_schema, write_chapter
+from backend.canon.writer import (
+    STRUCTURAL_EVIDENCE,
+    WriteEdge,
+    WriteNode,
+    ensure_schema,
+    write_chapter,
+)
+from backend.graph.schema import RelationshipType
 from backend.core.database import neo4j_session
 from backend.scripts.eval_retrieval import reciprocal_rank, score, summarize
 
@@ -450,7 +457,7 @@ class TestScoring:
 pytest_neo4j = pytest.mark.neo4j
 
 CHAPTER = "pytest-retrieval"
-BOOK = "pytest-book"
+BOOK = "pytest"  # must match the id prefix its entities carry
 PREFIX = "pytest:"
 MARKER = "Zz"
 
@@ -524,13 +531,35 @@ def written(graph):
         # book sitting in the same database cannot outrank it on the text path.
         # That makes it the one section that proves the text reservation is
         # reaching sections the graph alone could not.
-        _section(2, "Elsewhere", "Nothing Zzelsewhere happens in this section at all."),
+        # `capital` is here for the text path's contract test: that path CANNOT
+        # say it does not know, so an unrelated question must still come back
+        # with something. It used to come back with a real Curse of Strahd
+        # section, which meant the test passed only while retrieval searched
+        # every book -- the leak this fixture now has to live without.
+        _section(2, "Elsewhere",
+                 "Nothing Zzelsewhere happens here at all, in this capital or any other."),
+    ]
+    # The fixture wrote no edges at all, and the test asserting that a
+    # text-retrieved section still brings its entities' relationships was
+    # passing on edges belonging to the real book. One accepted edge between
+    # the fixture's own two entities makes that test true of the fixture.
+    edges = [
+        WriteEdge(
+            source_id=f"{PREFIX}donavich",
+            target_id=f"{PREFIX}undercroft",
+            rel_type=RelationshipType.LOCATED_IN,
+            chapter_slug=CHAPTER,
+            # `accepted` is DERIVED from this, never passed -- see
+            # `WriteEdge.status`. Structural evidence is what the book's
+            # own hierarchy produces, and is the only thing that earns it.
+            evidence=STRUCTURAL_EVIDENCE,
+        )
     ]
     write_chapter(
         graph,
         CHAPTER,
         [priest, room],
-        [],
+        edges,
         _spine(sections),
         [WriteAlias(f"{PREFIX}donavich", named("Father Donavich"))],
     )
@@ -549,7 +578,12 @@ def _spine(sections: list[Section]) -> ChapterSpine:
         chapter_title="A Test Chapter",
         sections=[
             WriteSection(
-                id=f"cos:{CHAPTER}#{s.index}",
+                # The fixture's OWN book, not Barovia's. These sections
+                # hang off a `:Book {slug: BOOK}` and their ids must agree
+                # with it, the way real data does -- retrieval scopes to a
+                # book and a section claiming a book it does not belong to
+                # is invisible to it.
+                id=f"{BOOK}:{CHAPTER}#{s.index}",
                 chapter_slug=CHAPTER,
                 heading=s.heading,
                 index=s.index,
@@ -566,10 +600,10 @@ def _spine(sections: list[Section]) -> ChapterSpine:
 @pytest.mark.neo4j
 class TestRetrievingFromTheGraph:
     def test_a_question_naming_an_entity_returns_its_sections(self, written):
-        result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
+        result = CanonRetriever(book="pytest").retrieve(f"Who is {named('Donavich')}?")
         assert [a.name for a in result.anchors] == [named("Donavich")]
-        assert f"cos:{CHAPTER}#0" in result.section_ids
-        assert f"cos:{CHAPTER}#2" not in result.section_ids
+        assert f"{BOOK}:{CHAPTER}#0" in result.section_ids
+        assert f"{BOOK}:{CHAPTER}#2" not in result.section_ids
 
     def test_an_anchored_question_still_reaches_a_section_the_graph_cannot(self, written):
         """The whole change, end to end.
@@ -585,33 +619,33 @@ class TestRetrievingFromTheGraph:
         all, and `TestCombiningTheTwoPaths` pins the split. A test asserting
         both would fail for two unrelated reasons.
         """
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="pytest").retrieve(
             f"What does {named('Donavich')} think of Zzelsewhere?"
         )
         assert result.anchors, "the question must anchor for this to mean anything"
-        assert f"cos:{CHAPTER}#2" in result.section_ids
+        assert f"{BOOK}:{CHAPTER}#2" in result.section_ids
 
     def test_the_passage_from_the_text_path_says_so(self, written):
         """Provenance is per passage now, because one result mixes both."""
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="pytest").retrieve(
             f"What does {named('Donavich')} think of Zzelsewhere?"
         )
-        found = next(p for p in result.passages if p.section_id == f"cos:{CHAPTER}#2")
+        found = next(p for p in result.passages if p.section_id == f"{BOOK}:{CHAPTER}#2")
         assert found.path == PATH_TEXT
         assert found.score is not None
 
     def test_the_graph_passages_in_a_mixed_result_are_still_labelled_graph(self, written):
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="pytest").retrieve(
             f"What does {named('Donavich')} think of Zzelsewhere?"
         )
-        found = next(p for p in result.passages if p.section_id == f"cos:{CHAPTER}#1")
+        found = next(p for p in result.passages if p.section_id == f"{BOOK}:{CHAPTER}#1")
         assert found.path == PATH_GRAPH
         assert found.score is None
 
     def test_the_section_id_matches_the_one_the_write_path_minted(self, written):
         """`_section_id` rebuilds the id from parts rather than reading it, so
         the format has to be pinned against real sections in the graph."""
-        rebuilt = set(CanonRetriever().retrieve(f"Who is {named('Donavich')}?").section_ids)
+        rebuilt = set(CanonRetriever(book="pytest").retrieve(f"Who is {named('Donavich')}?").section_ids)
         real = {
             row["id"]
             for row in written.run(
@@ -627,8 +661,8 @@ class TestRetrievingFromTheGraph:
         occurrence signal is dropped and the ranking falls back to document
         order -- which it did, silently, until this test was written to notice.
         """
-        result = CanonRetriever().retrieve(f"Tell me about {named('Donavich')}.")
-        assert result.section_ids[0] == f"cos:{CHAPTER}#1"
+        result = CanonRetriever(book="pytest").retrieve(f"Tell me about {named('Donavich')}.")
+        assert result.section_ids[0] == f"{BOOK}:{CHAPTER}#1"
 
     def test_a_questions_own_words_can_beat_a_louder_section(self, written):
         """The defect this ranking exists to fix.
@@ -639,25 +673,25 @@ class TestRetrievingFromTheGraph:
         though the anchor is quieter there. On the real set this is what moved
         "who are Strahd's undead enemies" from ninth to second.
         """
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="pytest").retrieve(
             f"What vestments does {named('Donavich')} wear?"
         )
-        assert result.section_ids[0] == f"cos:{CHAPTER}#0"
+        assert result.section_ids[0] == f"{BOOK}:{CHAPTER}#0"
         assert result.passages[0].term_hits >= 1
 
     def test_the_anchors_own_name_is_not_also_scored_as_a_term(self, written):
         """Counting it twice -- once as occurrences, once as a matched word --
         would re-favour the broad sections the term signal is meant to demote."""
-        result = CanonRetriever().retrieve(f"Where is {named('Donavich')}?")
+        result = CanonRetriever(book="pytest").retrieve(f"Where is {named('Donavich')}?")
         assert result.passages
         assert all(p.term_hits == 0 for p in result.passages)
 
     def test_a_word_the_question_never_used_scores_nothing(self, written):
-        result = CanonRetriever().retrieve(f"Tell me about {named('Donavich')}.")
+        result = CanonRetriever(book="pytest").retrieve(f"Tell me about {named('Donavich')}.")
         assert all(p.term_hits == 0 for p in result.passages)
 
     def test_a_recorded_alias_resolves_to_the_same_entity(self, written):
-        result = CanonRetriever().retrieve(f"Who is {named('Father Donavich')}?")
+        result = CanonRetriever(book="pytest").retrieve(f"Who is {named('Father Donavich')}?")
         assert [a.entity_id for a in result.anchors] == [f"{PREFIX}donavich"]
 
     def test_a_question_naming_nothing_is_answered_by_text_and_labelled_as_such(
@@ -673,7 +707,7 @@ class TestRetrievingFromTheGraph:
         carries its score. A caller that treats a text answer as a name match is
         then making its own mistake, not inheriting one.
         """
-        result = CanonRetriever().retrieve("What is the capital of France?")
+        result = CanonRetriever(book="pytest").retrieve("What is the capital of France?")
         assert result.anchors == ()
         assert result.path == "text"
         assert result.terms == ("capital", "france")
@@ -691,7 +725,7 @@ class TestRetrievingFromTheGraph:
         Which sections to read is still a guess and still labelled `text`. What
         the graph knows about the entities in them is not a guess.
         """
-        result = CanonRetriever().retrieve("who listens below")
+        result = CanonRetriever(book="pytest").retrieve("who listens below")
         assert result.path == "text"
         assert result.accepted or result.proposed, (
             "a section retrieved by text must still bring its entities' edges"
@@ -700,14 +734,14 @@ class TestRetrievingFromTheGraph:
     def test_the_text_path_honours_the_passage_width(self, written):
         """It used to call `derive_passage` directly and always send one
         sentence, silently ignoring the setting."""
-        wide = CanonRetriever(passage_width="section").retrieve("who listens below")
-        narrow = CanonRetriever(passage_width="sentence").retrieve("who listens below")
+        wide = CanonRetriever(passage_width="section", book="pytest").retrieve("who listens below")
+        narrow = CanonRetriever(passage_width="sentence", book="pytest").retrieve("who listens below")
         assert len(wide.passages[0].text) > len(narrow.passages[0].text)
 
     def test_a_graph_passage_carries_no_score(self, written):
         """`None`, not `0.0`. A name match has no score, and a zero would read
         as 'scored, badly'."""
-        result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
+        result = CanonRetriever(book="pytest").retrieve(f"Who is {named('Donavich')}?")
         assert result.path == "graph"
         assert all(p.score is None for p in result.passages)
 
@@ -716,23 +750,23 @@ class TestRetrievingFromTheGraph:
     ):
         """`content_terms` can empty a question completely, and an empty Lucene
         query is a syntax error rather than an empty result."""
-        result = CanonRetriever().retrieve("What is it?")
+        result = CanonRetriever(book="pytest").retrieve("What is it?")
         assert result.passages == ()
         assert "says nothing to search for" in result.miss_reason
 
     def test_the_budget_reports_what_it_cut(self, written):
         """A silent truncation reads as 'covered everything' when it did not."""
-        result = CanonRetriever(limit=1).retrieve(f"Tell me about {named('Donavich')}.")
+        result = CanonRetriever(limit=1, book="pytest").retrieve(f"Tell me about {named('Donavich')}.")
         assert len(result.passages) == 1
         assert result.dropped == 1
 
     def test_a_case_folded_question_anchors_and_says_it_was_loose(self, written):
-        result = CanonRetriever().retrieve(f"who is {named('Donavich').lower()}?")
+        result = CanonRetriever(book="pytest").retrieve(f"who is {named('Donavich').lower()}?")
         assert result.anchors
         assert result.loose is True
 
     def test_a_question_spelled_properly_never_needs_the_fallback(self, written):
-        result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
+        result = CanonRetriever(book="pytest").retrieve(f"Who is {named('Donavich')}?")
         assert result.loose is False
 
     def test_by_default_a_passage_carries_its_whole_section(self, written):
@@ -742,7 +776,7 @@ class TestRetrievingFromTheGraph:
         undercroft. On the real book the same shape put the answer to "who owns
         the Blood of the Vine Tavern" 3,331 characters outside the window.
         """
-        result = CanonRetriever().retrieve(f"Tell me about {named('Donavich')}.")
+        result = CanonRetriever(book="pytest").retrieve(f"Tell me about {named('Donavich')}.")
         first = result.passages[0]
         # `waits` is in the section's SECOND sentence, past any window anchored
         # on the first mention -- which is what makes this discriminating.
@@ -750,7 +784,7 @@ class TestRetrievingFromTheGraph:
         assert first.truncated is False
 
     def test_sentence_width_narrows_to_one_sentence(self, written):
-        result = CanonRetriever(passage_width="sentence").retrieve(
+        result = CanonRetriever(passage_width="sentence", book="pytest").retrieve(
             f"Tell me about {named('Donavich')}."
         )
         assert "waits" not in result.passages[0].text
@@ -766,7 +800,7 @@ class TestRetrievingFromTheGraph:
         assert derive_passage(text, 8) == "A fire burns low in the hearth."
 
     def test_a_passage_is_derived_prose_not_an_id(self, written):
-        result = CanonRetriever().retrieve(f"Who is {named('Donavich')}?")
+        result = CanonRetriever(book="pytest").retrieve(f"Who is {named('Donavich')}?")
         assert named("Donavich") in result.passages[0].text
 
 
@@ -789,34 +823,34 @@ class TestCarryingTheConversation:
     TAVERN = "cos:the-village-of-barovia:e2-blood-of-the-vine-tavern"
 
     def test_a_question_resolving_nothing_uses_what_came_before(self, written):
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="cos").retrieve(
             "give me a list of everyone in the pub", carry=[self.TAVERN]
         )
         assert result.carried is True
         assert self.TAVERN in {a.entity_id for a in result.anchors}
 
     def test_it_reaches_the_section_the_answer_is_in(self, written):
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="cos").retrieve(
             "give me a list of everyone in the pub", carry=[self.TAVERN]
         )
         assert "cos:the-village-of-barovia#5" in result.section_ids
 
     def test_a_question_that_names_something_is_never_overridden(self, written):
         """What was said three turns ago must not outrank what was just asked."""
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="cos").retrieve(
             "Who is Madam Eva?", carry=[self.TAVERN]
         )
         assert result.carried is False
         assert self.TAVERN not in {a.entity_id for a in result.anchors}
 
     def test_without_a_conversation_it_still_falls_through_to_text(self, written):
-        result = CanonRetriever().retrieve("give me a list of everyone in the pub")
+        result = CanonRetriever(book="cos").retrieve("give me a list of everyone in the pub")
         assert result.carried is False
         assert result.path == PATH_TEXT
 
     def test_carrying_ids_that_no_longer_exist_falls_through_to_text(self, written):
         """An evicted or deleted entity must not dead-end the turn."""
-        result = CanonRetriever().retrieve(
+        result = CanonRetriever(book="cos").retrieve(
             "give me a list of everyone in the pub", carry=["cos:nothing-here"]
         )
         assert result.carried is False
@@ -825,6 +859,6 @@ class TestCarryingTheConversation:
     def test_the_anchor_surface_is_the_entitys_own_name(self, written):
         """No wording in THIS question produced it, so the panel shows the name
         rather than implying the reader typed something that matched."""
-        result = CanonRetriever().retrieve("describe it", carry=[self.TAVERN])
+        result = CanonRetriever(book="cos").retrieve("describe it", carry=[self.TAVERN])
         anchor = next(a for a in result.anchors if a.entity_id == self.TAVERN)
         assert anchor.surface == anchor.name

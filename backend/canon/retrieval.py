@@ -66,6 +66,7 @@ from backend.canon.spine import mention_pattern
 #: its spellings, so one lower-case alias disqualifies all of them.
 ALL_ALIASES = """
 MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity {plane:$plane})
+WHERE $book IS NULL OR e.id STARTS WITH $book
 RETURN DISTINCT a.name AS name, e.id AS entity_id
 """
 
@@ -75,6 +76,7 @@ RETURN DISTINCT a.name AS name, e.id AS entity_id
 BY_ALIAS = """
 MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity {plane:$plane})
 WHERE a.normalized = $normalized
+  AND ($book IS NULL OR e.id STARTS WITH $book)
 RETURN DISTINCT e.id AS id, e.name AS name, labels(e) AS labels, e.status AS node_status
 ORDER BY e.id
 """
@@ -89,7 +91,7 @@ ORDER BY e.id
 #: answered, and this project's whole method is being able to tell.
 SEARCH_SECTIONS = """
 CALL db.index.fulltext.queryNodes('section_text', $query) YIELD node AS s, score
-MATCH (c:Chapter {plane:$plane})-[:HAS_SECTION]->(s)
+MATCH (:Book {slug:$book_slug})-[:HAS_CHAPTER]->(c:Chapter {plane:$plane})-[:HAS_SECTION]->(s)
 RETURN s.id AS section_id, s.heading AS section, s.index AS section_index,
        s.text AS text, c.slug AS chapter, c.index AS chapter_index, score
 ORDER BY score DESC
@@ -479,10 +481,27 @@ class CanonRetriever:
     """Retrieve grounded canon for a question. Read-only, deterministic."""
 
     def __init__(
-        self, limit: int = DEFAULT_LIMIT, passage_width: str = WIDTH_SECTION
+        self,
+        limit: int = DEFAULT_LIMIT,
+        passage_width: str = WIDTH_SECTION,
+        book: str = "cos",
     ) -> None:
+        """`book` is the ONE book this retriever reads.
+
+        A second book in the graph made every query book-blind. Lucene ranges
+        over the whole `section_text` index and the plane filter passes both,
+        so a Barovia question came back with `Blood War Balance` and
+        `Motherlode Tavern` -- 45 of 96 evaluation questions took at least one
+        passage from the wrong book, 12% of all passage slots, and MRR fell
+        from 0.61 to 0.56.
+
+        A session reads one book, the way a table runs one adventure. Nothing
+        blends them, and a question that would be answered by another book
+        gets nothing rather than something plausible from the wrong world.
+        """
         self.limit = limit
         self.passage_width = passage_width
+        self.book = book
 
     def retrieve(
         self,
@@ -888,16 +907,22 @@ class CanonRetriever:
             return False
         return derive_section(slot["text"], SECTION_MAX)[1]
 
-    @staticmethod
-    def _section_id(slot: dict) -> str:
+    def _section_id(self, slot: dict) -> str:
         """The id the write path minted, rebuilt from its parts.
 
         `MENTIONS` returns the section's heading and index but not its id, and
         widening that shared query for this module's benefit would change what
         `lookup` reads. The format is the write path's and is pinned by a test
         that reads a real section id out of the graph.
+
+        THE BOOK WAS HARDCODED `cos` HERE while one book was the whole world,
+        and a second book made it a lie: every passage the graph path returned
+        was labelled Curse of Strahd whatever book it came from, so a citation
+        pointed a reader at the wrong adventure. It also hid cross-book leakage
+        from the only measurement looking for it -- a foreign passage arrived
+        wearing the local book's prefix.
         """
-        return f"cos:{slot['chapter']}#{slot['section_index']}"
+        return f"{self.book}:{slot['chapter']}#{slot['section_index']}"
 
     def _session(self):
         from backend.core.database import neo4j_session
@@ -905,5 +930,13 @@ class CanonRetriever:
         return neo4j_session()
 
     def _rows(self, session, query: str, params: dict | None = None) -> list[dict]:
-        merged = {"plane": CANON_PLANE, **(params or {})}
+        # `book` beside `plane` because they are the same kind of fact: which
+        # slice of the graph this reader is allowed to see. Injected once, so a
+        # query cannot forget it.
+        merged = {
+            "plane": CANON_PLANE,
+            "book": f"{self.book}:",
+            "book_slug": self.book,
+            **(params or {}),
+        }
         return [dict(record) for record in session.run(query, merged)]

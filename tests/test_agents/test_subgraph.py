@@ -266,7 +266,7 @@ class TestTheFollowUpThatMotivatedThis:
     def _two_turns() -> Subgraph:
         from backend.canon.retrieval import CanonRetriever
 
-        retriever = CanonRetriever()
+        retriever = CanonRetriever(book="cos")
         graph = Subgraph()
         graph.turn = 1
         seed(graph, retriever.retrieve("Who is Rictavio?"))

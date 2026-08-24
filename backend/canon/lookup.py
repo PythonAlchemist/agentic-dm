@@ -192,6 +192,7 @@ PASSAGES = """
 MATCH (n:Entity {plane:$plane})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
 WHERE n.id IN $ids
 MATCH (c:Chapter)-[:HAS_SECTION]->(s)
+WHERE $book_slug IS NULL OR (:Book {slug:$book_slug})-[:HAS_CHAPTER]->(c)
 RETURN DISTINCT c.slug AS chapter, c.index AS chapter_index, c.title AS chapter_title,
        s.heading AS section, s.index AS section_index, s.key AS section_key
 ORDER BY chapter_index, section_index
@@ -241,6 +242,13 @@ RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
        o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status
 """
 
+#: `$book` SCOPES THE SECTION, and null means every book. Optional rather than
+#: a second query, because two definitions of "where an entity is named" would
+#: be free to disagree -- the rule this module states about `EDGES`. A mention
+#: can sit in a book its entity does not belong to: `cos:key` is named 146
+#: times across the heist anthology, which is correct and which a reader asking
+#: about Barovia must not be shown.
+#:
 #: The evidence, which is the sentence the book actually wrote. `USES_ALIAS`
 #: says which spellings it used there -- itself story information, since the
 #: party meets `Strahd` well before `Strahd von Zarovich`.
@@ -491,7 +499,12 @@ class CanonLookup:
         ]
 
     def _rows(self, session, query: str, params: dict | None = None) -> list[dict]:
-        merged = {"plane": CANON_PLANE, **(params or {})}
+        # `book_slug: None` means every book. This module answers a question
+        # about an ENTITY, which already names its book in its id; scoping is
+        # the retriever's concern, and a lookup that silently dropped a mention
+        # because it sat in another book would be answering a question nobody
+        # asked.
+        merged = {"plane": CANON_PLANE, "book_slug": None, **(params or {})}
         return [dict(record) for record in session.run(query, merged)]
 
     def _run(self, session, query: str, ids: list[str]) -> list[dict]:

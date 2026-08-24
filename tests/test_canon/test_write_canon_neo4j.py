@@ -41,7 +41,7 @@ pytestmark = pytest.mark.neo4j
 CHAPTER_A = "pytest-chapter-a"
 CHAPTER_B = "pytest-chapter-b"
 TEST_ID_PREFIX = "pytest:"
-TEST_BOOK = "pytest-book"
+TEST_BOOK = "pytest"
 
 #: A keyed test place mints `cos:<chapter>:<key>-<slug>` through `mint_id`, which
 #: hardcodes the book -- so the `pytest:` prefix cannot reach those and cleanup
