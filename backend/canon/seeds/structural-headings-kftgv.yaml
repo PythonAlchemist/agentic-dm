@@ -1,0 +1,37 @@
+# Headings Keys from the Golden Vault writes that are NOT it naming a thing.
+#
+# Same job as `structural-headings.yaml` does for Curse of Strahd, and a
+# separate file because the two books organise themselves differently: nothing
+# in Barovia heads `Planning the Heist`, and nothing here heads `Fortunes of
+# Ravenloft`. One seed shared between them would be each book carrying the
+# other's exceptions.
+#
+# DERIVED FROM REPETITION, THEN READ BY HAND. These are every non-keyed heading
+# appearing in three or more of the thirteen adventures. An anthology's
+# adventures share no continuity, so a heading they all use is the book's
+# scaffolding by construction -- it cannot be one thing named thirteen times
+# when the thirteen stories have nothing to do with each other. Counts are
+# recorded beside each so the claim stays checkable.
+#
+# A keyed area heading is never here: `V1: Grand Entrance` is the book naming a
+# place, and `KeyScheme` already tells the two apart.
+
+# The book organising its own text.
+apparatus:
+  - Adventure Background     # 13 of 13
+  - Using the Golden Vault   # 13 of 13
+  - For the Golden Vault     # 13 of 13
+  - Conclusion               # 13 of 13
+  - Planning the Heist       # 7
+  - Adventure Hooks          # 5
+  - Further Adventures       # 3
+
+# Parts of a building the text describes in passing. A heist adventure spends
+# real space on how a place is entered, so these head sections about doors and
+# windows AS OBSTACLES -- which is not the same as the book asserting that a
+# door is an entity worth a node.
+features:
+  - General Features         # 7
+  - Doors                    # 5
+  - Windows                  # 3
+  - Ceilings                 # 3

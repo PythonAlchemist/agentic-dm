@@ -6,6 +6,7 @@
 prefix: kftgv
 title: Keys from the Golden Vault
 anthology: true
+structural_headings: structural-headings-kftgv.yaml
 
 # THE EXCEPTIONS, hand-authored, because nothing in the text distinguishes
 # "recurs because it is one thing" from "recurs because the word is common".

@@ -130,7 +130,9 @@ def chapter_place_of_run(extraction_run: dict) -> str | None:
 
 
 
-def scheme_for(chapter_slug: str, corpus: str = "ddb") -> "KeyScheme":
+def scheme_for(
+    chapter_slug: str, corpus: str = "ddb", *, book_slug: str = "cos"
+) -> "KeyScheme":
     """The key shapes this chapter refers to, read off its own text.
 
     Per chapter rather than per book: chapter 2 keys regions with bare letters
@@ -143,13 +145,15 @@ def scheme_for(chapter_slug: str, corpus: str = "ddb") -> "KeyScheme":
     from backend.canon.sections import KeyScheme
     from backend.scripts.extract_canon import load_chapters
 
-    for chapter in load_chapters(corpus):
+    for chapter in load_chapters(corpus, book_slug=book_slug):
         if chapter.slug == chapter_slug:
             return KeyScheme.infer(chapter.markdown)
     return KeyScheme(frozenset())
 
 
-def book_names_of(corpus: str = "ddb") -> frozenset[str]:
+def book_names_of(
+    corpus: str = "ddb", *, book_slug: str = "cos", structural_seed: str = ""
+) -> frozenset[str]:
     """Every name the BOOK heads, anywhere in it, minus the structural seed.
 
     BOOK-WIDE, not this chapter's. The book heading `Rictavio` in appendix D is
@@ -177,13 +181,19 @@ def book_names_of(corpus: str = "ddb") -> frozenset[str]:
     """
     from backend.canon.aliases import normalize
     from backend.canon.sections import KeyScheme
-    from backend.canon.seed_loader import load_structural_headings
+    from backend.canon.seed_loader import SEED_DIR, load_structural_headings
     from backend.scripts.extract_canon import load_chapters
 
-    structural = load_structural_headings()
+    # Per book: nothing in Barovia heads `Planning the Heist`, and one
+    # shared seed would be each book carrying the other's exceptions.
+    structural = (
+        load_structural_headings(SEED_DIR / structural_seed)
+        if structural_seed
+        else load_structural_headings()
+    )
     title = re.compile(r"^(chapter \d+|appendix [a-f])\b", re.IGNORECASE)
     names: set[str] = set()
-    for chapter in load_chapters(corpus):
+    for chapter in load_chapters(corpus, book_slug=book_slug):
         # The chapter's OWN scheme, so a keyed room is left to the keyed path
         # and does not arrive here under its full heading. `14. Storage Room`
         # reaching this as the literal string `14. storage room` could never
@@ -207,7 +217,9 @@ def book_names_of(corpus: str = "ddb") -> frozenset[str]:
     return frozenset(names)
 
 
-def chapter_places_of(corpus: str = "ddb") -> frozenset[str]:
+def chapter_places_of(
+    corpus: str = "ddb", *, book_slug: str = "cos"
+) -> frozenset[str]:
     """The place each chapter is ABOUT, for every chapter in the book.
 
     A keyed area naming one of these is a cross-reference to that chapter
@@ -216,12 +228,12 @@ def chapter_places_of(corpus: str = "ddb") -> frozenset[str]:
     from backend.scripts.extract_canon import load_chapters
 
     return frozenset(
-        p for c in load_chapters(corpus) if (p := place_from_chapter_title(c.title))
+        p for c in load_chapters(corpus, book_slug=book_slug) if (p := place_from_chapter_title(c.title))
     )
 
 
 def keyed_headings_of(
-    chapter_slug: str, corpus: str, splitter: str
+    chapter_slug: str, corpus: str, splitter: str, *, book_slug: str = "cos"
 ) -> list[tuple[str, str]]:
     """`(key, place name)` for every keyed section the chapter heads.
 
@@ -242,12 +254,14 @@ def keyed_headings_of(
     # budget. A keyed area whose name is another chapter's own place is that
     # chapter's place, referred to from the map.
     chapter_places = {
-        place_from_chapter_title(c.title) for c in load_chapters(corpus)
+        place_from_chapter_title(c.title) for c in load_chapters(corpus, book_slug=book_slug)
     }
     chapter_places.discard(None)
-    scheme = scheme_for(chapter_slug, corpus)
+    scheme = scheme_for(chapter_slug, corpus, book_slug=book_slug)
 
-    _, _, sections = load_spine_sections(chapter_slug, corpus, splitter)
+    _, _, sections = load_spine_sections(
+        chapter_slug, corpus, splitter, book_slug=book_slug
+    )
     found: list[tuple[str, str]] = []
     seen: set[str] = set()
     for section in sections:
@@ -267,7 +281,7 @@ def keyed_headings_of(
 
 
 def load_spine_sections(
-    chapter_slug: str, corpus: str, splitter: str
+    chapter_slug: str, corpus: str, splitter: str, *, book_slug: str = "cos"
 ) -> tuple[Chapter, int, list[Section]]:
     """The chapter as the book wrote it, its index, and its sections.
 
@@ -282,7 +296,7 @@ def load_spine_sections(
     """
     from backend.scripts.extract_canon import load_chapters
 
-    chapters = load_chapters(corpus)
+    chapters = load_chapters(corpus, book_slug=book_slug)
     for index, chapter in enumerate(chapters):
         if chapter.slug == chapter_slug:
             return chapter, index, split_chapter(chapter, splitter=splitter).sections
@@ -678,10 +692,21 @@ def main() -> None:
         chapter_place=chapter_place,
         subtypes=subtypes,
         artifacts=artifacts,
-        keyed_headings=keyed_headings_of(args.chapter, args.corpus, args.splitter),
-        book_names=book_names_of(args.corpus),
-        cross_references=chapter_places_of(args.corpus),
-        scheme=scheme_for(args.chapter, args.corpus),
+        # The id prefix doubles as the harvest directory name -- `data/ddb/cos`,
+        # `data/ddb/kftgv` -- which is a convention rather than a coincidence
+        # and is worth keeping: a book whose cache is named after something
+        # other than its ids is a book two halves of this pipeline disagree
+        # about.
+        keyed_headings=keyed_headings_of(
+            args.chapter, args.corpus, args.splitter, book_slug=book.prefix
+        ),
+        book_names=book_names_of(
+            args.corpus,
+            book_slug=book.prefix,
+            structural_seed=book.structural_headings,
+        ),
+        cross_references=chapter_places_of(args.corpus, book_slug=book.prefix),
+        scheme=scheme_for(args.chapter, args.corpus, book_slug=book.prefix),
         book=book,
     )
     print(format_report(report))
@@ -701,7 +726,7 @@ def main() -> None:
         sys.exit(1)
 
     chapter, chapter_index, sections = load_spine_sections(
-        args.chapter, args.corpus, args.splitter
+        args.chapter, args.corpus, args.splitter, book_slug=book.prefix
     )
     spine = build_spine(
         chapter_slug=args.chapter,

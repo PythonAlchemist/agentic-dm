@@ -54,6 +54,12 @@ class BookScheme:
     anthology: bool = False
     #: Names that stay book-wide even in an anthology, folded for comparison.
     global_names: frozenset[str] = field(default_factory=frozenset)
+    #: This book's structural-heading seed, by filename inside the seeds
+    #: directory. Per book because books organise themselves differently:
+    #: nothing in Barovia heads `Planning the Heist` and nothing in the heist
+    #: anthology heads `Fortunes of Ravenloft`, so one shared seed would be
+    #: each book carrying the other's exceptions.
+    structural_headings: str = "structural-headings.yaml"
 
     def is_global(self, name: str) -> bool:
         """Is this one of the few names an anthology shares?
@@ -93,5 +99,8 @@ def load(path: Path) -> BookScheme:
         anthology=bool(raw.get("anthology", False)),
         global_names=frozenset(
             name.strip().casefold() for name in raw.get("global_names", [])
+        ),
+        structural_headings=raw.get(
+            "structural_headings", "structural-headings.yaml"
         ),
     )
