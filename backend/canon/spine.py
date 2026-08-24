@@ -360,7 +360,6 @@ class WriteMention:
         a slug the reader can already see, which is the trade that produced the
         original defect. 17 out of 3,304 is where this stops.
         """
-        loud = f" x{self.occurrences}" if self.occurrences > 1 else ""
         return {
             "plane": CANON_PLANE,
             "chapter_slug": self.chapter_slug,
@@ -369,16 +368,21 @@ class WriteMention:
             # where it wants an anchor to quote from; co-occurrence reads all
             # of them, which is the whole point of keeping them.
             "offsets": list(self.offsets),
-            # THE ENTITY FIRST, then where it was named. The caption used to
-            # be the section heading alone, which says where a mention lives
-            # and never what it refers to -- so a section headed `Prisoner 13`
-            # produced sixteen identical circles in a browser, one of them the
-            # NPC and the others his tattoos, the prison and the quest.
+            # WHAT IT REFERS TO, and nothing else.
             #
-            # The entity leads because a caption is TRUNCATED FROM THE RIGHT,
-            # and the discriminating half has to survive that. `x2` rides with
-            # the entity for the same reason.
-            "display_name": f"{self.entity_name}{loud} · {self.section_heading}",
+            # A caption's job is to say what a node IS. It is not a key, and
+            # two mentions of Revel's End may read `Revel's End` twice -- what
+            # tells them apart is where their edges go, which is the thing a
+            # graph browser is for.
+            #
+            # This deliberately gives up caption uniqueness, which two earlier
+            # versions chased. The section heading alone made every mention in
+            # one section identical; the pair `entity · section` fixed that and
+            # bought it with a caption long enough to truncate. Neither problem
+            # is worth solving in a string when the edges already carry the
+            # answer, and `occurrences` is still on the node for anyone who
+            # wants the count.
+            "display_name": self.entity_name,
         }
 
 
