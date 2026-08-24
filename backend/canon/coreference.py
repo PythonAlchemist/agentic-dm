@@ -100,6 +100,32 @@ def weak_words(names: Sequence[str], *, common: int = 6) -> frozenset[str]:
 _TASK_LABELS = frozenset({"QUEST"})
 
 
+#: Either apostrophe the corpus sets a possessive with. The book uses the curly
+#: one and the extractor emits the straight one, the same split `spine` folds.
+_POSSESSIVE = re.compile(r"['\u2019]s\b", re.IGNORECASE)
+
+
+def owns_something(name: str, word: str) -> bool:
+    """Is `word` the OWNER in this name rather than the thing named?
+
+    `Constantori` and `Constantori's Portrait` share a word, so blocking offers
+    them together and the model merges a person with their portrait. It did
+    that to `Agile Hand` and its guildhouse, and to Gwish and his room, his
+    trunk and his raven.
+
+    True when the word appears before a possessive marker: `Constantori's
+    Portrait` is about a portrait, `Constantori` is about a man. False when the
+    word comes after one -- in `Vidorant's Vault` the word `vault` is the thing
+    owned, and whether that is the same vault as `Vault` is a real question
+    worth asking.
+    """
+    match = _POSSESSIVE.search(name)
+    if match is None:
+        return False
+    before = name[: match.start()].casefold()
+    return word.casefold() in _WORD.findall(before)
+
+
 def _partition(name: str, kinds: "Mapping[str, frozenset[str]] | None") -> str:
     """`task` or `thing`. Blocks never mix the two.
 
@@ -142,10 +168,15 @@ def blocks(
     weak = weak_words(names, common=common)
     by_word: dict[tuple[str, str], set[str]] = {}
     for name in names:
-        side = _partition(name, kinds)
+        kind = _partition(name, kinds)
         for word in significant_words(name):
             if word in weak:
                 continue
+            # An owner and what they own are never offered together, so the
+            # side depends on the WORD as well as the name: `Gwish` is plain
+            # everywhere, `Gwish's raven` is possessed under `gwish` and plain
+            # under `raven`.
+            side = f"{kind}/owned" if owns_something(name, word) else kind
             by_word.setdefault((word, side), set()).add(name)
     return sorted(
         (word if side == "thing" else f"{word}/{side}", tuple(sorted(group)))

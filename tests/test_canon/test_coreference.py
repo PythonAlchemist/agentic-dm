@@ -9,6 +9,7 @@ here; what IS tested is that nothing it returns gets through unchecked.
 from backend.canon.coreference import (
     AliasGroup,
     blocks,
+    owns_something,
     weak_words,
     merge_overlapping,
     parse,
@@ -46,7 +47,10 @@ class TestWhatCouldBeTheSameThing:
         assert blocks(names) == blocks(list(reversed(names)))
 
     def test_case_and_punctuation_do_not_hide_a_shared_word(self):
-        found = dict(blocks(["Alda Arkin", "ALDA", "Alda’s Office"]))
+        """`Alda’s Office` is deliberately NOT here -- see
+        `TestAnOwnerIsNotWhatTheyOwn`. What this asserts is that casing and a
+        curly apostrophe inside a name do not stop it blocking."""
+        found = dict(blocks(["Alda Arkin", "ALDA", "Curator Alda"]))
         assert len(found["alda"]) == 3
 
     def test_significant_words_drop_the_scaffolding(self):
@@ -235,3 +239,36 @@ class TestATaskIsNeverTheThingItIsAbout:
     def test_without_types_nothing_is_partitioned(self):
         """The rule is opt-in: a caller with no types gets the old behaviour."""
         assert blocks(list(self.KINDS)) == blocks(list(self.KINDS), kinds=None)
+
+
+class TestAnOwnerIsNotWhatTheyOwn:
+    """`Constantori` and `Constantori's Portrait` share a word, so blocking
+    offered them together and the model merged a man with his portrait. It did
+    the same to Gwish and his room, his trunk and his raven."""
+
+    def test_the_word_before_a_possessive_is_the_owner(self):
+        assert owns_something("Constantori’s Portrait", "constantori")
+
+    def test_a_name_with_no_possessive_owns_nothing(self):
+        assert not owns_something("Constantori", "constantori")
+
+    def test_a_word_AFTER_the_possessive_is_the_thing_owned(self):
+        """In `Vidorant's Vault` the vault is owned, and whether it is the same
+        vault as `Vault` is a real question worth asking."""
+        assert not owns_something("Vidorant’s Vault", "vault")
+        assert owns_something("Vidorant’s Vault", "vidorant")
+
+    def test_both_apostrophes_count(self):
+        """The book sets the curly one, the extractor emits the straight one."""
+        assert owns_something("Gwish's raven", "gwish")
+        assert owns_something("Gwish’s raven", "gwish")
+
+    def test_an_owner_is_never_offered_beside_what_they_own(self):
+        names = ["Constantori", "Constantori’s Portrait"]
+        for _, group in blocks(names):
+            assert set(group) != set(names), group
+
+    def test_two_things_one_person_owns_are_still_asked_about(self):
+        """Splitting must not stop `Gwish's room` grouping with a respelling
+        of itself."""
+        assert blocks(["Gwish’s Room", "Gwish’s room"]) != []
