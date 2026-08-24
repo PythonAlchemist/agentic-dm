@@ -369,7 +369,16 @@ class WriteMention:
             # where it wants an anchor to quote from; co-occurrence reads all
             # of them, which is the whole point of keeping them.
             "offsets": list(self.offsets),
-            "display_name": f"{self.section_heading}{loud}",
+            # THE ENTITY FIRST, then where it was named. The caption used to
+            # be the section heading alone, which says where a mention lives
+            # and never what it refers to -- so a section headed `Prisoner 13`
+            # produced sixteen identical circles in a browser, one of them the
+            # NPC and the others his tattoos, the prison and the quest.
+            #
+            # The entity leads because a caption is TRUNCATED FROM THE RIGHT,
+            # and the discriminating half has to survive that. `x2` rides with
+            # the entity for the same reason.
+            "display_name": f"{self.entity_name}{loud} · {self.section_heading}",
         }
 
 

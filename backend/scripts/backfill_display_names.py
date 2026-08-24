@@ -82,7 +82,7 @@ def _mention_caption(row) -> str:
         section_id="",  # not part of the caption; never written by this script
         chapter_slug=row["chapter_slug"] or "",
         occurrences=row["occurrences"] or 1,
-        offset=row["offset"] or 0,
+        offsets=(row["offset"] or 0,),  # the caption needs no more than one
         entity_name=row["entity_name"],
         section_heading=row["section_heading"],
     ).properties["display_name"]

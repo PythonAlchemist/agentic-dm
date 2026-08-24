@@ -958,11 +958,23 @@ class TestTheSpineInTheGraph:
         assert row["section"] == "The Old Bonegrinder"
         assert row["entity"] == named("Madam Eva")
         assert row["alias"] == named("Madam Eva")
-        # The SECTION, plus how loudly it names the entity. Not the entity:
-        # expanding an entity draws its mentions and no sections, and captioning
-        # each with the name of the node they all point at made six mentions of
-        # Ismark render as six identical circles.
-        assert row["mention"] == "The Old Bonegrinder x2"
+        # BOTH ENDS, because a mention has two and either one alone degenerates.
+        #
+        # It was the section alone, on the reasoning below -- and that reasoning
+        # is still right about the failure it names. Captioning a mention with
+        # its ENTITY makes six mentions of Ismark six identical circles when you
+        # expand Ismark, because they all point at the node you expanded.
+        #
+        # The section alone has the mirror defect, found by reading a real
+        # graph: expand a SECTION and every mention in it carries that
+        # section's heading. A section headed `Prisoner 13` drew sixteen
+        # identical circles, one the NPC and the rest his tattoos, the prison
+        # and the quest.
+        #
+        # A caption naming both discriminates under either expansion. Entity
+        # first, because a caption truncates from the RIGHT and the part that
+        # differs has to survive it.
+        assert row["mention"] == f"{named('Madam Eva')} x2 · The Old Bonegrinder"
 
     def test_a_mention_named_once_carries_no_count(self, graph):
         """`x1` on every quiet mention would be noise on the majority of nodes."""
@@ -975,7 +987,26 @@ class TestTheSpineInTheGraph:
             "MATCH (m:Mention {chapter_slug:$slug}) RETURN m.display_name AS d",
             {"slug": CHAPTER_A},
         ).single()["d"]
-        assert caption == "Section 0"
+        assert caption == f"{named('Madam Eva')} · Section 0"
+
+    def test_two_mentions_in_one_section_get_different_captions(self, graph):
+        """The mirror of the property below, and the one the section-only
+        caption broke. Expanding a section draws every mention in it; if the
+        caption is the section, they are all the same circle."""
+        eva = node("Madam Eva", CHAPTER_A, "NPC")
+        arik = node("Arik", CHAPTER_A, "NPC")
+        write(graph, CHAPTER_A, [eva, arik], [], chapter_spine=spine(
+            eva, arik,
+            sections=[prose(0, "One Room",
+                            f"{named('Madam Eva')} reads. {named('Arik')} cleans.")],
+        ))
+        captions = {
+            r["d"] for r in graph.run(
+                "MATCH (m:Mention {chapter_slug:$slug}) RETURN m.display_name AS d",
+                {"slug": CHAPTER_A},
+            )
+        }
+        assert len(captions) == 2, captions
 
     def test_two_mentions_of_one_entity_get_different_captions(self, graph):
         """THE DEFECT THAT MOVED THE CAPTION, stated as the property it broke.
