@@ -41,6 +41,31 @@ class TestAnAnthologyIsManyWorlds:
         assert not anthology.scopes_to_chapter("The Golden Vault")
         assert anthology.scopes_to_chapter("Guard")
 
+    def test_the_allowlist_names_a_thing_not_a_spelling(self):
+        """The bug this had, and it did the opposite of its job.
+
+        Written exact, `The Golden Vault` made only the entity spelled that way
+        global and left every `Golden Vault` to be scoped per chapter. The one
+        line meant to keep the organisation whole shattered it into thirteen,
+        one per adventure, beside a fourteenth holding the mentions that
+        happened to use the article.
+        """
+        anthology = BookScheme(
+            prefix="kftgv", anthology=True, global_names=frozenset({"golden vault"})
+        )
+        for spelling in ("The Golden Vault", "the Golden Vault", "Golden Vault"):
+            assert not anthology.scopes_to_chapter(spelling), spelling
+
+    def test_it_still_refuses_a_different_thing(self):
+        """`the vault` is Vidorant's vault in one adventure and a keyed room in
+        another. Article-stripping must not turn the allowlist into a prefix
+        match."""
+        anthology = BookScheme(
+            prefix="kftgv", anthology=True, global_names=frozenset({"golden vault"})
+        )
+        assert anthology.scopes_to_chapter("the vault")
+        assert anthology.scopes_to_chapter("Vault")
+
     def test_the_allowlist_ignores_case(self):
         """The book heads `The Golden Vault` and writes it lowercase
         mid-sentence; a hand-authored list cannot chase that."""

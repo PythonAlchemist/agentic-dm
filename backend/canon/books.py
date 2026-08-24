@@ -66,14 +66,37 @@ class BookScheme:
     #: `plan_write` falls back to filtering by name shape.
     gazetteer: str = ""
 
+    def __post_init__(self) -> None:
+        """Normalise the allowlist HERE, so no caller has to remember to.
+
+        `load` did it and a directly-constructed scheme did not, which meant a
+        test could pass `the golden vault` and get a set that `is_global` could
+        never match -- the invariant living in one of two construction paths.
+        It belongs on the type.
+        """
+        from backend.canon.duplicates import normalize
+
+        object.__setattr__(
+            self, "global_names", frozenset(normalize(n) for n in self.global_names)
+        )
+
     def is_global(self, name: str) -> bool:
         """Is this one of the few names an anthology shares?
 
-        Case-folded, because the allowlist is hand-authored and the book is
-        not consistent -- it heads `The Golden Vault` and writes `the golden
-        vault` mid-sentence.
+        Case-folded AND article-stripped, the same normalisation
+        `duplicates.normalize` uses, because an allowlist that matched a
+        SPELLING did the opposite of its job. Written exact, `The Golden Vault`
+        made the entity spelled that way global and left every `Golden Vault`
+        to be scoped per chapter -- so the one line meant to keep the
+        organisation whole shattered it into thirteen, one per adventure, while
+        a fourteenth held the 35 mentions that happened to use the article.
+
+        An allowlist names a THING. Anything a reader would spell it as has to
+        match, or the entry is a trap.
         """
-        return name.strip().casefold() in self.global_names
+        from backend.canon.duplicates import normalize
+
+        return normalize(name) in self.global_names
 
     def scopes_to_chapter(self, name: str) -> bool:
         """Should an UNKEYED entity of this name be scoped to its chapter?
@@ -102,9 +125,7 @@ def load(path: Path) -> BookScheme:
         prefix=raw["prefix"],
         title=raw.get("title", ""),
         anthology=bool(raw.get("anthology", False)),
-        global_names=frozenset(
-            name.strip().casefold() for name in raw.get("global_names", [])
-        ),
+        global_names=frozenset(raw.get("global_names", [])),
         structural_headings=raw.get(
             "structural_headings", "structural-headings.yaml"
         ),
