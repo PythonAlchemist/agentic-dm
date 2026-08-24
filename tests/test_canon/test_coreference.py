@@ -10,6 +10,7 @@ from backend.canon.coreference import (
     AliasGroup,
     blocks,
     owns_something,
+    shares_only_a_surname,
     weak_words,
     merge_overlapping,
     parse,
@@ -272,3 +273,45 @@ class TestAnOwnerIsNotWhatTheyOwn:
         """Splitting must not stop `Gwish's room` grouping with a respelling
         of itself."""
         assert blocks(["Gwish’s Room", "Gwish’s room"]) != []
+
+
+class TestASurnameMeansRelatedNotIdentical:
+    """A campaign has families. Blocking on a shared word assembles them and
+    asked which are the same, the model merged `Sergei von Zarovich` with
+    `Strahd von Zarovich` -- the two brothers whose quarrel is the campaign --
+    along with six Belviews and three Krezkovs."""
+
+    def test_two_given_names_on_one_surname_are_two_people(self):
+        assert shares_only_a_surname("Sergei von Zarovich", "Strahd von Zarovich")
+        assert shares_only_a_surname("Emil Toranescu", "Zuleika Toranescu")
+
+    def test_a_title_does_not_make_a_second_person(self):
+        """`Curator Alda Arkin` and `Alda Arkin` are one woman, and she is the
+        family this pipeline was built to find. Handled by asking whether one
+        name is the other said longer, which needs no list of titles and so
+        cannot be defeated by a title nobody wrote down."""
+        assert not shares_only_a_surname("Curator Alda Arkin", "Alda Arkin")
+        assert not shares_only_a_surname("Mayor Braith Broadfoot", "Braith Broadfoot")
+
+    def test_a_shared_FIRST_word_is_not_a_surname_case(self):
+        assert not shares_only_a_surname(
+            "Varkenbluff Museum of Natural History", "Varkenbluff Museum"
+        )
+
+    def test_it_reads_places_the_same_way(self):
+        """`Old Svalich Road` and `Winding Road` share a kind, not an identity."""
+        assert shares_only_a_surname("Old Svalich Road", "Winding Road")
+
+    def test_a_single_word_name_is_never_a_surname_case(self):
+        assert not shares_only_a_surname("Strahd", "Strahd von Zarovich")
+
+    def test_a_family_is_never_offered_as_one_block(self):
+        family = ["Emil Toranescu", "Zuleika Toranescu", "Arturi Toranescu"]
+        for _, group in blocks(family):
+            assert len(group) < 2 or not any(
+                shares_only_a_surname(a, b) for a in group for b in group if a != b
+            ), group
+
+    def test_two_spellings_of_one_person_still_block_together(self):
+        found = blocks(["Curator Alda Arkin", "Alda Arkin"])
+        assert any(len(g) == 2 for _, g in found), found

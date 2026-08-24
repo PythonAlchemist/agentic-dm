@@ -126,6 +126,39 @@ def owns_something(name: str, word: str) -> bool:
     return word.casefold() in _WORD.findall(before)
 
 
+def shares_only_a_surname(a: str, b: str) -> bool:
+    """Two names ending in the same word but beginning differently.
+
+    A CAMPAIGN HAS FAMILIES, and blocking on a shared word assembles them:
+    `Emil Toranescu` and `Zuleika Toranescu`, six Belviews, `Sergei von
+    Zarovich` and `Strahd von Zarovich`. Asked which of those are the same
+    thing, the model merged all of them -- including the two brothers whose
+    quarrel is the entire campaign.
+
+    A surname means RELATED, not identical, which is the `hallway` failure
+    wearing a proper noun. The given name is the discriminating position, so
+    names that differ there are different people however much else they share.
+
+    `Varkenbluff Museum of Natural History` and `Varkenbluff Museum` begin
+    alike and are untouched; `Old Svalich Road` and `Winding Road` do not, and
+    are correctly kept apart.
+    """
+    first = [w.casefold() for w in _WORD.findall(a)]
+    second = [w.casefold() for w in _WORD.findall(b)]
+    if len(first) < 2 or len(second) < 2:
+        return False
+    if first[-1] != second[-1] or first[0] == second[0]:
+        return False
+    # A TITLE MAKES THE FIRST WORDS DIFFER WITHOUT MAKING TWO PEOPLE.
+    # `Curator Alda Arkin` and `Alda Arkin` are one woman, and she is the
+    # family this whole pipeline was built to find. Where one name is the
+    # other with words in front, it is the same name said longer -- which
+    # needs no list of titles to know, and so cannot be defeated by a title
+    # nobody wrote down.
+    shorter, longer = sorted((first, second), key=len)
+    return longer[-len(shorter):] != shorter
+
+
 def _partition(name: str, kinds: "Mapping[str, frozenset[str]] | None") -> str:
     """`task` or `thing`. Blocks never mix the two.
 
@@ -178,11 +211,31 @@ def blocks(
             # under `raven`.
             side = f"{kind}/owned" if owns_something(name, word) else kind
             by_word.setdefault((word, side), set()).add(name)
-    return sorted(
-        (word if side == "thing" else f"{word}/{side}", tuple(sorted(group)))
-        for (word, side), group in by_word.items()
-        if 2 <= len(group) <= cap
-    )
+    out = []
+    for (word, side), group in by_word.items():
+        # A block whose members merely share a surname is a family, and asking
+        # about it invites the answer it got. Split so each given name is asked
+        # about on its own -- two spellings of ONE person still block together,
+        # because they begin alike.
+        for family in _by_given_name(sorted(group)):
+            if 2 <= len(family) <= cap:
+                out.append(
+                    (word if side == "thing" else f"{word}/{side}", tuple(family))
+                )
+    return sorted(out)
+
+
+def _by_given_name(group: list[str]) -> list[list[str]]:
+    """Split a block so no two members share only a surname."""
+    families: list[list[str]] = []
+    for name in group:
+        for family in families:
+            if not any(shares_only_a_surname(name, other) for other in family):
+                family.append(name)
+                break
+        else:
+            families.append([name])
+    return families
 
 
 @dataclass(frozen=True)
