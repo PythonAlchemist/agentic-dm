@@ -38,6 +38,7 @@ from backend.canon.models import Chapter
 from pathlib import Path
 
 from backend.canon.sections import (
+    KEY_PREFIX,
     LEGACY_SCHEME,
     KeyScheme,
     key_shape,
@@ -519,3 +520,39 @@ def chapters() -> list[tuple[str, str]]:
         (path.stem, path.read_text(encoding="utf-8"))
         for path in sorted(Path("data/ddb/cos").glob("*.md"))
     ]
+
+
+class TestTheKeySeparatorVariesByBook:
+    """Hardcoding the period cost a whole book.
+
+    Curse of Strahd heads `K61a. Empty Cell`; Keys from the Golden Vault heads
+    `V1: Grand Entrance`. Against a period-only pattern, ZERO of that book's
+    43 sections parsed as keyed, so it derived no containment at all -- and
+    containment is the only relationship type this corpus has any DERIVED edges
+    for. An entire book would have been extractor guesswork end to end because
+    of one character.
+    """
+
+    def test_a_period_still_parses(self):
+        assert KEY_PREFIX.match("K61a. Empty Cell").group("key") == "K61a"
+
+    def test_a_colon_parses_too(self):
+        assert KEY_PREFIX.match("V1: Grand Entrance").group("key") == "V1"
+
+    def test_the_name_survives_either_separator(self):
+        assert KEY_PREFIX.match("V12: Storeroom").group("name") == "Storeroom"
+
+    def test_a_key_may_not_swallow_its_own_separator(self):
+        """`[^\\s.:]` on the key, so `V1` is the key and `:` is the boundary
+        rather than `V1:` being a four-character key."""
+        assert KEY_PREFIX.match("V1: Grand Entrance").group("key") == "V1"
+
+    def test_loosening_the_separator_did_not_loosen_what_counts_as_a_key(self):
+        """The shape gate is what refuses a colon false positive, and it has to
+        keep doing so: `Note:` parses HERE and must be refused THERE."""
+        book = KeyScheme(frozenset({"A#"}))
+        assert book.match("V1: Grand Entrance") is not None
+        assert book.match("Note: a thing") is None
+
+    def test_a_heading_with_no_separator_is_never_keyed(self):
+        assert KeyScheme(frozenset({"A#"})).match("Museum Staff") is None

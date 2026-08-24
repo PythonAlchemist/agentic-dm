@@ -32,7 +32,19 @@ logger = logging.getLogger(__name__)
 #: shape of a key is what varies between books, so this parses and `KeyScheme`
 #: decides. It matches `St. Andral's Feast` too, and that is fine -- nothing
 #: consults it without a scheme.
-KEY_PREFIX = re.compile(r"^(?P<key>[^\s.]{1,4})\.\s+(?P<name>\S.*)$")
+#:
+#: THE SEPARATOR VARIES TOO, and hardcoding the period cost a whole book.
+#: Curse of Strahd heads `K61a. Empty Cell`; Keys from the Golden Vault heads
+#: `V1: Grand Entrance`. Against a period-only pattern, ZERO of that book's
+#: forty-three sections parsed as keyed, so it derived no containment at all --
+#: and containment is the only relationship type this corpus has any DERIVED
+#: edges for. An entire book would have been extractor guesswork end to end
+#: because of one character.
+#:
+#: Loosening this cannot loosen what counts as a key: `KeyScheme` still admits
+#: only the shapes the book's own `area XX` cross-references attest, so a
+#: heading like `Note: something` parses here and is refused there.
+KEY_PREFIX = re.compile(r"^(?P<key>[^\s.:]{1,4})[.:]\s+(?P<name>\S.*)$")
 
 #: How the book refers to its own keys. A key exists SO THAT the book can point
 #: at it, which is why this is the evidence a scheme is inferred from.
