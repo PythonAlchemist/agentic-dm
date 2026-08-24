@@ -19,6 +19,7 @@ refuses rather than reaching for DETACH DELETE.
 """
 
 import logging
+import re
 from collections.abc import Container, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
@@ -455,6 +456,10 @@ class FilterReport:
     derived_nodes: int = 0
     # Node drops
     gazetteer_dropped: int = 0
+    #: Dropped by NAME SHAPE, which is the filter a book with no
+    #: gazetteer gets instead. Counted apart because the two reject
+    #: for different reasons and a reader deserves to know which.
+    shape_dropped: int = 0
     # NOT a drop: candidates kept because the BOOK names them -- a keyed area or
     # a heading that survived the structural seed. Counted apart from the plain
     # keeps so the effect of trusting the book over the wiki is readable in the
@@ -492,6 +497,7 @@ class FilterReport:
     written_edges: int = 0
     # Samples, so a reader can see WHAT was dropped and not only how much.
     dropped_gazetteer: list[str] = field(default_factory=list)
+    dropped_shape: list[str] = field(default_factory=list)
     dropped_undecidable_keyed: list[str] = field(default_factory=list)
     dropped_self_loops: list[str] = field(default_factory=list)
     dropped_violations: list[str] = field(default_factory=list)
@@ -511,6 +517,7 @@ class FilterReport:
             "candidate_edges": self.candidate_edges,
             "derived_nodes": self.derived_nodes,
             "gazetteer_dropped": self.gazetteer_dropped,
+            "shape_dropped": self.shape_dropped,
             "book_asserted": self.book_asserted,
             "unnameable": self.unnameable,
             "undecidable_keyed": self.undecidable_keyed,
@@ -631,6 +638,39 @@ class KeyedIndex:
         return "", True
 
 
+#: A candidate that merely POINTS at a keyed area rather than being one.
+#:
+#: The prose says "return to area V7", the extractor reads `area V7` as a thing,
+#: and the graph gets a node beside the real room. Measured on one adventure of
+#: Keys from the Golden Vault: 15 of 139 written nodes, 11%, every one of them a
+#: duplicate of an area the chapter already heads. The bare key is the same
+#: mistake with the word left off -- `V1` and `area V1` and `V1: Grand Entrance`
+#: were three nodes for one room.
+#:
+#: The vocabulary is `sections._AREA_REFERENCE`'s, which is how `KeyScheme`
+#: infers a book's key shapes in the first place: a key exists SO THAT the book
+#: can point at it. This is the same fact read from the other end.
+_KEY_REFERENCE = re.compile(r"^(?:areas?|rooms?)\s+(?P<key>\S{1,4})$", re.IGNORECASE)
+
+
+def key_reference(name: str, keyed_headings: "Sequence[tuple[str, str]]") -> str:
+    """The key a candidate points at, or `""` if it names something itself.
+
+    Resolves `area V7`, `Area V7` and a bare `V7` alike, and ONLY against keys
+    this chapter actually heads -- so `area 51` in a book with no area 51 stays
+    whatever the extractor made of it rather than becoming a room that does not
+    exist. A name is never invented here; one is either recognised or left
+    alone.
+    """
+    stripped = name.strip()
+    match = _KEY_REFERENCE.match(stripped)
+    candidate = (match.group("key") if match else stripped).casefold()
+    for key, _ in keyed_headings:
+        if key.casefold() == candidate:
+            return key
+    return ""
+
+
 def keyed_index(
     nodes: list[CandidateNode], scheme: KeyScheme = LEGACY_SCHEME
 ) -> KeyedIndex:
@@ -686,17 +726,24 @@ def _endpoint_ids(
     return ids_by_name.get(_fold(name), set())
 
 
-def _as_write_node(node: CandidateNode, node_id: str, chapter_slug: str) -> WriteNode:
+def _as_write_node(
+    node: CandidateNode, node_id: str, chapter_slug: str, name: str = ""
+) -> WriteNode:
     """A candidate with its id minted and the caller's chapter slug stamped.
 
     The candidate's `description` and its section provenance are deliberately
     NOT carried across -- see `WriteNode.properties`. They stay in the run
     artifact, which is the record of what the extractor said; the graph records
     where the entity actually appears instead.
+
+    `name` overrides the candidate's own, and the ONE caller that passes it is
+    the key-reference resolver: a candidate reading `area V3` identifies the
+    room correctly and names it after the pointer rather than the thing. The
+    default keeps every other caller saying exactly what it said before.
     """
     return WriteNode(
         id=node_id,
-        name=node.name,
+        name=name or node.name,
         entity_types=(node.entity_type,),
         chapter_slug=chapter_slug,
         votes=node.votes,
@@ -897,7 +944,7 @@ def restrict_to_accepted(
 def plan_write(
     nodes: list[CandidateNode],
     edges: list[CandidateEdge],
-    gazetteer: Gazetteer,
+    gazetteer: Gazetteer | None,
     chapter_slug: str,
     *,
     chapter_place: str | None = None,
@@ -1023,11 +1070,33 @@ def plan_write(
             report.book_asserted += 1
             kept_nodes.append(node)
             continue
-        if gazetteer.is_known(node.name):
+        if gazetteer is not None:
+            if gazetteer.is_known(node.name):
+                kept_nodes.append(node)
+                continue
+            report.gazetteer_dropped += 1
+            report.dropped_gazetteer.append(f"{node.entity_type} {node.name}")
+            continue
+        # NO GAZETTEER FOR THIS BOOK, so shape decides. Curse of Strahd has a
+        # 677-entry wiki index; Keys from the Golden Vault has none -- its wiki
+        # page carries no `==Index==` at all, and only one of its thirteen
+        # adventures has a subpage that does. Gating on a list that does not
+        # exist would drop the whole book, including its quest-givers.
+        #
+        # What is left is the book's own assertions above, plus this: a name
+        # with no capital letter in it is a common noun, not a thing the book
+        # named. It removes `attic`, `ballroom` and `guards` and keeps
+        # `Varkenbluff Museum`.
+        #
+        # DELIBERATELY WEAKER THAN A GAZETTEER, and the graph is noisier for
+        # it. What makes that survivable is that `retrieval.anchorable_forms`
+        # already refuses a common-noun ANCHOR per entity, so junk that reaches
+        # the graph is largely inert: it is a node nothing resolves through.
+        if any(word[:1].isupper() for word in node.name.split()):
             kept_nodes.append(node)
             continue
-        report.gazetteer_dropped += 1
-        report.dropped_gazetteer.append(f"{node.entity_type} {node.name}")
+        report.shape_dropped += 1
+        report.dropped_shape.append(f"{node.entity_type} {node.name}")
 
     # Ids, and the indexes the edges resolve through.
     by_id: dict[str, WriteNode] = {}
@@ -1055,9 +1124,24 @@ def plan_write(
         # stub's overland sections crowded the real tower out of the budget.
         # Left unkeyed, the candidate falls through to the global id that
         # already exists, which is the one entity there should be.
-        if node.name in cross_references:
-            node_key, undecidable = "", False
+        # A candidate that merely POINTS at a keyed area is that area, not a
+        # second one beside it. `area V7` and a bare `V7` both resolve to the
+        # room the chapter heads, so the three nodes one room used to get --
+        # `V1`, `area V1` and `V1: Grand Entrance` -- are one.
+        #
+        # The NAME is taken from the heading rather than from the candidate,
+        # because `area v1` is what the prose called it and `Grand Entrance` is
+        # what the book named it.
+        pointed_at = key_reference(node.name, keyed_headings)
+        if pointed_at:
+            node_name = next(
+                name for key, name in keyed_headings if key == pointed_at
+            )
+            node_key, undecidable = pointed_at, False
+        elif node.name in cross_references:
+            node_name, node_key, undecidable = node.name, "", False
         else:
+            node_name = node.name
             node_key, undecidable = keyed.key_for(node.name, node.section_index)
         if undecidable:
             # A name two sections key, mentioned from neither. Choosing one
@@ -1073,7 +1157,7 @@ def plan_write(
             # A name that slugifies to nothing cannot be given an id at all.
             report.unnameable += 1
             continue
-        node_id = mint_id(chapter_slug, node.name, node_key, scheme=book)
+        node_id = mint_id(chapter_slug, node_name, node_key, scheme=book)
         if node_key:
             keyed_ids.add(node_id)
             key_by_id[node_id] = node_key
@@ -1083,6 +1167,11 @@ def plan_write(
         # the node, and an edge derived from a section must be able to reach the
         # room that section keys.
         ids_by_name.setdefault(_fold(node.name), set()).add(node_id)
+        # Indexed under the BOOK's spelling as well when the two differ, so an
+        # edge written against `area V1` and one written against `Grand
+        # Entrance` both reach the room.
+        if node_name != node.name:
+            ids_by_name.setdefault(_fold(node_name), set()).add(node_id)
         if keyed.keys_own_name(node.name, node.section_index):
             ids_by_section.setdefault(node.section_index, set()).add(node_id)
 
@@ -1097,7 +1186,15 @@ def plan_write(
         # carrying the extractor's `burgomaster's mansion` instead of the book's
         # `E4. Burgomaster's Mansion` finds fewer of its own appearances.
         rank = 0
-        if keyed.keys_own_name(node.name, node.section_index):
+        if pointed_at:
+            # `node_name` IS the book's own heading for this room, so it wins
+            # the spelling outright. Without this the candidate's `area V3`
+            # took the name of a node correctly identified as
+            # `v3-ancient-plants-exhibit` -- the right room wearing the prose's
+            # pointer as its label, which the mention scan then goes looking
+            # for in every section of the book.
+            rank = 2
+        elif keyed.keys_own_name(node.name, node.section_index):
             rank = 2 if keyed.spells_it_as_the_book_does(node.name, node.section_index) else 1
         # The TYPE unions across every candidate for this id, whichever one wins
         # the provenance tiebreak. The tiebreak is about which section to cite;
@@ -1108,10 +1205,10 @@ def plan_write(
         if node_id in by_id:
             report.duplicate_nodes += 1
             if rank > provenance_rank[node_id]:
-                by_id[node_id] = _as_write_node(node, node_id, chapter_slug)
+                by_id[node_id] = _as_write_node(node, node_id, chapter_slug, node_name)
                 provenance_rank[node_id] = rank
             continue
-        by_id[node_id] = _as_write_node(node, node_id, chapter_slug)
+        by_id[node_id] = _as_write_node(node, node_id, chapter_slug, node_name)
         provenance_rank[node_id] = rank
 
     # The chapter's own place, which `derive_structure` has already used as the

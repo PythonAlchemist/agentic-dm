@@ -417,6 +417,10 @@ def format_report(report: FilterReport) -> str:
         "       candidate never names it, so it is written or the hierarchy is severed)",
         "  node drops:",
         f"    gazetteer (not a known name, not a keyed place): {report.gazetteer_dropped}",
+        # Printed beside it rather than folded into it: a book with no
+        # name index is filtered by SHAPE, and a reader has to be able to
+        # see which of the two rejected what.
+        f"    shape (no capital letter -- a common noun):       {report.shape_dropped}",
         f"    unnameable (name slugifies to nothing):          {report.unnameable}",
         f"    undecidable keyed place (two keys, neither its):  {report.undecidable_keyed}",
         f"    duplicate (same id as an earlier candidate):     {report.duplicate_nodes}",
@@ -591,7 +595,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="book definition YAML: id prefix, title, and whether an unkeyed "
              "name is global to the book or to its chapter",
     )
-    parser.add_argument("--gazetteer", type=Path, default=DEFAULT_GAZETTEER)
+    parser.add_argument(
+        "--gazetteer", type=Path, default=None,
+        help="name index. Defaults to whatever the --book names, which "
+             "for a book with none means filtering by name shape instead.",
+    )
     parser.add_argument(
         "--location-subtypes",
         type=Path,
@@ -664,8 +672,16 @@ def main() -> None:
         )
 
     book = load_book(args.book)
-    gazetteer = load_gazetteer(args.gazetteer)
-    print(f"  gazetteer: {len(gazetteer)} entries from {args.gazetteer}")
+    # None is a real answer, not a missing one: a book with no name index is
+    # filtered by shape in `plan_write`. Gating on a list that does not exist
+    # would drop the whole book.
+    gazetteer_path = args.gazetteer or (Path(book.gazetteer) if book.gazetteer else None)
+    gazetteer = load_gazetteer(gazetteer_path) if gazetteer_path else None
+    print(
+        f"  gazetteer: {len(gazetteer)} entries from {gazetteer_path}"
+        if gazetteer_path
+        else "  gazetteer: none for this book -- filtering candidates by name shape"
+    )
 
     subtypes = load_location_subtypes(args.location_subtypes)
     print(f"  location subtypes: {len(subtypes)} authored from {args.location_subtypes}")

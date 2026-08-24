@@ -60,6 +60,11 @@ class BookScheme:
     #: anthology heads `Fortunes of Ravenloft`, so one shared seed would be
     #: each book carrying the other's exceptions.
     structural_headings: str = "structural-headings.yaml"
+    #: Path to this book's name index, or empty when it has none. Curse of
+    #: Strahd has a 677-entry wiki index; the heist anthology's wiki page
+    #: carries no `==Index==` at all, so the field is empty there and
+    #: `plan_write` falls back to filtering by name shape.
+    gazetteer: str = ""
 
     def is_global(self, name: str) -> bool:
         """Is this one of the few names an anthology shares?
@@ -103,4 +108,5 @@ def load(path: Path) -> BookScheme:
         structural_headings=raw.get(
             "structural_headings", "structural-headings.yaml"
         ),
+        gazetteer=raw.get("gazetteer", ""),
     )

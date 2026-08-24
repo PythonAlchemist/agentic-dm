@@ -53,8 +53,27 @@ class TestParser:
     def test_defaults_point_at_the_paths_the_verifier_uses(self):
         args = build_parser().parse_args(["ch3.json", "--chapter", SLUG])
         assert args.runs_dir == DEFAULT_RUNS_DIR
-        assert args.gazetteer == DEFAULT_GAZETTEER
         assert str(DEFAULT_RUNS_DIR) == "data/canon/runs"
+
+    def test_the_gazetteer_defaults_to_whatever_the_book_names(self):
+        """`None` here is not "unset", it is "ask the book".
+
+        The flag used to default to the Curse of Strahd wiki index, which made
+        that one book's name list the default for every book. Keys from the
+        Golden Vault has no index at all -- its wiki page carries no
+        `==Index==` -- and gating it on Barovia's names dropped 366 candidates
+        including the adventure's own quest-giver.
+        """
+        args = build_parser().parse_args(["ch3.json", "--chapter", SLUG])
+        assert args.gazetteer is None
+
+    def test_the_default_book_is_still_curse_of_strahd(self):
+        """Which is where the old default came from, now said once and in the
+        book's own file rather than as a constant beside an unrelated flag."""
+        from backend.canon.books import load
+
+        args = build_parser().parse_args(["ch3.json", "--chapter", SLUG])
+        assert load(args.book).gazetteer == "data/gazetteer/curse-of-strahd.json"
 
 
 class TestParseArtifact:

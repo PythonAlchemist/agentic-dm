@@ -7,3 +7,6 @@
 prefix: cos
 title: Curse of Strahd
 anthology: false
+
+# The Forgotten Realms Wiki index for this book: 677 names.
+gazetteer: data/gazetteer/curse-of-strahd.json
