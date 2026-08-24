@@ -69,7 +69,8 @@ from dataclasses import dataclass
 from backend.canon.models import Section
 from backend.canon.sections import LEGACY_SCHEME, KeyScheme
 from backend.canon.structure import place_of_section
-from backend.canon.writer import BOOK, CANON_PLANE, mint_id
+from backend.canon.books import LEGACY as LEGACY_BOOK, BookScheme
+from backend.canon.writer import CANON_PLANE, mint_id
 
 #: The right single quotation mark the book sets its possessives with, and the
 #: ASCII apostrophe the extractor emits instead. The WHOLE of the folding, and a
@@ -134,19 +135,21 @@ def strip_soft_hyphens(name: str) -> str:
     return name.replace(SOFT_HYPHEN, "")
 
 
-def section_id(chapter_slug: str, index: int) -> str:
+def section_id(
+    chapter_slug: str, index: int, *, scheme: BookScheme = LEGACY_BOOK
+) -> str:
     """`cos:<chapter>#<index>`.
 
     Keyed on the INDEX rather than the heading, because `(chapter, heading)` is
     not unique -- chapter 4 has four sections headed "Treasure" and appendix D
     three headed "Actions" -- and a heading-keyed id would silently merge them.
 
-    Prefixed from `BOOK` rather than from `plan_spine`'s `book_slug`, for the
-    same reason `mint_id` is: it is the prefix every entity id in this graph
-    already carries, and one id scheme with two sources of the book is how two
-    halves of a graph end up disagreeing about which book they are.
+    Prefixed from the SCHEME rather than from `plan_spine`'s `book_slug`, for
+    the same reason `mint_id` is: it is the prefix every entity id in this
+    graph already carries, and one id scheme with two sources of the book is
+    how two halves of a graph end up disagreeing about which book they are.
     """
-    return f"{BOOK}:{chapter_slug}#{index}"
+    return f"{scheme.prefix}:{chapter_slug}#{index}"
 
 
 def mention_id(entity_id: str, section_id_: str) -> str:
@@ -408,6 +411,8 @@ def plan_spine(
     sections: Sequence[Section],
     location_ids: Container[str],
     scheme: KeyScheme = LEGACY_SCHEME,
+    #: See `plan_write`: which book, not how it numbers its areas.
+    book: BookScheme = LEGACY_BOOK,
 ) -> ChapterSpine:
     """The spine for one chapter, and the places its sections describe.
 
@@ -425,7 +430,7 @@ def plan_spine(
     """
     written = tuple(
         WriteSection(
-            id=section_id(chapter_slug, section.index),
+            id=section_id(chapter_slug, section.index, scheme=book),
             chapter_slug=chapter_slug,
             heading=section.heading,
             index=section.index,
@@ -442,7 +447,7 @@ def plan_spine(
         place = place_of_section(plain, scheme)
         if not place:
             continue
-        place_id = mint_id(chapter_slug, place, section.key)
+        place_id = mint_id(chapter_slug, place, section.key, scheme=book)
         if place_id in location_ids:
             describes.append((section.id, place_id))
 

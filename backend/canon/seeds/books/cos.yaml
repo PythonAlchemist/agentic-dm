@@ -1,0 +1,9 @@
+# Curse of Strahd: one continuous campaign, so an unkeyed name is one thing
+# wherever the book says it. Madam Eva is one woman in the introduction and in
+# chapter 3, and scoping her per chapter is a defect this project already had
+# and already fixed.
+#
+# Slugs and a rule -- no book text -- so this file is committed.
+prefix: cos
+title: Curse of Strahd
+anthology: false

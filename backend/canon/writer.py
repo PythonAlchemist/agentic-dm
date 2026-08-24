@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from neo4j.exceptions import Neo4jError
 
 from backend.canon.assembler import slugify
+from backend.canon.books import LEGACY as LEGACY_BOOK, BookScheme
 from backend.canon.constraints import check_edges, exclusive_conflicts
 from backend.canon.gazetteer import Gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode
@@ -82,7 +83,10 @@ CONFLICTED = "conflicted"
 
 #: Every id is prefixed with the book. Entities merge across the chapters of one
 #: book -- see `mint_id` -- but never across books.
-BOOK = "cos"
+#: The book every id carried before books were a parameter. Kept as a name so
+#: nothing importing it breaks; `books.BookScheme` is what carries this now,
+#: and it carries the SCOPING RULE with it, which a bare prefix cannot.
+BOOK = LEGACY_BOOK.prefix
 
 #: The labels a canon node may carry beside `:Entity`, derived from the ontology
 #: rather than restated. A label CANNOT be parameterized in Cypher, so it is
@@ -153,7 +157,9 @@ class CampaignDataAttached(Exception):
         self.relationships = relationships
 
 
-def mint_id(chapter_slug: str, name: str, key: str = "") -> str:
+def mint_id(
+    chapter_slug: str, name: str, key: str = "", *, scheme: BookScheme = LEGACY_BOOK
+) -> str:
     """`cos:<name-slug>`, or `cos:<chapter-slug>:<key>-<name-slug>` when keyed.
 
     UNKEYED ENTITIES ARE GLOBAL TO THE BOOK. Madam Eva is one woman whether the
@@ -191,8 +197,20 @@ def mint_id(chapter_slug: str, name: str, key: str = "") -> str:
     """
     tail = "-".join(part for part in (key.strip().lower(), slugify(name)) if part)
     if key.strip():
-        return f"{BOOK}:{chapter_slug}:{tail}"
-    return f"{BOOK}:{tail}"
+        return f"{scheme.prefix}:{chapter_slug}:{tail}"
+    # AN ANTHOLOGY SCOPES ITS UNKEYED NAMES TOO. Thirteen unconnected heists
+    # each have a guard and a vault, and the global rule above would fuse them
+    # -- the same defect Madam Eva's per-chapter ids were, running the other
+    # way. `books.BookScheme` holds which kind of book this is, and its
+    # allowlist is what keeps the genuinely book-wide names global.
+    #
+    # The result wears the same two-colon shape as a keyed id, which
+    # `duplicates.is_keyed` reads as "distinct, never merge" -- and that is the
+    # right answer for it as well, for the same reason. Noted because it is a
+    # collision that happens to be correct rather than one nobody spotted.
+    if scheme.scopes_to_chapter(name):
+        return f"{scheme.prefix}:{chapter_slug}:{tail}"
+    return f"{scheme.prefix}:{tail}"
 
 
 @dataclass(frozen=True)
@@ -889,6 +907,10 @@ def plan_write(
     book_names: Container[str] = frozenset(),
     cross_references: Container[str] = frozenset(),
     scheme: KeyScheme = LEGACY_SCHEME,
+    #: WHICH BOOK, and how far an unkeyed name reaches inside it. Distinct from
+    #: `scheme`, which is how the book NUMBERS its areas -- one is about the
+    #: prefix and the scoping rule, the other about `K61a`.
+    book: BookScheme = LEGACY_BOOK,
 ) -> tuple[list[WriteNode], list[WriteEdge], FilterReport]:
     """Decide exactly what to write, and count every candidate that is dropped.
 
@@ -1051,7 +1073,7 @@ def plan_write(
             # A name that slugifies to nothing cannot be given an id at all.
             report.unnameable += 1
             continue
-        node_id = mint_id(chapter_slug, node.name, node_key)
+        node_id = mint_id(chapter_slug, node.name, node_key, scheme=book)
         if node_key:
             keyed_ids.add(node_id)
             key_by_id[node_id] = node_key
@@ -1101,7 +1123,7 @@ def plan_write(
     # Minting a node here for a chapter that keys nothing would put a place in
     # the graph that no edge references and the book never established.
     if chapter_place and keyed.place_slugs:
-        place_id = mint_id(chapter_slug, chapter_place)
+        place_id = mint_id(chapter_slug, chapter_place, scheme=book)
         keyed_ids.add(place_id)
         # No key, so no rung from `key_by_id`. A chapter is about a discrete
         # thing -- a village, a castle, an abbey -- and SITE is the rung for the
@@ -1139,7 +1161,7 @@ def plan_write(
     # A candidate that already minted the same id keeps its node -- it carries a
     # real section heading and a vote count, and this does not.
     for key, place_name in keyed_headings:
-        room_id = mint_id(chapter_slug, place_name, key)
+        room_id = mint_id(chapter_slug, place_name, key, scheme=book)
         types_seen.setdefault(room_id, []).append(LOCATION_LABEL)
         ids_by_name.setdefault(_fold(place_name), set()).add(room_id)
         if room_id not in by_id:

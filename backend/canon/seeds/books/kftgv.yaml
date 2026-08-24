@@ -1,0 +1,17 @@
+# Keys from the Golden Vault: thirteen heists that share no continuity, so an
+# unkeyed name belongs to the adventure that says it. Measured on the harvest,
+# thirteen adventures each head `Conclusion` and `Adventure Background`, seven
+# head `General Features`, five head `Doors`; a guard in heist one and a guard
+# in heist seven are two people.
+prefix: kftgv
+title: Keys from the Golden Vault
+anthology: true
+
+# THE EXCEPTIONS, hand-authored, because nothing in the text distinguishes
+# "recurs because it is one thing" from "recurs because the word is common".
+#
+# The Golden Vault is the organisation that commissions every heist -- named 88
+# times across the 14 harvested chapters and the only thing connecting them.
+# Without this line it would be thirteen separate organisations.
+global_names:
+  - The Golden Vault

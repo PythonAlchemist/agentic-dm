@@ -25,6 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.aliases import plan_aliases
+from backend.canon.books import BookScheme, load as load_book
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode, Chapter, Section
 from backend.canon.sections import split_chapter
@@ -59,7 +60,12 @@ DEFAULT_RUNS_DIR = Path("data/canon/runs")
 
 #: The book the spine hangs off. One book per corpus directory today; the slug
 #: matches `writer.BOOK`, which is what every entity id is already prefixed with.
-BOOK_TITLE = "Curse of Strahd"
+#: The book written when `--book` is not given. A path rather than two string
+#: constants, because `BOOK` and `BOOK_TITLE` were two hardcoded facts about
+#: one book with nothing keeping them agreeing -- and because the scoping rule
+#: has to travel with them. See `backend/canon/books.py`.
+BOOKS_DIR = Path(__file__).parent.parent / "canon" / "seeds" / "books"
+DEFAULT_BOOK = BOOKS_DIR / "cos.yaml"
 
 #: The splitter the SPINE uses, which is not necessarily the one the EXTRACTION
 #: used. `depth` reads the document's own heading levels and knows nothing about
@@ -293,6 +299,7 @@ def build_spine(
     chapter_index: int,
     sections: list[Section],
     nodes: list[WriteNode],
+    book: BookScheme,
 ) -> ChapterSpine:
     """The spine for this chapter, with `DESCRIBES` resolved against the plan.
 
@@ -302,13 +309,14 @@ def build_spine(
     which the extractor typed an ITEM -- correctly describes nothing.
     """
     return plan_spine(
-        book_slug=BOOK,
-        book_title=BOOK_TITLE,
+        book_slug=book.prefix,
+        book_title=book.title,
         chapter_slug=chapter_slug,
         chapter_title=chapter.title,
         chapter_index=chapter_index,
         sections=sections,
         location_ids={n.id for n in nodes if LOCATION_LABEL in n.labels},
+        book=book,
     )
 
 
@@ -562,6 +570,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Delete this chapter's canon nodes and edges first, in the same transaction",
     )
+    parser.add_argument(
+        "--book",
+        type=Path,
+        default=DEFAULT_BOOK,
+        help="book definition YAML: id prefix, title, and whether an unkeyed "
+             "name is global to the book or to its chapter",
+    )
     parser.add_argument("--gazetteer", type=Path, default=DEFAULT_GAZETTEER)
     parser.add_argument(
         "--location-subtypes",
@@ -634,6 +649,7 @@ def main() -> None:
             f"(run.failed={failed!r}) -- the verifier's check 6 will FAIL for this chapter !!"
         )
 
+    book = load_book(args.book)
     gazetteer = load_gazetteer(args.gazetteer)
     print(f"  gazetteer: {len(gazetteer)} entries from {args.gazetteer}")
 
@@ -666,6 +682,7 @@ def main() -> None:
         book_names=book_names_of(args.corpus),
         cross_references=chapter_places_of(args.corpus),
         scheme=scheme_for(args.chapter, args.corpus),
+        book=book,
     )
     print(format_report(report))
 
@@ -692,6 +709,7 @@ def main() -> None:
         chapter_index=chapter_index,
         sections=sections,
         nodes=write_nodes,
+        book=book,
     )
     print(
         f"  spine: chapter {chapter_index} of the {args.corpus} corpus, "
