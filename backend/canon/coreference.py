@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 #: Words that make two names look alike without being evidence of anything.
@@ -94,8 +94,32 @@ def weak_words(names: Sequence[str], *, common: int = 6) -> frozenset[str]:
     )
 
 
+#: A name whose entity is one of these is a TASK, and a task is never the thing
+#: it is about. `Deliver the key to Varrin Axebreaker` and `Varrin` share two
+#: words and are a job and a person.
+_TASK_LABELS = frozenset({"QUEST"})
+
+
+def _partition(name: str, kinds: "Mapping[str, frozenset[str]] | None") -> str:
+    """`task` or `thing`. Blocks never mix the two.
+
+    AT BLOCKING, not at validation, for the reason `weak_words` is: a question
+    that offers a quest beside its object invites the answer it gets, and the
+    prompt forbidding it did not stop the model doing it fourteen times. Asked
+    only about quests, the same model groups two spellings of one quest, which
+    is right and useful.
+    """
+    if not kinds:
+        return "thing"
+    return "task" if kinds.get(name, frozenset()) & _TASK_LABELS else "thing"
+
+
 def blocks(
-    names: Iterable[str], *, cap: int = 40, common: int = 6
+    names: Iterable[str],
+    *,
+    cap: int = 40,
+    common: int = 6,
+    kinds: "Mapping[str, frozenset[str]] | None" = None,
 ) -> list[tuple[str, tuple[str, ...]]]:
     """Names that COULD be one thing, grouped by a word they share.
 
@@ -116,15 +140,16 @@ def blocks(
     """
     names = list(names)
     weak = weak_words(names, common=common)
-    by_word: dict[str, set[str]] = {}
+    by_word: dict[tuple[str, str], set[str]] = {}
     for name in names:
+        side = _partition(name, kinds)
         for word in significant_words(name):
             if word in weak:
                 continue
-            by_word.setdefault(word, set()).add(name)
+            by_word.setdefault((word, side), set()).add(name)
     return sorted(
-        (word, tuple(sorted(group)))
-        for word, group in by_word.items()
+        (word if side == "thing" else f"{word}/{side}", tuple(sorted(group)))
+        for (word, side), group in by_word.items()
         if 2 <= len(group) <= cap
     )
 
@@ -210,7 +235,9 @@ def parse(payload: str, offered: Sequence[str]) -> tuple[list[AliasGroup], list[
     return groups, refused
 
 
-def merge_overlapping(groups: Iterable[AliasGroup]) -> list[AliasGroup]:
+def merge_overlapping(
+    groups: Iterable[AliasGroup], *, cap: int = 6
+) -> tuple[list[AliasGroup], list[str]]:
     """Fold groups that share a name, since a name is asked about many times.
 
     `Varkenbluff Museum` is in the `varkenbluff` block and the `museum` block,
@@ -239,14 +266,26 @@ def merge_overlapping(groups: Iterable[AliasGroup]) -> list[AliasGroup]:
     for name in parent:
         families.setdefault(find(name), set()).add(name)
 
-    return sorted(
-        (
-            AliasGroup(
-                canonical=max(sorted(names), key=len),
-                names=tuple(sorted(names)),
+    kept, runaway = [], []
+    for names in families.values():
+        if len(names) < 2:
+            continue
+        # A RUNAWAY IS NOT AN ANSWER. Folding is transitive, so one wrong
+        # grouping welds two families together and the union keeps growing:
+        # a single bad link chained Little Lockford, Brimstone Hold, Vrakir's
+        # Chamber and the Ashen Creatures into one 28-name "entity". A real
+        # alias family is two to five names. Refused whole and reported,
+        # because trimming it would mean guessing which of the links was the
+        # bad one.
+        if len(names) > cap:
+            runaway.append(
+                f"{len(names)} names folded into one family, refused: "
+                f"{sorted(names)[:4]}..."
             )
-            for names in families.values()
-            if len(names) > 1
-        ),
-        key=lambda g: g.canonical,
-    )
+            continue
+        kept.append(
+            AliasGroup(
+                canonical=max(sorted(names), key=len), names=tuple(sorted(names))
+            )
+        )
+    return sorted(kept, key=lambda g: g.canonical), runaway

@@ -137,13 +137,14 @@ class TestFoldingWhatCameBackInPieces:
     arrive as two partial answers."""
 
     def test_groups_sharing_a_name_become_one(self):
-        folded = merge_overlapping([
+        folded, runaway = merge_overlapping([
             AliasGroup("Varkenbluff Museum", ("Varkenbluff Museum", "Museum")),
             AliasGroup(
                 "Varkenbluff Museum of Natural History",
                 ("Varkenbluff Museum of Natural History", "Varkenbluff Museum"),
             ),
         ])
+        assert runaway == []
         assert len(folded) == 1
         assert set(folded[0].names) == {
             "Museum", "Varkenbluff Museum", "Varkenbluff Museum of Natural History",
@@ -151,25 +152,86 @@ class TestFoldingWhatCameBackInPieces:
 
     def test_it_is_transitive(self):
         """A groups with B, B with C, so all three are one thing."""
-        folded = merge_overlapping([
+        folded, _ = merge_overlapping([
             AliasGroup("B", ("A", "B")), AliasGroup("C", ("B", "C")),
         ])
         assert len(folded) == 1
         assert set(folded[0].names) == {"A", "B", "C"}
 
     def test_unrelated_families_stay_apart(self):
-        folded = merge_overlapping([
+        folded, _ = merge_overlapping([
             AliasGroup("Alda Arkin", ("Alda Arkin", "Alda")),
             AliasGroup("Master Key", ("Master Key", "Key")),
         ])
         assert len(folded) == 2
 
     def test_the_fullest_name_wins_when_two_answers_disagree(self):
-        folded = merge_overlapping([
+        folded, _ = merge_overlapping([
             AliasGroup("Museum", ("Museum", "Varkenbluff Museum")),
             AliasGroup("Varkenbluff Museum", ("Varkenbluff Museum", "Museum")),
         ])
         assert folded[0].canonical == "Varkenbluff Museum"
 
     def test_nothing_in_means_nothing_out(self):
-        assert merge_overlapping([]) == []
+        assert merge_overlapping([]) == ([], [])
+
+
+class TestARunawayFamilyIsNotAnAnswer:
+    """Folding is transitive, so one wrong grouping welds two families together
+    and the union keeps growing. A single bad link chained Little Lockford,
+    Brimstone Hold, Vrakir's Chamber and the Ashen Creatures into one 28-name
+    "entity"."""
+
+    @staticmethod
+    def _chain(n: int) -> list[AliasGroup]:
+        return [AliasGroup(f"n{i+1}", (f"n{i}", f"n{i+1}")) for i in range(n)]
+
+    def test_a_family_over_the_cap_is_refused(self):
+        folded, runaway = merge_overlapping(self._chain(10), cap=6)
+        assert folded == []
+        assert "folded into one family" in runaway[0]
+
+    def test_it_is_refused_WHOLE_rather_than_trimmed(self):
+        """Trimming would mean guessing which link was the bad one."""
+        folded, _ = merge_overlapping(self._chain(10), cap=6)
+        assert folded == []
+
+    def test_a_family_within_the_cap_is_kept(self):
+        folded, runaway = merge_overlapping(self._chain(3), cap=6)
+        assert len(folded) == 1
+        assert runaway == []
+
+    def test_the_refusal_names_what_it_dropped(self):
+        """A grouping nobody was told about is indistinguishable from one never
+        proposed."""
+        _, runaway = merge_overlapping(self._chain(10), cap=6)
+        assert "n0" in runaway[0]
+
+
+class TestATaskIsNeverTheThingItIsAbout:
+    KINDS = {
+        "Deliver the key to Varrin Axebreaker": frozenset({"QUEST"}),
+        "Varrin Axebreaker": frozenset({"NPC"}),
+        "Varrin": frozenset({"NPC"}),
+    }
+
+    def test_a_quest_is_not_offered_beside_its_object(self):
+        """The prompt forbade this and the model did it fourteen times. A
+        question that offers them together invites the answer it gets."""
+        found = blocks(list(self.KINDS), kinds=self.KINDS)
+        for _, group in found:
+            has_task = any(self.KINDS[n] == frozenset({"QUEST"}) for n in group)
+            has_thing = any(self.KINDS[n] != frozenset({"QUEST"}) for n in group)
+            assert not (has_task and has_thing), group
+
+    def test_two_spellings_of_one_quest_are_still_asked_about(self):
+        """Splitting must not stop quests grouping with each other."""
+        kinds = {
+            "Retrieve the key": frozenset({"QUEST"}),
+            "Retrieve the key from Prisoner 13": frozenset({"QUEST"}),
+        }
+        assert blocks(list(kinds), kinds=kinds) != []
+
+    def test_without_types_nothing_is_partitioned(self):
+        """The rule is opt-in: a caller with no types gets the old behaviour."""
+        assert blocks(list(self.KINDS)) == blocks(list(self.KINDS), kinds=None)

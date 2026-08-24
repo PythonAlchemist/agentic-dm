@@ -44,7 +44,7 @@ CONCURRENCY = 8
 
 _NAMES = """
 MATCH (e:Entity {plane:'canon'}) WHERE e.id STARTS WITH $prefix
-RETURN e.name AS name
+RETURN e.name AS name, [l IN labels(e) WHERE l <> 'Entity'] AS labels
 """
 
 
@@ -63,9 +63,9 @@ async def _ask(client: AsyncOpenAI, word: str, names: tuple[str, ...]):
         return word, ([], [f"call failed: {type(exc).__name__}: {exc}"])
 
 
-async def propose(names: list[str], cap: int) -> tuple[list, list[str], int]:
+async def propose(names, cap: int, kinds, family_cap: int):
     """Returns `(groups, refusals, blocks_asked)`."""
-    work = blocks(names, cap=cap)
+    work = blocks(names, cap=cap, kinds=kinds)
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     semaphore = asyncio.Semaphore(CONCURRENCY)
 
@@ -78,7 +78,8 @@ async def propose(names: list[str], cap: int) -> tuple[list, list[str], int]:
     for word, (found, refused) in results:
         groups.extend(found)
         refusals.extend(f"[{word}] {r}" for r in refused)
-    return merge_overlapping(groups), refusals, len(work)
+    folded, runaway = merge_overlapping(groups, cap=family_cap)
+    return folded, refusals + [f"[fold] {r}" for r in runaway], len(work)
 
 
 def main() -> int:
@@ -86,14 +87,24 @@ def main() -> int:
     parser.add_argument("--book", required=True, help="id prefix, e.g. kftgv")
     parser.add_argument("-o", "--out", type=Path, help="seed file to write")
     parser.add_argument("--cap", type=int, default=40, help="largest block to ask about")
+    parser.add_argument(
+        "--family-cap", type=int, default=6,
+        help="largest folded alias family to accept. Bigger is a runaway "
+             "transitive merge, not an answer.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    kinds: dict[str, frozenset[str]] = {}
     with read_only_session() as session:
-        names = sorted({r["name"] for r in session.run(_NAMES, {"prefix": args.book})})
-    work = blocks(names, cap=args.cap)
+        for record in session.run(_NAMES, {"prefix": args.book}):
+            row = dict(record)
+            kinds.setdefault(row["name"], frozenset()) 
+            kinds[row["name"]] = kinds[row["name"]] | frozenset(row["labels"])
+    names = sorted(kinds)
+    work = blocks(names, cap=args.cap, kinds=kinds)
     dropped = [
-        (w, len(g)) for w, g in blocks(names, cap=10**9) if len(g) > args.cap
+        (w, len(g)) for w, g in blocks(names, cap=10**9, kinds=kinds) if len(g) > args.cap
     ]
 
     print(f"{len(names)} entity names in {args.book}")
@@ -108,7 +119,9 @@ def main() -> int:
         print("\n--dry-run: nothing asked, nothing spent.")
         return 0
 
-    groups, refusals, asked = asyncio.run(propose(names, args.cap))
+    groups, refusals, asked = asyncio.run(
+        propose(names, args.cap, kinds, args.family_cap)
+    )
     print(f"\nasked {asked} blocks, {len(groups)} groupings proposed")
     for refusal in refusals:
         print(f"  REFUSED {refusal}")
