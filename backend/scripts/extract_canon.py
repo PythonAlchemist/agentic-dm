@@ -223,6 +223,7 @@ async def run(
     corpus: str = DEFAULT_CORPUS,
     splitter: str = "depth",
     concurrency: int = 6,
+    book_slug: str = "cos",
 ) -> dict:
     # Validated before the paid extraction call below: a bad --grade value
     # must fail fast, not silently score 1.00/1.00 after money is spent.
@@ -231,7 +232,7 @@ async def run(
         data = yaml.safe_load((SEED_DIR / "village-of-barovia.yaml").read_text())
         golden = _gradeable_subset(data, grade_against)
 
-    chapter = find_chapter(load_chapters(corpus), chapter_title)
+    chapter = find_chapter(load_chapters(corpus, book_slug=book_slug), chapter_title)
     split = split_chapter(chapter, splitter=splitter)
     sections = split.sections
     units = units_from_sections(sections)
@@ -593,6 +594,13 @@ def build_parser() -> argparse.ArgumentParser:
     # The pivot. `ddb` is the publisher's own markup for any of the 35 books the
     # user owns; `transcription` is the retired per-book vision pass, kept
     # reachable for the A/B and as a fallback while the new path is young.
+    parser.add_argument(
+        "--book-slug",
+        default="cos",
+        help="which harvested book under the corpus root, e.g. kftgv. "
+             "Defaults to cos, which is what every run meant before the "
+             "harvest held more than one book.",
+    )
     parser.add_argument("--corpus", choices=CORPORA, default=DEFAULT_CORPUS,
                         help=f"Which corpus to read (default {DEFAULT_CORPUS})")
     # `key` is Curse of Strahd-specific by construction and cannot serve a book
@@ -647,7 +655,7 @@ def main() -> None:
                 samples=args.samples, node_k=args.node_k, edge_k=args.edge_k,
                 reject_violations=args.reject_violations,
                 corpus=args.corpus, splitter=args.splitter,
-                concurrency=args.concurrency,
+                concurrency=args.concurrency, book_slug=args.book_slug,
             )
         )
     except ValueError as exc:
