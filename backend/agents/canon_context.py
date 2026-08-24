@@ -55,6 +55,16 @@ class Depth:
     #: conversation is ABOUT rather than what the book says.
     subgraph_budget: int = 400
     include_proposed: bool = True
+    #: Withhold a guessed edge whose own cited sentence does not support it.
+    #:
+    #: Every proposed edge carries `evidence_check`, a verdict on whether the
+    #: sentence the extractor read says what the edge claims -- 61% supported
+    #: in Curse of Strahd, 51% in the heist anthology. This drops the rest.
+    #:
+    #: OFF BY DEFAULT until it is measured. The verdict is a model grading a
+    #: model, and gating what a DM is shown on it is a larger claim than
+    #: recording it, which is why the label was written first and used second.
+    only_supported_edges: bool = False
     #: `section` sends each passage's whole section; `sentence` sends one
     #: sentence around the mention.
     #:
@@ -76,9 +86,16 @@ def apply(retrieval: Retrieval, depth: Depth) -> Retrieval:
     what the model may read, not about what the graph holds -- the retrieval
     keeps reporting what it found either way.
     """
-    if depth.include_proposed:
-        return retrieval
-    return replace(retrieval, proposed=())
+    kept = retrieval.proposed if depth.include_proposed else ()
+    if kept and depth.only_supported_edges:
+        # `unsupported` and `reversed` go; `unclear` and an UNJUDGED edge stay.
+        # An edge nobody judged is not an edge that failed, and dropping it
+        # here would make a missing verdict look like a verdict.
+        kept = tuple(
+            e for e in kept
+            if e.get("evidence_check") not in {"unsupported", "reversed"}
+        )
+    return replace(retrieval, proposed=kept)
 
 #: What the model is told about the whole block, before any of it.
 _PREAMBLE = (

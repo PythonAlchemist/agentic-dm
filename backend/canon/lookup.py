@@ -234,12 +234,14 @@ EDGES = """
 MATCH (n:Entity {plane:$plane})-[r]->(o:Entity {plane:$plane})
 WHERE n.id IN $ids
 RETURN n.name AS entity, 'out' AS direction, type(r) AS relationship,
-       o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status
+       o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status,
+       r.evidence_check AS evidence_check
 UNION
 MATCH (o:Entity {plane:$plane})-[r]->(n:Entity {plane:$plane})
 WHERE n.id IN $ids
 RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
-       o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status
+       o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status,
+       r.evidence_check AS evidence_check
 """
 
 #: `$book` SCOPES THE SECTION, and null means every book. Optional rather than

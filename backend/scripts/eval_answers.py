@@ -293,7 +293,10 @@ def render(rows: list[dict], *, repeat: int = 1) -> str:
 ANSWER_SEED = 20260821
 
 
-async def _answer(question: str, model: str | None, attempt: int = 0) -> tuple[str, dict | None]:
+async def _answer(
+    question: str, model: str | None, attempt: int = 0,
+    only_supported: bool = False,
+) -> tuple[str, dict | None]:
     """One grounded turn from a FRESH agent.
 
     Fresh per question, never a shared session: history would let question four
@@ -301,6 +304,7 @@ async def _answer(question: str, model: str | None, attempt: int = 0) -> tuple[s
     then differ for reasons nobody could see. The same reason `/lab/generate`
     builds its own agent.
     """
+    from backend.agents import canon_context
     from backend.agents.dm_agent import DMAgent
 
     # temperature 0 and a seed that VARIES BY REPEAT. Pinning both would make
@@ -310,7 +314,10 @@ async def _answer(question: str, model: str | None, attempt: int = 0) -> tuple[s
     # DRAW, deliberately, and the same draw as repeat i of any other run -- so
     # two runs are compared sample against matching sample rather than as two
     # clouds.
-    agent = DMAgent(model=model, temperature=0.0, seed=ANSWER_SEED + attempt)
+    agent = DMAgent(
+        model=model, temperature=0.0, seed=ANSWER_SEED + attempt,
+        depth=canon_context.Depth(only_supported_edges=only_supported),
+    )
     response = await agent.process_message(
         user_input=question, use_rag=False, use_canon=True
     )
@@ -344,7 +351,8 @@ CONCURRENCY = 8
 
 
 async def run(
-    questions: list[dict], model: str | None, *, show: bool, repeat: int = 1
+    questions: list[dict], model: str | None, *, show: bool, repeat: int = 1,
+    only_supported: bool = False,
 ) -> list[dict]:
     semaphore = asyncio.Semaphore(CONCURRENCY)
     done = 0
@@ -353,7 +361,9 @@ async def run(
     async def one(question: dict, attempt: int) -> dict:
         nonlocal done
         async with semaphore:
-            answer, cost = await _answer(question["question"], model, attempt)
+            answer, cost = await _answer(
+                question["question"], model, attempt, only_supported
+            )
         row = check(question, answer)
         row["answer"] = answer
         row["attempt"] = attempt
@@ -402,6 +412,10 @@ def main() -> int:
     )
     parser.add_argument("--label", default="", help="what this run is testing")
     parser.add_argument(
+        "--only-supported-edges", action="store_true",
+        help="withhold a guessed edge whose cited sentence does not support it",
+    )
+    parser.add_argument(
         "--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"),
         help="two saved runs: is the difference bigger than the noise? "
              "Spends nothing.",
@@ -435,7 +449,8 @@ def main() -> int:
         return 0
 
     rows = asyncio.run(
-        run(questions, args.model, show=args.show, repeat=args.repeat)
+        run(questions, args.model, show=args.show, repeat=args.repeat,
+            only_supported=args.only_supported_edges)
     )
     print()
     print(render(rows, repeat=args.repeat))
