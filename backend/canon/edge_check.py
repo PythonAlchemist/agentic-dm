@@ -12,6 +12,29 @@ therefore about a claim and its stated evidence, and a person can settle any
 disagreement in the time it takes to read one sentence. `cooccurrence` refuses
 to automate a judgment with no evidence attached; this one has it attached.
 
+WHAT IT MEASURED, and the second result cost real money to learn.
+
+    Curse of Strahd, 128 edges by vote count   supported   95% CI
+        3 votes                                     48%    33-63%
+        5 votes                                     57%    42-71%
+        overall                                     54%    45-62%
+
+    Golden Vault, same chapters both ways      supported   95% CI
+        one sample, every edge kept                 53%    45-61%
+        five samples, edge kept at three            51%    43-59%
+
+CONSENSUS DOES NOT BUY PRECISION. Measured twice by different methods -- by
+vote stratum inside one book, and by a controlled A/B extracting the same
+chapters both ways -- and neither can distinguish five passes from one. The
+five-sample arm is nominally WORSE. It costs five times the extraction spend.
+
+The reason is the one this project already knew about a neighbouring problem:
+consensus filters UNSTABLE output, and these errors are stable. A model that
+misreads a sentence misreads it the same way five times, so five passes agree
+on the mistake and the vote count records agreement rather than truth. Five
+passes do move `reversed` (6 -> 2 in the A/B), which is a small real effect on
+one narrow class and not worth 5x on its own.
+
 THE MODEL MAY NOT USE WHAT IT KNOWS ABOUT D&D. It is asked whether THIS
 sentence supports THIS claim, and a true statement the sentence does not make
 is still `unsupported`. Otherwise the check would grade the extractor against
