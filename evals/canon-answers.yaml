@@ -187,3 +187,108 @@ questions:
       retrieval at the time of writing, so a `must` failure here is expected
       and is the point -- it pins whether the model INVENTS a location or says
       it does not have one.
+
+# ---------------------------------------------------------------------------
+# KEYS FROM THE GOLDEN VAULT.
+#
+# The ten questions above are all Curse of Strahd, so every answer-quality
+# figure this project has reported describes one book -- the same flaw the
+# retrieval suite carried until Golden Vault questions were added to it. These
+# make the other half of the answer measurable.
+#
+# `book` is DECLARED here rather than derived, unlike the retrieval set. Those
+# questions carry a gold section id whose prefix names the book; an answer
+# question has no gold section to read one off, so there is nothing to count
+# and the field is honest about that. Absent means `cos`, which is what the
+# ten above are.
+#
+# `must` ENTRIES ARE PROPER NOUNS AND NUMBERS wherever possible. a02 is the
+# lesson: it required the word `padlock`, scored 3/10, and every one of the ten
+# answers was correct -- seven simply described the chain without using the
+# word. A name or a DC is a thing an answer either has or has not; an adjective
+# is a paraphrase waiting to happen.
+
+  - id: b01
+    book: kftgv
+    question: "Who approaches the party with the job in Prisoner 13, and what do they want?"
+    must: ["Varrin"]
+    cites: true
+    note: "Varrin Axebreaker, a dwarf noble, wants a key recovered from the prison."
+
+  - id: b02
+    book: kftgv
+    question: "How does the suspicion track at Revel's End work, and what level do the characters start at?"
+    must: ["1", "6"]
+    cites: true
+    note: >
+      Levels 1 to 6, starting at 1. Both numbers, because an answer naming only
+      the range has not said where play begins and an answer naming only the
+      start has not said what it climbs toward.
+
+  - id: b03
+    book: kftgv
+    question: "What is the Golden Vault's motto?"
+    must: ["Do good"]
+    cites: true
+    note: "\"Do good, no matter the cost.\" Quoted verbatim in the introduction."
+
+  - id: b04
+    book: kftgv
+    question: "Who is the curator of the museum in Varkenbluff?"
+    must: ["Alda Arkin"]
+    cites: true
+    note: "Alda Arkin, a retired professor, neutral evil, at the gala unarmed."
+
+  - id: b05
+    book: kftgv
+    question: "What can an employee pass card do in the Afterlife Casino, and how hard is it to steal one?"
+    must: ["15"]
+    cites: true
+    note: >
+      Opens any locked door, bypassing the arcane lock; DC 15 Sleight of Hand.
+      The DC is the checkable half -- 'opens locked doors' is paraphrasable a
+      dozen ways and the number is not.
+
+  - id: b06
+    book: kftgv
+    question: "Who does the Afterlife Casino employ?"
+    must: ["tiefling"]
+    cites: true
+    note: "Tieflings only, which is what makes a disguise the party's problem."
+
+  - id: b07
+    book: kftgv
+    question: "Where is the Murkmire Stone kept during the gala, and what happens to it at midnight?"
+    must: ["hatch"]
+    cites: true
+    note: >
+      On a pedestal in the Gemstone Wing; the egg hatches at midnight. `hatch`
+      rather than `Gemstone Wing`, because the thing a DM must not be surprised
+      by is that the exhibit is an egg on a timer.
+
+  - id: b08
+    book: kftgv
+    question: "What happens if Vidorant is alerted that the diadem has been taken?"
+    must: ["teleport"]
+    cites: true
+    note: >
+      A custom ring functioning as a helm of teleportation brings her to the
+      balcony five rounds after the alarm. The teleport is the fact that
+      changes how the escape is run.
+
+  - id: b09
+    book: kftgv
+    question: "Who built the clockwork automatons threatening Little Lockford?"
+    must: ["Tockworth"]
+    cites: true
+    note: "Tixie Tockworth, a gnome tinkerer who replaced her own body with machinery."
+
+  - id: b10
+    book: kftgv
+    question: "Who is the mayor of Toadhop?"
+    must: ["Jenna Bean"]
+    cites: true
+    note: >
+      A brown sow with 'Mayor' painted on her flank. Included deliberately: an
+      answer that reaches for a plausible human name instead of the book's
+      actual joke is the exact failure mode grounding is supposed to prevent.

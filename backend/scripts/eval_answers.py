@@ -283,6 +283,23 @@ def render(rows: list[dict], *, repeat: int = 1) -> str:
     always = sum(1 for rs in scored if all(verdict(r) == "pass" for r in rs))
     out.append(f"  passed every run     {always}/{len(scored)}   (a minimum, not a score)")
     out.append(f"  needing a reading    {len(by_id) - len(scored)}")
+
+    # PER BOOK whenever the suite spans more than one, for the reason
+    # `eval_retrieval` prints it: a headline over a mixed set is an average of
+    # two books and comparable to neither on its own, and reporting one book's
+    # figure as the system's is the defect this suite was just extended to fix.
+    books = {r.get("book", "cos") for r in samples}
+    if len(books) > 1:
+        out.append("")
+        out.append("  by book")
+        for book in sorted(books):
+            subset = [r for r in samples if r.get("book", "cos") == book]
+            hits = sum(1 for r in subset if verdict(r) == "pass")
+            lo, hi = wilson(hits, len(subset))
+            out.append(
+                f"    {book:8} {hits:3}/{len(subset):<3} = {hits / max(1, len(subset)):.0%}"
+                f"   95% CI {lo:.0%}-{hi:.0%}"
+            )
     return "\n".join(out)
 
 
@@ -295,7 +312,7 @@ ANSWER_SEED = 20260821
 
 async def _answer(
     question: str, model: str | None, attempt: int = 0,
-    only_supported: bool = False,
+    only_supported: bool = False, book: str = "cos",
 ) -> tuple[str, dict | None]:
     """One grounded turn from a FRESH agent.
 
@@ -306,6 +323,7 @@ async def _answer(
     """
     from backend.agents import canon_context
     from backend.agents.dm_agent import DMAgent
+    from backend.canon.retrieval import CanonRetriever
 
     # temperature 0 and a seed that VARIES BY REPEAT. Pinning both would make
     # every repeat the same draw, which reads as perfect stability and measures
@@ -314,9 +332,18 @@ async def _answer(
     # DRAW, deliberately, and the same draw as repeat i of any other run -- so
     # two runs are compared sample against matching sample rather than as two
     # clouds.
+    # THE BOOK IS THE QUESTION'S, not a default. This built its own retriever
+    # and therefore always read Curse of Strahd, which is how ten Barovia
+    # questions came to be reported as the system's answer quality while a
+    # campaign was being run out of the heist anthology.
+    #
+    # No campaign, ever: a DM's own material must not reach a measurement of
+    # what the BOOK supports. `test_the_eval_harnesses_are_campaign_less` pins
+    # the absence of the word here.
     agent = DMAgent(
         model=model, temperature=0.0, seed=ANSWER_SEED + attempt,
         depth=canon_context.Depth(only_supported_edges=only_supported),
+        canon=CanonRetriever(book=book),
     )
     response = await agent.process_message(
         user_input=question, use_rag=False, use_canon=True
@@ -362,11 +389,13 @@ async def run(
         nonlocal done
         async with semaphore:
             answer, cost = await _answer(
-                question["question"], model, attempt, only_supported
+                question["question"], model, attempt, only_supported,
+                question.get("book", "cos"),
             )
         row = check(question, answer)
         row["answer"] = answer
         row["attempt"] = attempt
+        row["book"] = question.get("book", "cos")
         row["usd"] = spend_of(cost)
         done += 1
         print(f"  [{done}/{total}] {row['id']:<5} {verdict(row)}")
