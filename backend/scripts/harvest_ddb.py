@@ -228,6 +228,24 @@ async def read_chapter(
     return markdown, calls
 
 
+def exit_code(manifest: dict) -> int:
+    """0 only when every chapter in the table of contents actually landed.
+
+    UNRESOLVED FAILS THE RUN, exactly as `failed` does, and for a stronger
+    reason: `failed` means the page was found and the fetch broke, which is
+    loud. Unresolved means the chapter was never located at all, so the book is
+    quietly short one chapter and every count downstream still looks
+    self-consistent. Keys from the Golden Vault sat in the graph missing its
+    Introduction -- the chapter defining the Golden Vault itself, and the only
+    place Meera Raheer or the rival-crew rules appear -- because this returned
+    0 and the warning printed above it scrolled past.
+
+    A named function rather than an expression inside `main` so it can be
+    tested without a network or an argv.
+    """
+    return 1 if manifest["failed"] or manifest["unresolved"] else 0
+
+
 def load_overrides(book_slug: str, path: Path | None = None) -> dict[str, str]:
     """Load title -> slug overrides for a book, if any are recorded."""
     source = path or SLUG_DIR / f"{slug_filename(book_slug)}.json"
@@ -464,7 +482,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAILED: {[f['slug'] for f in manifest['failed']]}", file=sys.stderr)
     if manifest["unresolved"]:
         print(f"UNRESOLVED: {manifest['unresolved']}", file=sys.stderr)
-    return 1 if manifest["failed"] else 0
+    return exit_code(manifest)
 
 
 if __name__ == "__main__":

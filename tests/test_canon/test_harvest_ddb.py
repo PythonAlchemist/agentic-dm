@@ -358,3 +358,23 @@ async def test_a_404_page_is_never_cached_as_a_chapter(tmp_path):
 
     assert not (tmp_path / "poster-map.md").exists()
     assert not (tmp_path / "appendices.md").exists()
+
+
+class TestUnresolvedFailsTheRun:
+    """A chapter that was never located must not report success.
+
+    The distinction that matters: `failed` is a fetch that broke on a page we
+    found; `unresolved` is a page we never found. The second is quieter and
+    worse -- the book is short a chapter and every downstream count still
+    looks self-consistent.
+    """
+
+    def test_a_clean_run_passes(self):
+        assert harvest_ddb.exit_code({"failed": [], "unresolved": []}) == 0
+
+    def test_a_failed_chapter_fails(self):
+        assert harvest_ddb.exit_code({"failed": [{"slug": "x"}], "unresolved": []}) == 1
+
+    def test_an_unresolved_chapter_fails_too(self):
+        """This is the one that used to return 0."""
+        assert harvest_ddb.exit_code({"failed": [], "unresolved": ["Introduction"]}) == 1
