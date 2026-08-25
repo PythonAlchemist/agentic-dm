@@ -939,3 +939,46 @@ questions:
     sections: ["kftgv:party-at-paliset-hall#4"]
     needs: graph
     note: "Its origin story, the Adulares, the solstice gala and Paliset Hall."
+
+  # Six of one shape, added to test a ranking rule against something other
+  # than the question it was derived from. Asking what the job is in a NAMED
+  # adventure is what a DM actually asks, and it stresses the anthology's
+  # global-name fan-out: every heist heads a section `Using the Golden Vault`,
+  # so the patron's name alone retrieves thirteen near-identical candidates.
+  # Written from the chapter text before running any of them.
+
+  - id: k29
+    question: "What is the job in The Stygian Gambit?"
+    sections: ["kftgv:the-stygian-gambit#2"]
+    needs: graph
+    note: "Infiltrate the Afterlife Casino; steal a statuette and money for Verity Kye."
+
+  - id: k30
+    question: "What does the Golden Vault want recovered in Reach for the Stars?"
+    sections: ["kftgv:reach-for-the-stars#2"]
+    needs: graph
+    note: "The Celestial Codex, stolen by the nobleman Markos Delphi."
+
+  - id: k31
+    question: "What is the job in Axe from the Grave?"
+    sections: ["kftgv:axe-from-the-grave#2"]
+    needs: graph
+    note: "Return a Canaith mandolin stolen from a bard's grave; travel to Toadhop."
+
+  - id: k32
+    question: "What does the Golden Vault want done in Heart of Ashes?"
+    sections: ["kftgv:heart-of-ashes#2"]
+    needs: graph
+    note: "Stop Charmayne Daymore's ritual, which uses King Jhaeros's heart."
+
+  - id: k33
+    question: "What is the job in Party at Paliset Hall?"
+    sections: ["kftgv:party-at-paliset-hall#2"]
+    needs: graph
+    note: "Steal the shard solitaire from Zorhanna Adulare, at her husband's request."
+
+  - id: k34
+    question: "What does the Golden Vault want done in Shard of the Accursed?"
+    sections: ["kftgv:shard-of-the-accursed#4"]
+    needs: graph
+    note: "The shard threatens Oztocan with earthquakes; it came from a giant's tomb."

@@ -207,6 +207,41 @@ PATH_NONE = ""
 #: combined, which is why occurrences are not simply replaced.
 TERM_WEIGHT = 3
 
+#: Added to a section's score when it sits in a chapter one of the anchors
+#: BELONGS to, rather than merely a chapter that mentions it.
+#:
+#: WHY AN ANTHOLOGY NEEDS THIS AND A CAMPAIGN DOES NOT. A book-wide name in
+#: thirteen unconnected adventures retrieves one near-identical section from
+#: each: asked what the Golden Vault wants stolen in Fire and Darkness,
+#: retrieval spent seven of eight slots on other heists' `Using the Golden
+#: Vault` sections. The anchors themselves say which chapter the question is
+#: about -- `kftgv:fire-and-darkness:...` names its own chapter in its id --
+#: and nothing was reading it.
+#:
+#: A BONUS, NOT A GATE. It moves a section up; it never removes one and never
+#: makes a candidate, so the fact/guess line holds here as it does for terms.
+#:
+#: THE VALUE IS MEASURED, AND THE RULE WAS CONFIRMED ON QUESTIONS IT WAS NOT
+#: DERIVED FROM. Derived from one failing question, it fixed exactly that
+#: question -- which is a hypothesis agreeing with its own training example and
+#: worth nothing. Six more questions of the same shape were then written from
+#: the chapter text, blind to the outcome; four of them failed with the rule
+#: off and two of those four passed with it on. Over 34 Golden Vault questions:
+#:
+#:     weight   0    71% recall, MRR 0.43
+#:     weight   3    79% recall, MRR 0.46
+#:     weight   4    79% recall, MRR 0.47   <- plateau begins
+#:     weight 6-8    79% recall, MRR 0.47
+#:
+#: Curse of Strahd is IDENTICAL at every weight -- 85% / 90% / MRR 0.61, the
+#: same six misses. A campaign's anchors mostly live in the chapter that
+#: answers, so the bonus applies uniformly there and reorders nothing. That is
+#: the evidence this is an anthology repair and not a tuning knob.
+#:
+#: The plateau matters as much as the peak: anything from 4 upward behaves the
+#: same, so this is not a number fitted to a sample.
+CHAPTER_WEIGHT = 4
+
 #: How many of the budget's passages are held for the text path when a question
 #: DID anchor. The rest go to the graph, and any slack the graph does not use
 #: goes to text as well.
@@ -280,6 +315,10 @@ class Passage:
     #: `in-chain`, `skipped`, or `` when no campaign is selected. Says whether
     #: this is in play at this table; never used to rank, only to label.
     chain_status: str = ""
+    #: True when this section is in a chapter one of the anchors belongs to.
+    #: Travels so a surprising order can be read rather than guessed at, the
+    #: same reason `term_hits` does.
+    home_chapter: bool = False
     #: Set on a passage that came along because of WHERE it sits, naming the
     #: section it rode with. Positional relevance is not lexical, so a reader
     #: seeing it among scored passages needs to know it was not scored.
@@ -1027,6 +1066,15 @@ class CanonRetriever:
         variants moved this set by at most one question in either direction --
         ranking was measured, repeatedly, and is not where these misses live.
         """
+        # The chapters the anchors THEMSELVES live in, read off their ids: a
+        # chapter-scoped id spells its chapter as its middle segment, and a
+        # book-global one (`kftgv:golden-vault`) has none and contributes
+        # nothing -- which is right, since a global name is evidence about no
+        # particular chapter.
+        home_chapters = {
+            entity_id.split(":")[1] for entity_id in ids if entity_id.count(":") >= 2
+        }
+
         merged: dict[str, dict] = {}
         for row in self._rows(session, MENTIONS, {"ids": ids}):
             section_id = f"{row['chapter']}#{row['section_index']}"
@@ -1065,12 +1113,17 @@ class CanonRetriever:
                 entity_ids=tuple(sorted(set(slot["entity_ids"]))),
                 aliases=tuple(sorted(set(slot["aliases"]))),
                 term_hits=terms_present(slot["text"], terms),
+                home_chapter=slot["chapter"] in home_chapters,
             )
             for slot in merged.values()
         ]
         passages.sort(
             key=lambda p: (
-                -(p.occurrences + TERM_WEIGHT * p.term_hits),
+                -(
+                    p.occurrences
+                    + TERM_WEIGHT * p.term_hits
+                    + CHAPTER_WEIGHT * p.home_chapter
+                ),
                 -len(p.entity_ids),
                 p.chapter_index,
                 p.section_index,
