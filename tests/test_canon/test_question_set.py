@@ -68,12 +68,27 @@ class TestTheLabelsAreWellFormed:
         ]
 
     def test_a_gold_section_id_looks_like_one(self, questions):
-        bad = [
-            (q["id"], s)
-            for q in questions
-            for s in q["sections"]
-            if not s.startswith("cos:") or "#" not in s
-        ]
+        """`<book>:<chapter>#<n>`, where the book is one that actually exists.
+
+        The prefix is checked against the committed seeds rather than against
+        a literal. This read `startswith("cos:")` -- the same one-book
+        assumption that made the harness hardcode its retriever, sitting in the
+        test that was supposed to guard the data.
+        """
+        import re
+
+        from backend.canon.books import SEEDS
+
+        known = {path.stem for path in SEEDS.glob("*.yaml")}
+        assert known, "the seeds directory must hold the committed books"
+        shape = re.compile(r"^([a-z0-9-]+):.+#\d+$")
+
+        bad = []
+        for question in questions:
+            for section in question["sections"]:
+                found = shape.match(section)
+                if not found or found.group(1) not in known:
+                    bad.append((question["id"], section))
         assert not bad
 
 
