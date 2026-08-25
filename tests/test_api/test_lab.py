@@ -71,14 +71,13 @@ def client(monkeypatch):
     monkeypatch.setattr(
         "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
     )
-    monkeypatch.setattr(
-        "backend.agents.dm_agent.CanonRetriever",
-        lambda **kw: SimpleNamespace(retrieve=lambda q, **k: a_retrieval()),
+    fake_retriever = lambda **kw: SimpleNamespace(  # noqa: E731
+        book=kw.get("book", "cos"),
+        campaign=kw.get("campaign"),
+        retrieve=lambda q, **k: a_retrieval(),
     )
-    monkeypatch.setattr(
-        "backend.api.routes.lab.CanonRetriever",
-        lambda **kw: SimpleNamespace(retrieve=lambda q, **k: a_retrieval()),
-    )
+    monkeypatch.setattr("backend.agents.dm_agent.CanonRetriever", fake_retriever)
+    monkeypatch.setattr("backend.api.routes.lab.CanonRetriever", fake_retriever)
 
     completions = FakeCompletions("an answer")
     real_init = lab.DMAgent.__init__
@@ -104,7 +103,7 @@ class TestConfig:
 
     def test_it_offers_the_generation_kinds(self, client):
         assert set(client.get("/api/lab/config").json()["kinds"]) == {
-            "quest", "npc", "monster"
+            "quest", "npc", "monster", "scene"
         }
 
 
@@ -169,6 +168,24 @@ class TestChat:
         assert before, "the fixture retrieval must anchor something to test this"
         assert set(before) <= set(after.nodes)
 
+    def test_the_chosen_book_reaches_the_retriever(self, client):
+        """The whole point of the selector: a session reads the book it names."""
+        client.post("/api/lab/chat", json={"message": "hi", "book": "kftgv"})
+        assert lab._SESSIONS["lab"].canon.book == "kftgv"
+
+    def test_switching_book_drops_the_thread(self, client):
+        """The OPPOSITE of the model switch above, and deliberately so.
+
+        A subgraph holds entities by id, so carrying it across a book change
+        would put Barovia in front of a heist -- the cross-book bleed that
+        scoping the retriever exists to stop, re-entering through the
+        conversation's own memory."""
+        client.post("/api/lab/chat", json={"message": "first", "book": "cos"})
+        assert lab._SESSIONS["lab"].subgraph.nodes, "fixture must anchor something"
+
+        client.post("/api/lab/chat", json={"message": "second", "book": "kftgv"})
+        assert lab._SESSIONS["lab"].subgraph.turn == 1
+
     def test_reset_drops_the_thread(self, client):
         """Reset has to clear the subgraph too, or a "new" conversation starts
         holding the last one's entities."""
@@ -210,3 +227,66 @@ class TestGenerate:
         client.post("/api/lab/generate", json={"kind": "npc", "subject": "x"})
         sent = [m["content"] for m in client.completions.calls[-1]["messages"]]
         assert not any("remember the barkeep" in c for c in sent)
+
+
+class TestTheCampaignScopesTheSession:
+    """A campaign is a world, and switching one is switching worlds."""
+
+    def test_the_chosen_campaign_reaches_the_retriever(self, client):
+        client.post("/api/lab/chat", json={"message": "hi", "campaign": "p13-home"})
+        assert lab._SESSIONS["lab"].canon.campaign == "p13-home"
+
+    def test_none_is_the_default(self):
+        """The same default the evaluation harnesses use: canon only."""
+        assert lab.ChatRequest(message="x").campaign is None
+
+    def test_switching_campaign_drops_the_thread(self, client):
+        """The book rule, one scope in: a subgraph holds entities by id, so
+        carrying one table's scenes into another table's session is the same
+        bleed the plane and prefix filters exist to stop."""
+        client.post("/api/lab/chat", json={"message": "first", "campaign": "table-a"})
+        assert lab._SESSIONS["lab"].subgraph.nodes, "fixture must anchor something"
+        client.post("/api/lab/chat", json={"message": "second", "campaign": "table-b"})
+        assert lab._SESSIONS["lab"].subgraph.turn == 1
+
+    def test_the_thread_survives_a_model_switch_within_one_campaign(self, client):
+        """The comparison the lab exists for still works."""
+        client.post(
+            "/api/lab/chat",
+            json={"message": "first", "campaign": "table-a", "model": "gpt-4o-mini"},
+        )
+        before = dict(lab._SESSIONS["lab"].subgraph.nodes)
+        client.post(
+            "/api/lab/chat",
+            json={"message": "second", "campaign": "table-a", "model": "gpt-4o"},
+        )
+        assert set(before) <= set(lab._SESSIONS["lab"].subgraph.nodes)
+
+
+class TestDraftCardsReachTheReader:
+    """A card the model asked for must survive the route.
+
+    THE DEFECT THIS PINS. The chat route builds an explicit dict rather than
+    dumping the response, so a field it does not name is dropped in silence.
+    Draft cards were generated, charged for, and discarded here; the model
+    politely told the DM a draft was ready and the DM was shown nothing.
+    """
+
+    def test_the_route_carries_generations(self, client, monkeypatch):
+        card = {"kind": "scene", "title": "A Storm", "body": "...",
+                "from_canon": [], "invented": ["the storm"], "from_context": []}
+
+        async def fake(self, *a, **kw):
+            from backend.agents.dm_agent import DMResponse
+
+            return DMResponse(message="a draft is ready", generations=[card])
+
+        monkeypatch.setattr(lab.DMAgent, "process_message", fake)
+        body = client.post("/api/lab/chat", json={"message": "make a scene"}).json()
+        assert body["generations"] == [card]
+
+    def test_it_is_present_and_empty_on_an_ordinary_turn(self):
+        """Absent and empty are different answers; the field is always sent."""
+        from backend.agents.dm_agent import DMResponse
+
+        assert DMResponse(message="hello").generations == []

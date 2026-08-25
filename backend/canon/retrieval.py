@@ -42,8 +42,10 @@ church", while a question that names anything properly never reaches it.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from backend.campaign.chain import adjacent_homebrew
+from backend.campaign.model import is_campaign_id
 from backend.canon.aliases import normalize
 from backend.canon.lookup import (
     CANON_PLANE,
@@ -65,8 +67,9 @@ from backend.canon.spine import mention_pattern
 #: ENTITY: a thing the book writes as a common noun is not a name under any of
 #: its spellings, so one lower-case alias disqualifies all of them.
 ALL_ALIASES = """
-MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity {plane:$plane})
-WHERE $book IS NULL OR e.id STARTS WITH $book
+MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity)
+WHERE (e.plane = $plane AND ($book IS NULL OR e.id STARTS WITH $book))
+   OR ($campaign_prefix IS NOT NULL AND e.id STARTS WITH $campaign_prefix)
 RETURN DISTINCT a.name AS name, e.id AS entity_id
 """
 
@@ -74,9 +77,10 @@ RETURN DISTINCT a.name AS name, e.id AS entity_id
 #: `Barovia` is a region and a village -- and the ambiguity travels rather than
 #: being resolved by a coin flip.
 BY_ALIAS = """
-MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity {plane:$plane})
+MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity)
 WHERE a.normalized = $normalized
-  AND ($book IS NULL OR e.id STARTS WITH $book)
+  AND ((e.plane = $plane AND ($book IS NULL OR e.id STARTS WITH $book))
+       OR ($campaign_prefix IS NOT NULL AND e.id STARTS WITH $campaign_prefix))
 RETURN DISTINCT e.id AS id, e.name AS name, labels(e) AS labels, e.status AS node_status
 ORDER BY e.id
 """
@@ -96,6 +100,42 @@ RETURN s.id AS section_id, s.heading AS section, s.index AS section_index,
        s.text AS text, c.slug AS chapter, c.index AS chapter_index, score
 ORDER BY score DESC
 LIMIT $limit
+"""
+
+#: The campaign's own sections, searched separately and NEVER merged into the
+#: canon ranking. Two orderings in different units are not comparable, so they
+#: are concatenated and labelled -- `combine_passages`' rule, applied to a third
+#: source. Scoped through the Campaign container, which is also why the canon
+#: search above cannot reach these: it matches through the BOOK spine.
+SEARCH_CAMPAIGN_SECTIONS = """
+CALL db.index.fulltext.queryNodes('section_text', $query) YIELD node AS s, score
+MATCH (:Campaign {slug:$campaign})-[:HAS_SECTION]->(s)
+RETURN s.id AS section_id, s.heading AS section, s.index AS section_index,
+       s.text AS text, score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+#: What the DM chained immediately around a retrieved canon section.
+#:
+#: THE RIDE-ALONG, AND WHY IT IS A WALK RATHER THAN A SEARCH. A scene inserted
+#: into the voyage may share no vocabulary at all with "what happens on the way
+#: to the prison" -- so no Lucene score and no occurrence count can find it. Its
+#: relevance is POSITIONAL, and the chain records that position as something the
+#: DM asserted. Both directions, campaign sections only, stopping at the first
+#: canon one: see `chain.adjacent_homebrew`, which decides the rule; this only
+#: fetches the links it needs.
+CHAIN_AROUND = """
+MATCH (a:Section)-[r:NEXT {campaign:$campaign}]->(b:Section)
+RETURN a.id AS source, b.id AS target
+"""
+
+#: Sections this campaign has cut. Retrieved all the same -- the chain is the
+#: running order, not the knowledge scope, and "what was in the bit I skipped"
+#: is a real question -- but marked, so nothing reads as in play that is not.
+CAMPAIGN_SKIPPED = """
+MATCH (:Campaign {slug:$campaign})-[:SKIPPED]->(s:Section)
+RETURN s.id AS id
 """
 
 #: The entities a set of sections names. What the text path anchors on, having
@@ -233,6 +273,17 @@ class Passage:
     term_hits: int = 0
     #: True when a whole-section passage hit `SECTION_MAX` and lost its tail.
     truncated: bool = False
+    #: `canon` or `campaign`. The DM must be able to tell at a glance whose
+    #: word a line is, and `sources()` hardcoded `"canon"` on every citation
+    #: for as long as there was only one answer.
+    origin: str = "canon"
+    #: `in-chain`, `skipped`, or `` when no campaign is selected. Says whether
+    #: this is in play at this table; never used to rank, only to label.
+    chain_status: str = ""
+    #: Set on a passage that came along because of WHERE it sits, naming the
+    #: section it rode with. Positional relevance is not lexical, so a reader
+    #: seeing it among scored passages needs to know it was not scored.
+    rode_with: str = ""
     #: Lucene's score, on a text-path passage only. `None` on a graph passage,
     #: and deliberately not defaulted to 0.0: a name match has no score, and a
     #: zero would read as "scored, badly".
@@ -293,6 +344,12 @@ class Retrieval:
     #: turns ago is a different kind of answer, and a reader must be able to
     #: see which they got.
     carried: bool = False
+    #: The display name of the book this came from, so a caller rendering a
+    #: prompt does not have to know one. Two model-facing strings said "Curse
+    #: of Strahd" unconditionally and went on saying it after a second book was
+    #: loaded -- the same stale-constant defect as the chapter count, but told
+    #: to the MODEL, where nobody could see it.
+    book_title: str = ""
 
     @property
     def found(self) -> bool:
@@ -485,6 +542,7 @@ class CanonRetriever:
         limit: int = DEFAULT_LIMIT,
         passage_width: str = WIDTH_SECTION,
         book: str = "cos",
+        campaign: str | None = None,
     ) -> None:
         """`book` is the ONE book this retriever reads.
 
@@ -502,8 +560,132 @@ class CanonRetriever:
         self.limit = limit
         self.passage_width = passage_width
         self.book = book
+        self.campaign = campaign
+        self._title: str | None = None
 
     def retrieve(
+        self,
+        question: str,
+        *,
+        limit: int | None = None,
+        carry: Sequence[str] = (),
+    ) -> Retrieval:
+        """Canon for a question, plus this table's own material when it has any.
+
+        A THIN WRAPPER so the title is attached in ONE place. `_retrieve` has
+        four `return Retrieval(...)` sites and stamping each was four chances
+        to forget -- the shape of defect this module already carries scars for.
+        The campaign overlay hangs here for the same reason.
+
+        WITH NO CAMPAIGN NOTHING BELOW RUNS. `campaign` is None by default and
+        both evaluation harnesses build retrievers without one, so the 96
+        questions cannot see a DM's material no matter what is in the graph --
+        by construction, not by discipline.
+        """
+        found = replace(
+            self._retrieve(question, limit=limit, carry=carry),
+            book_title=self.title,
+        )
+        if not self.campaign:
+            return found
+        return self._with_campaign(found)
+
+    def _with_campaign(self, found: Retrieval) -> Retrieval:
+        """Label what came back, and bring along what the DM chained beside it.
+
+        CONCATENATED, NEVER BLENDED. Canon keeps its own order and its own
+        ranking; campaign passages follow, each labelled with why it is here.
+        Three orderings -- graph occurrences, Lucene score, chain position --
+        stay three, so a reader can always say which one is responsible for any
+        line. Merging them into one number is the one thing this module has
+        refused everywhere else.
+        """
+        with self._session() as session:
+            links = frozenset(
+                (row["source"], row["target"])
+                for row in self._rows(session, CHAIN_AROUND)
+            )
+            skipped = {row["id"] for row in self._rows(session, CAMPAIGN_SKIPPED)}
+
+        by_id = {p.section_id: p for p in found.passages}
+        labelled: list[Passage] = []
+        riders: list[Passage] = []
+        cut = 0
+        for passage in found.passages:
+            status = "skipped" if passage.section_id in skipped else "in-chain"
+            labelled.append(
+                replace(
+                    passage,
+                    origin="campaign" if is_campaign_id(passage.section_id) else "canon",
+                    chain_status=status,
+                )
+            )
+            before, after, dropped = adjacent_homebrew(links, passage.section_id)
+            cut += dropped
+            for section_id in before + after:
+                if section_id in by_id or any(r.section_id == section_id for r in riders):
+                    # Already retrieved on its own merits. Deduplicated by
+                    # section id, `combine_passages`-style: the same passage
+                    # twice is noise, and the scored copy is the better one.
+                    continue
+                rider = self._campaign_passage(section_id)
+                if rider is not None:
+                    riders.append(replace(rider, rode_with=passage.section_id))
+
+        return replace(
+            found,
+            passages=tuple(labelled + riders),
+            dropped=found.dropped + cut,
+        )
+
+    def _campaign_passage(self, section_id: str) -> Passage | None:
+        """One campaign section, as a passage. None when it has vanished."""
+        with self._session() as session:
+            rows = self._rows(
+                session,
+                """
+                MATCH (s:Section {id:$id, plane:'campaign'})
+                RETURN s.id AS section_id, s.heading AS section, s.text AS text
+                """,
+                {"id": section_id},
+            )
+        if not rows:
+            return None
+        row = rows[0]
+        return Passage(
+            section_id=row["section_id"],
+            chapter=self.campaign or "",
+            chapter_index=0,
+            section=row["section"] or "",
+            section_index=0,
+            text=row["text"] or "",
+            occurrences=0,
+            entity_ids=(),
+            origin="campaign",
+            chain_status="in-chain",
+        )
+
+    @property
+    def title(self) -> str:
+        """This book's display name, read from the graph and remembered.
+
+        Falls back to the slug rather than raising: a prompt that says `kftgv`
+        is worse than one that says Keys from the Golden Vault and better than
+        no answer at all.
+        """
+        if self._title is None:
+            try:
+                with self._session() as session:
+                    row = session.run(
+                        "MATCH (b:Book {slug:$slug}) RETURN b.display_name AS title",
+                        {"slug": self.book},
+                    ).single()
+                self._title = (dict(row)["title"] if row else "") or self.book
+            except Exception:  # noqa: BLE001 - a title is not worth failing a question for
+                self._title = self.book
+        return self._title
+
+    def _retrieve(
         self,
         question: str,
         *,
@@ -937,6 +1119,12 @@ class CanonRetriever:
             "plane": CANON_PLANE,
             "book": f"{self.book}:",
             "book_slug": self.book,
+            # None when no campaign is selected, which is the DEFAULT and makes
+            # every campaign clause below a no-op. The evaluation harnesses
+            # construct retrievers without one, so contamination is impossible
+            # by construction rather than by remembering.
+            "campaign": self.campaign,
+            "campaign_prefix": f"hb:{self.campaign}:" if self.campaign else None,
             **(params or {}),
         }
         return [dict(record) for record in session.run(query, merged)]

@@ -65,6 +65,13 @@ class BookScheme:
     #: carries no `==Index==` at all, so the field is empty there and
     #: `plan_write` falls back to filtering by name shape.
     gazetteer: str = ""
+    #: Starter subjects for the lab, keyed by what they seed: `ask` for the
+    #: chat box, `quest`/`npc`/`monster` for the generator. HERE rather than
+    #: in the web app because they have to NAME something the book contains --
+    #: the chat one is click-to-fill and has to actually retrieve -- and a
+    #: Barovia tavern sat in the ask box while the lab answered out of a heist
+    #: anthology. A book without them simply offers none.
+    examples: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Normalise the allowlist HERE, so no caller has to remember to.
@@ -114,6 +121,11 @@ class BookScheme:
 LEGACY = BookScheme(prefix="cos")
 
 
+#: Where the committed schemes live. Here rather than in each caller: two
+#: modules already needed it and a third would have been a third spelling.
+SEEDS = Path(__file__).parent / "seeds" / "books"
+
+
 def load(path: Path) -> BookScheme:
     """Read a scheme from YAML.
 
@@ -130,4 +142,5 @@ def load(path: Path) -> BookScheme:
             "structural_headings", "structural-headings.yaml"
         ),
         gazetteer=raw.get("gazetteer", ""),
+        examples=dict(raw.get("examples") or {}),
     )

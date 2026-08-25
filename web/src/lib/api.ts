@@ -33,8 +33,18 @@ export interface LabConfig {
   default_model: string
   kinds: string[]
   defaults: Depth
-  /** Counted from the graph, never written down -- it went stale twice. */
+  /** Counted from the graph, never written down -- the count went stale twice
+   *  and the title was hardcoded to Curse of Strahd until there were two. */
+  books: BookInfo[]
+}
+
+export interface BookInfo {
+  slug: string
+  title: string
   chapters: number
+  /** Starter subjects from the book's own seed, keyed `ask`/`quest`/`npc`/
+   *  `monster`. Empty for a book that names none. */
+  examples: Record<string, string>
 }
 
 export interface Usage {
@@ -105,6 +115,9 @@ export interface ChatReply {
   retrieval: RetrievalReport | null
   subgraph: SubgraphView | null
   model: string
+  /** Draft cards the model asked for. NEVER part of `message`: a generation
+   *  that arrived as prose would carry none of the provenance split. */
+  generations?: GeneratedReply[]
 }
 
 export interface GeneratedReply {
@@ -114,6 +127,9 @@ export interface GeneratedReply {
   body: string
   from_canon: { claim: string; cite: string }[]
   invented: string[]
+  /** The third source: what came from the conversation rather than the book or
+   *  the model. Present only when chat handed context over. */
+  from_context?: string[]
   sources: Source[]
   usage: Usage
   cost: Cost
@@ -121,6 +137,51 @@ export interface GeneratedReply {
   error: string
   raw: string
   model: string
+  /** Set on a card the chat agent asked for: the canon section it goes after. */
+  anchor?: string
+  carried?: string[]
+}
+
+export interface CampaignInfo {
+  slug: string
+  name: string
+  books: string[]
+  sections: number
+}
+
+export interface OrderRow {
+  section_id: string
+  heading: string
+  origin: 'canon' | 'campaign'
+  skipped: boolean
+}
+
+export interface StoredResult {
+  entity_id: string
+  section_id: string
+  citations: number
+  chain_changes: number
+  anchored_after: string
+}
+
+async function getJSON<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`)
+  if (!response.ok) throw new Error(`${path} failed: ${response.status}`)
+  return response.json()
+}
+
+/** Posts to a path OUTSIDE `/lab`, which `post` below prefixes. */
+async function postTo<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null)
+    throw new Error(detail?.detail || `${path} failed: ${response.status}`)
+  }
+  return response.json()
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -146,12 +207,61 @@ export const labAPI = {
     return response.json()
   },
 
-  chat(message: string, model: string, depth: Depth, sessionId: string) {
-    return post<ChatReply>('/chat', { message, model, depth, session_id: sessionId })
+  chat(
+    message: string,
+    model: string,
+    depth: Depth,
+    sessionId: string,
+    book: string,
+    campaign: string | null,
+  ) {
+    return post<ChatReply>('/chat', {
+      message, model, depth, session_id: sessionId, book, campaign,
+    })
   },
 
-  generate(kind: string, subject: string, model: string, depth: Depth) {
-    return post<GeneratedReply>('/generate', { kind, subject, model, depth })
+  generate(
+    kind: string,
+    subject: string,
+    model: string,
+    depth: Depth,
+    book: string,
+    campaign: string | null,
+  ) {
+    return post<GeneratedReply>('/generate', { kind, subject, model, depth, book, campaign })
+  },
+
+  campaigns(): Promise<{ campaigns: CampaignInfo[] }> {
+    return getJSON('/homebrew/campaigns')
+  },
+
+  runningOrder(campaign: string): Promise<{ sections: OrderRow[] }> {
+    return getJSON(`/homebrew/running-order?campaign=${encodeURIComponent(campaign)}`)
+  },
+
+  /** Approve a card into the graph. The card is the gate; this is the write. */
+  store(body: {
+    campaign: string
+    kind: string
+    title: string
+    body: string
+    generated_body: string
+    from_canon: { claim: string; cite: string }[]
+    invented: string[]
+    from_context: string[]
+    sources: Source[]
+    anchor: string | null
+    model: string
+  }): Promise<StoredResult> {
+    return postTo<StoredResult>('/homebrew/store', body)
+  },
+
+  skip(campaign: string, sectionId: string) {
+    return postTo('/homebrew/skip', { campaign, section_id: sectionId })
+  },
+
+  unskip(campaign: string, sectionId: string) {
+    return postTo('/homebrew/unskip', { campaign, section_id: sectionId })
   },
 
   reset(sessionId: string) {

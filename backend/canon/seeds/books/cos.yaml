@@ -10,3 +10,11 @@ anthology: false
 
 # The Forgotten Realms Wiki index for this book: 677 names.
 gazetteer: data/gazetteer/curse-of-strahd.json
+
+# What the lab offers as a starting point. The ask is click-to-fill, so it has
+# to be a question this book can actually answer.
+examples:
+  ask: Who owns the Blood of the Vine Tavern?
+  quest: a reason to enter the church undercroft
+  npc: a regular at the Blood of the Vine Tavern
+  monster: something stalking the Svalich Woods

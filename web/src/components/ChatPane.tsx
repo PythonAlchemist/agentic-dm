@@ -1,27 +1,58 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
-import { labAPI, type ChatReply, type Depth } from '@/lib/api'
+import { labAPI, type ChatReply, type Depth, type OrderRow } from '@/lib/api'
+import { GenerationCard } from './GenerationCard'
 import { CallMeter, RetrievalPanel } from './Meters'
 import { SubgraphPanel } from './SubgraphPanel'
 
-const SUGGESTION = 'Who owns the Blood of the Vine Tavern?'
 
 type Turn = { question: string; reply?: ChatReply; error?: string }
 
 export function ChatPane({
+  suggestion,
+  book,
+  campaign,
+  onChainChanged,
   model,
   depth,
   sessionId,
   onSpend,
 }: {
+  /** From the selected book's seed -- a Barovia tavern used to sit in this box
+   *  while the lab answered out of a heist anthology. Empty means no chip. */
+  suggestion: string
+  book: string
+  campaign: string | null
+  onChainChanged: () => void
   model: string
   depth: Depth
   sessionId: string
   onSpend: (reply: ChatReply) => void
 }) {
   const [turns, setTurns] = useState<Turn[]>([])
+  // The anchor picker on a card needs the book's sections to choose from.
+  // Fetched once per table rather than per card: it is the same list.
+  const [order, setOrder] = useState<OrderRow[]>([])
+
+  useEffect(() => {
+    if (!campaign) return
+    // `cancelled` is not lint appeasement: switching tables mid-fetch would
+    // otherwise let the previous table's order land and be offered as this
+    // one's insertion points.
+    let cancelled = false
+    labAPI
+      .runningOrder(campaign)
+      .then((r) => {
+        if (!cancelled) setOrder(r.sections)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [campaign])
+
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -32,7 +63,7 @@ export function ChatPane({
     setBusy(true)
     setTurns((t) => [...t, { question }])
     try {
-      const reply = await labAPI.chat(question, model, depth, sessionId)
+      const reply = await labAPI.chat(question, model, depth, sessionId, book, campaign)
       setTurns((t) => t.map((turn, i) => (i === t.length - 1 ? { ...turn, reply } : turn)))
       onSpend(reply)
     } catch (error) {
@@ -94,6 +125,21 @@ export function ChatPane({
                       </ul>
                     )}
 
+                    {/* CARDS, NOT PROSE. The model was told to say a draft is
+                        ready and not to write it; this is where the draft
+                        actually appears, with its provenance split intact and
+                        a person's approval between it and the graph. */}
+                    {(turn.reply.generations ?? []).map((card, index) => (
+                      <div key={index} className="mt-3">
+                        <GenerationCard
+                          card={card}
+                          campaign={campaign}
+                          order={campaign ? order : []}
+                          onStored={onChainChanged}
+                        />
+                      </div>
+                    ))}
+
                     <CallMeter usage={turn.reply.usage} cost={turn.reply.cost} />
                     <RetrievalPanel report={turn.reply.retrieval} />
                   </>
@@ -116,10 +162,10 @@ export function ChatPane({
                 // with anything typed, Tab has to go on moving focus.
                 if (e.key === 'Tab' && !draft) {
                   e.preventDefault()
-                  setDraft(SUGGESTION)
+                  setDraft(suggestion)
                 }
               }}
-              placeholder={SUGGESTION}
+              placeholder={suggestion}
               className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-amber-600/60"
             />
             <button

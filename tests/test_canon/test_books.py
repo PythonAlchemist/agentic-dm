@@ -167,3 +167,30 @@ class TestMintingUnderAScheme:
         assert section_id("prisoner-13", 4, scheme=BookScheme(prefix="kftgv")) == (
             "kftgv:prisoner-13#4"
         )
+
+
+class TestExamples:
+    """Every committed book offers the lab a starting point in ITS OWN world.
+
+    A book added without them leaves the ask box empty and the generator with
+    no placeholders -- silently, since an empty string renders as nothing.
+    """
+
+    def test_every_seed_carries_all_four(self):
+        from backend.canon.books import SEEDS, load
+
+        seeds = sorted(SEEDS.glob("*.yaml"))
+        assert seeds, "the seeds directory must hold the committed books"
+        for path in seeds:
+            examples = load(path).examples
+            assert set(examples) == {"ask", "quest", "npc", "monster"}, path.name
+            assert all(v.strip() for v in examples.values()), path.name
+
+    def test_no_two_books_share_a_starting_question(self):
+        """The failure this exists to stop: a Barovia tavern in the ask box
+        while the lab answers out of a heist anthology. Identical asks across
+        books is what that looked like."""
+        from backend.canon.books import SEEDS, load
+
+        asks = [load(p).examples["ask"] for p in sorted(SEEDS.glob("*.yaml"))]
+        assert len(set(asks)) == len(asks)

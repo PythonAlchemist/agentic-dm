@@ -16,3 +16,12 @@ structural_headings: structural-headings-kftgv.yaml
 # Without this line it would be thirteen separate organisations.
 global_names:
   - The Golden Vault
+
+# As in `cos.yaml`: the ask is click-to-fill, so it names something the book
+# holds. A heist anthology's starting question is about the patron every
+# adventure shares rather than about any one job.
+examples:
+  ask: What is the Golden Vault and how do missions reach the party?
+  quest: a reason to break into the museum after hours
+  npc: a fence who moves stolen goods for the Golden Vault
+  monster: something guarding a vault nobody has opened

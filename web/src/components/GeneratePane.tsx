@@ -1,22 +1,35 @@
 'use client'
 
-import { useState } from 'react'
-import { labAPI, type Depth, type GeneratedReply } from '@/lib/api'
+import { useEffect, useState } from 'react'
+import { labAPI, type Depth, type GeneratedReply, type OrderRow } from '@/lib/api'
+import { GenerationCard } from './GenerationCard'
 import { CallMeter, RetrievalPanel } from './Meters'
 
+// Labels only. The PLACEHOLDERS come from the selected book's seed, because
+// they name things -- and three Barovia examples stayed put when the lab
+// switched to a heist anthology.
 const KINDS = [
-  { id: 'quest', label: 'Quest', placeholder: 'a reason to enter the church undercroft' },
-  { id: 'npc', label: 'NPC', placeholder: 'a regular at the Blood of the Vine Tavern' },
-  { id: 'monster', label: 'Monster', placeholder: 'something stalking the Svalich Woods' },
+  { id: 'quest', label: 'Quest' },
+  { id: 'npc', label: 'NPC' },
+  { id: 'monster', label: 'Monster' },
 ]
 
 /** A quest, NPC or monster, with what came from the book kept apart from what
  *  was made up. */
 export function GeneratePane({
+  examples,
+  book,
+  campaign,
+  onChainChanged,
   model,
   depth,
   onSpend,
 }: {
+  /** The selected book's starter subjects, keyed by kind. */
+  examples: Record<string, string>
+  book: string
+  campaign: string | null
+  onChainChanged: () => void
   model: string
   depth: Depth
   onSpend: (reply: GeneratedReply) => void
@@ -26,8 +39,23 @@ export function GeneratePane({
   const [result, setResult] = useState<GeneratedReply | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [order, setOrder] = useState<OrderRow[]>([])
 
-  const placeholder = KINDS.find((k) => k.id === kind)?.placeholder ?? ''
+  useEffect(() => {
+    if (!campaign) return
+    let cancelled = false
+    labAPI
+      .runningOrder(campaign)
+      .then((r) => {
+        if (!cancelled) setOrder(r.sections)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [campaign])
+
+  const placeholder = examples[kind] ?? ''
 
   const run = async () => {
     if (!subject.trim() || busy) return
@@ -35,7 +63,7 @@ export function GeneratePane({
     setError('')
     setResult(null)
     try {
-      const reply = await labAPI.generate(kind, subject.trim(), model, depth)
+      const reply = await labAPI.generate(kind, subject.trim(), model, depth, book, campaign)
       setResult(reply)
       onSpend(reply)
     } catch (e) {
@@ -106,48 +134,17 @@ export function GeneratePane({
 
         {result && !result.error && (
           <>
-            <h2 className="text-lg font-medium text-amber-300">{result.title}</h2>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200">
-              {result.body}
-            </p>
-
-            {/* THE SPLIT IS THE PRODUCT. A DM who cannot tell which half came
-                from the book will eventually contradict the book at the table. */}
-            <div className="grid gap-3 md:grid-cols-2">
-              <section className="rounded-lg border border-emerald-900/50 bg-emerald-950/10 p-3">
-                <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-emerald-400">
-                  From canon
-                </h3>
-                {result.from_canon.length === 0 ? (
-                  <p className="text-xs text-neutral-500">
-                    Nothing — all of this is invented.
-                  </p>
-                ) : (
-                  <ul className="space-y-1 text-sm text-neutral-200">
-                    {result.from_canon.map((c, i) => (
-                      <li key={i}>
-                        {c.claim} <span className="text-xs text-neutral-600">{c.cite}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <p className="mt-2 text-xs leading-relaxed text-neutral-600">
-                  Citations point at the passages supplied. Nothing checks that a
-                  passage supports its claim — open it and see.
-                </p>
-              </section>
-
-              <section className="rounded-lg border border-amber-900/50 bg-amber-950/10 p-3">
-                <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-amber-400">
-                  Invented
-                </h3>
-                <ul className="space-y-1 text-sm text-neutral-200">
-                  {result.invented.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
-              </section>
-            </div>
+            {/* THE SAME CARD THE CHAT TAB SHOWS, deliberately. One generator,
+                two callers, and one approval path -- a second store flow here
+                would be free to drift into being the good one, or the one that
+                forgot a provenance list. The split rendering lives in the card
+                so both entry points cannot disagree about it. */}
+            <GenerationCard
+              card={result}
+              campaign={campaign}
+              order={order}
+              onStored={onChainChanged}
+            />
 
             {result.sources.length > 0 && (
               <ul className="space-y-0.5 text-xs text-neutral-600">

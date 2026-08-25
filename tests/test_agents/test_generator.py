@@ -191,3 +191,156 @@ class TestGenerating:
         )
         assert result.sources[0]["source"] == "cos:the-village-of-barovia#5"
         assert result.sources[0]["citation"] == "[1]"
+
+
+class TestTheBookIsNamedFromTheRetrieval:
+    """Both model-facing blocks name the book the passages actually came from.
+
+    THE DEFECT THIS PINS. `_INSTRUCTIONS` opened "a Dungeon Master running
+    Curse of Strahd" and `_PREAMBLE` said "passages retrieved from Curse of
+    Strahd", both unconditionally. A second book was loaded and made selectable
+    and neither string changed, so every Golden Vault turn was prefaced to the
+    model as Barovia -- the stale-constant defect the chapter count already
+    taught this project, except said to the MODEL, where no reader sees it.
+    """
+
+    def _messages(self, title: str) -> str:
+        # A PASSAGE IS REQUIRED. `render` short-circuits to the no-canon message
+        # when there are none, so a passage-less retrieval never reaches the
+        # preamble at all -- and a first draft of this test passed happily while
+        # the preamble was still hardcoded, because it was never rendered.
+        retrieval = Retrieval(
+            question="a guard",
+            book_title=title,
+            path=PATH_GRAPH,
+            passages=(
+                Passage(
+                    section_id="x:ch#0",
+                    chapter="ch",
+                    chapter_index=0,
+                    section="A Section",
+                    section_index=0,
+                    text="A guard stands here.",
+                    occurrences=1,
+                    entity_ids=(),
+                ),
+            ),
+        )
+        depth = canon_context.Depth()
+        return "\n".join(
+            m["content"] for m in generator.build_messages("npc", "a guard", retrieval, depth)
+        )
+
+    def test_the_heist_anthology_is_named(self):
+        text = self._messages("Keys from the Golden Vault")
+        assert "Keys from the Golden Vault" in text
+        assert "Curse of Strahd" not in text
+
+    def test_curse_of_strahd_is_still_named_when_it_is_the_book(self):
+        """The fix must not have simply deleted the name."""
+        assert "Curse of Strahd" in self._messages("Curse of Strahd")
+
+    def test_an_unknown_book_says_something_rather_than_nothing(self):
+        """A retrieval with no title must not render an empty phrase."""
+        text = self._messages("")
+        assert "running ." not in text and "retrieved from  " not in text
+
+
+class TestTheThirdSource:
+    """A conversation is neither the book nor the model's invention.
+
+    Once chat can call the generator, three things can put a detail on the
+    page: the book, the model, and what the DM said at the table. Two buckets
+    for three origins forces a lie either way -- `from_canon` claims the book
+    says something it does not, `invented` claims the model made up a fact the
+    table established.
+    """
+
+    def _retrieval(self):
+        return Retrieval(
+            question="a sea battle",
+            book_title="Keys from the Golden Vault",
+            path=PATH_GRAPH,
+            passages=(
+                Passage(
+                    section_id="kftgv:prisoner-13#7",
+                    chapter="prisoner-13",
+                    chapter_index=3,
+                    section="Trek to the Prison",
+                    section_index=7,
+                    text="The voyage north takes eight days.",
+                    occurrences=1,
+                    entity_ids=(),
+                ),
+            ),
+        )
+
+    def _messages(self, context=None):
+        return generator.build_messages(
+            "scene", "a sea battle", self._retrieval(), canon_context.Depth(), context
+        )
+
+    def test_context_is_its_own_block_not_folded_into_canon(self):
+        """A DM's remark and the book's sentence must not arrive looking alike."""
+        system = self._messages(
+            generator.GenerationContext(entities=("Meera Raheer",), note="they took the boat")
+        )[0]["content"]
+        assert "CONVERSATION" in system
+        canon_block, _, context_block = system.partition("CONVERSATION")
+        assert "they took the boat" in context_block
+        assert "they took the boat" not in canon_block
+
+    def test_the_third_list_is_asked_for_when_context_is_given(self):
+        user = self._messages(generator.GenerationContext(note="they took the boat"))[1]["content"]
+        assert "from_context" in user
+
+    def test_and_is_not_asked_for_when_there_is_none(self):
+        """A required list that is always empty teaches the model to ignore it."""
+        assert "from_context" not in self._messages()[1]["content"]
+
+    def test_empty_context_renders_nothing_at_all(self):
+        assert generator.GenerationContext().render() == ""
+        assert "CONVERSATION" not in self._messages()[0]["content"]
+
+    def test_parse_rejects_a_response_missing_the_third_list(self):
+        _, error = generator.parse(
+            json.dumps({"title": "t", "body": "b", "from_canon": [], "invented": []}),
+            expect_context=True,
+        )
+        assert "from_context" in error
+
+    def test_parse_still_accepts_it_when_no_context_was_given(self):
+        data, error = generator.parse(
+            json.dumps({"title": "t", "body": "b", "from_canon": [], "invented": []})
+        )
+        assert error == "" and data["title"] == "t"
+
+    def test_the_two_original_lists_are_still_required(self):
+        """The contract this module was built on does not weaken."""
+        for missing in ("from_canon", "invented"):
+            payload = {"title": "t", "body": "b", "from_canon": [], "invented": []}
+            del payload[missing]
+            assert missing in generator.parse(json.dumps(payload))[1]
+
+
+class TestTheSceneKind:
+    def test_scene_is_generatable(self):
+        assert "scene" in generator.KINDS
+
+    def test_it_asks_about_where_it_interrupts(self):
+        """What makes a scene a scene is its position, not its contents."""
+        user = generator.build_messages(
+            "scene", "a sea battle",
+            Retrieval(question="x", book_title="B", path=PATH_GRAPH, passages=(
+                Passage(section_id="b:c#0", chapter="c", chapter_index=0, section="S",
+                        section_index=0, text="t", occurrences=1, entity_ids=()),
+            )),
+            canon_context.Depth(),
+        )[1]["content"]
+        assert "interrupts" in user
+
+    def test_an_unknown_kind_is_still_refused(self):
+        with pytest.raises(ValueError):
+            generator.build_messages(
+                "sea-shanty", "x", Retrieval(question="x"), canon_context.Depth()
+            )

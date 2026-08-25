@@ -1,6 +1,6 @@
 'use client'
 
-import type { Depth, ModelInfo } from '@/lib/api'
+import type { BookInfo, CampaignInfo, Depth, ModelInfo } from '@/lib/api'
 import { Card, Slider } from './ui'
 
 /**
@@ -13,12 +13,24 @@ import { Card, Slider } from './ui'
  * no reason attached.
  */
 export function Controls({
+  campaigns,
+  campaign,
+  onCampaign,
+  books,
+  book,
+  onBook,
   models,
   model,
   onModel,
   depth,
   onDepth,
 }: {
+  campaigns: CampaignInfo[]
+  campaign: string | null
+  onCampaign: (c: string | null) => void
+  books: BookInfo[]
+  book: string
+  onBook: (b: string) => void
   models: ModelInfo[]
   model: string
   onModel: (m: string) => void
@@ -29,6 +41,77 @@ export function Controls({
 
   return (
     <div className="space-y-4">
+      {/* FIRST, above the model: which world the answers come from matters
+          more than which model writes them. Every book here is one the graph
+          actually holds -- the list is counted, not written down. */}
+      <Card title="Campaign">
+        <div className="space-y-1 p-2">
+          {books.map((b) => (
+            <button
+              key={b.slug}
+              onClick={() => onBook(b.slug)}
+              className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                b.slug === book
+                  ? 'border-amber-600/60 bg-amber-500/10'
+                  : 'border-transparent hover:bg-neutral-800/50'
+              }`}
+            >
+              <span className="text-sm font-medium text-neutral-200">{b.title}</span>
+              <span className="mt-0.5 block text-xs tabular-nums text-neutral-600">
+                {b.chapters} chapters loaded
+              </span>
+            </button>
+          ))}
+        </div>
+        {/* Said plainly, because the transcript vanishing is otherwise
+            indistinguishable from a bug. */}
+        <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-neutral-500">
+          Switching campaigns starts a new conversation. A session reads one
+          book, so what the agent is holding onto has to go with it.
+        </p>
+      </Card>
+
+      {/* SEPARATE FROM THE BOOK, because they answer different questions: the
+          book is which world, the table is whose. Canon only is the DEFAULT
+          and is what every measurement this project reports is taken with. */}
+      <Card title="Table">
+        <div className="space-y-1 p-2">
+          <button
+            onClick={() => onCampaign(null)}
+            className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
+              campaign === null
+                ? 'border-amber-600/60 bg-amber-500/10'
+                : 'border-transparent hover:bg-neutral-800/50'
+            }`}
+          >
+            <span className="text-sm font-medium text-neutral-200">Canon only</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-neutral-500">
+              The published book, with nothing of yours in it.
+            </span>
+          </button>
+          {campaigns.map((c) => (
+            <button
+              key={c.slug}
+              onClick={() => onCampaign(c.slug)}
+              className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
+                c.slug === campaign
+                  ? 'border-amber-600/60 bg-amber-500/10'
+                  : 'border-transparent hover:bg-neutral-800/50'
+              }`}
+            >
+              <span className="text-sm font-medium text-neutral-200">{c.name}</span>
+              <span className="mt-0.5 block text-xs tabular-nums text-neutral-600">
+                {c.sections} sections in your running order
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-neutral-500">
+          Your own material rides alongside canon and is always labelled as
+          yours. Switching tables starts a new conversation.
+        </p>
+      </Card>
+
       <Card title="Model">
         <div className="space-y-1 p-2">
           {models.map((m) => (

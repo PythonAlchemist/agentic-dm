@@ -98,13 +98,21 @@ def apply(retrieval: Retrieval, depth: Depth) -> Retrieval:
     return replace(retrieval, proposed=kept)
 
 #: What the model is told about the whole block, before any of it.
-_PREAMBLE = (
-    "CANON — passages retrieved from Curse of Strahd for this question.\n"
-    "Answer from these passages. Cite the section you used, like [1].\n"
-    "If they do not cover what was asked, say so plainly rather than filling "
-    "the gap from memory — a DM acting on an invented detail finds out at the "
-    "table."
-)
+#:
+#: TAKES THE BOOK'S NAME rather than stating one. This said "Curse of Strahd"
+#: unconditionally, and went on saying it after a second book was loaded -- so
+#: every Golden Vault answer was prefaced to the model as Barovia. The same
+#: stale-constant defect as the chapter count, except told to the model, where
+#: no reader could see it. Counted, never written down, applies to prose too.
+def _preamble(book_title: str) -> str:
+    book = book_title or "the loaded canon"
+    return (
+        f"CANON — passages retrieved from {book} for this question.\n"
+        "Answer from these passages. Cite the section you used, like [1].\n"
+        "If they do not cover what was asked, say so plainly rather than filling "
+        "the gap from memory — a DM acting on an invented detail finds out at the "
+        "table."
+    )
 
 #: Reached when no name in the question resolved. The model is told the answer
 #: may simply not be here, because the fallback cannot say so itself: any
@@ -153,6 +161,27 @@ _PROPOSED_HEADING = (
     "each as a lead to check, never state one as fact:"
 )
 
+#: The third trust level, and the one the other two cannot express. Authored
+#: material is not derived from the book's structure and is not an extractor's
+#: guess -- it is a decision by the person running the game, which makes it
+#: authoritative AT THIS TABLE and no claim at all about the published book.
+_AUTHORED_HEADING = (
+    "Relationships the DM AUTHORED for this campaign. True at this table; the "
+    "published book does not say them:"
+)
+
+#: Marks on a passage, for what the DM's own decisions did to it.
+_CAMPAIGN_MARK = "  ← YOUR CAMPAIGN, written by you. Not the published book."
+_SKIPPED_MARK = "  ← SKIPPED in this campaign: not in play at this table."
+#: A rider was not scored or matched -- it is here because of WHERE the DM put
+#: it. A reader seeing it among ranked passages has to know that.
+_RODE_MARK = "  ← in this campaign's running order beside [{}]. Positional, not a keyword match."
+
+
+def _authored(edge: dict) -> bool:
+    """An edge the DM asserted, rather than one derived or guessed."""
+    return edge.get("status") == "authored"
+
 
 def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
     """The context block, or a statement that there is none.
@@ -165,23 +194,38 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
     if not retrieval.passages:
         return _NO_CANON
 
-    parts = [_PREAMBLE]
+    parts = [_preamble(retrieval.book_title)]
     if retrieval.path == PATH_TEXT:
         parts.append(_TEXT_WARNING)
         if retrieval.terms:
             parts.append(f"Words searched for: {', '.join(retrieval.terms)}.")
 
+    numbers = {p.section_id: n for n, p in enumerate(retrieval.passages, start=1)}
     for number, passage in enumerate(retrieval.passages, start=1):
         heading = f"[{number}] {passage.chapter} › {passage.section}"
         # Only when the block has not already said it wholesale, so a pure text
         # retrieval does not repeat the warning on every line.
         if passage.path == PATH_TEXT and retrieval.path != PATH_TEXT:
             heading += _KEYWORD_MARK
+        # WHOSE WORD IT IS, said on the line the model reads. The block above
+        # promises "passages retrieved from <the book>", and a DM's own scene
+        # arriving under that promise unlabelled would be the model telling a
+        # table its own invention is published canon.
+        if passage.origin == "campaign":
+            heading += _CAMPAIGN_MARK
+        elif passage.chain_status == "skipped":
+            heading += _SKIPPED_MARK
+        if passage.rode_with:
+            heading += _RODE_MARK.format(numbers.get(passage.rode_with, "?"))
         parts.append(f"{heading}\n{passage.text}")
 
     for heading, edges in (
-        (_ACCEPTED_HEADING, retrieval.accepted),
+        (_ACCEPTED_HEADING, tuple(e for e in retrieval.accepted if not _authored(e))),
         (_PROPOSED_HEADING, retrieval.proposed),
+        (
+            _AUTHORED_HEADING,
+            tuple(e for e in retrieval.accepted + retrieval.proposed if _authored(e)),
+        ),
     ):
         if not edges:
             continue
@@ -205,15 +249,24 @@ def sources(retrieval: Retrieval) -> list[dict]:
     Taken from the PASSAGE, not from the retrieval. One result now mixes both
     paths, and stamping the question's coarse label on every citation was how a
     Lucene guess came to be presented in the UI as a resolved name.
+
+    `type` IS READ OFF THE PASSAGE for exactly that reason. It was the constant
+    `"canon"` on every citation, which was true while canon was all there was
+    and became a lie the moment a DM's own material could be cited beside it --
+    the same defect as the coarse path label, one layer along.
     """
     return [
         {
             "source": passage.section_id,
-            "type": "canon",
+            "type": passage.origin,
             "chapter": passage.chapter,
             "section": passage.section,
             "path": passage.path,
             "citation": f"[{number}]",
+            # Empty when no campaign is selected. Says whether the DM has this
+            # in play, cut it, or has not placed it -- never used to rank.
+            "chain_status": passage.chain_status,
+            "rode_with": passage.rode_with,
         }
         for number, passage in enumerate(retrieval.passages, start=1)
     ]

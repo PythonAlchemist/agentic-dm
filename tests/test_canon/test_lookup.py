@@ -403,7 +403,7 @@ class TestWhereIs:
             session.run(
                 """
                 MATCH (p:Entity {id:$p}), (o:Entity {id:$o})
-                MERGE (p)-[r:CONTAINS]->(o) SET r.status = $status
+                MERGE (p)-[r:CONTAINS]->(o) SET r.status = $status, r.plane = 'canon'
                 """,
                 {"p": CHURCH.id, "o": ORPHAN.id, "status": ACCEPTED},
             )
@@ -726,7 +726,7 @@ class TestTheProposedLayerIsNeverLaundered:
             session.run(
                 """
                 MATCH (o:Entity {id:$o}), (p:Entity {id:$p})
-                MERGE (o)-[r:LOCATED_IN]->(p) SET r.status = $status
+                MERGE (o)-[r:LOCATED_IN]->(p) SET r.status = $status, r.plane = 'canon'
                 """,
                 {"o": ORPHAN.id, "p": CHURCH.id, "status": PROPOSED},
             )
@@ -741,7 +741,7 @@ class TestTheProposedLayerIsNeverLaundered:
             session.run(
                 """
                 MATCH (p:Entity {id:$p}), (o:Entity {id:$o})
-                MERGE (p)-[r:CONTAINS]->(o) SET r.status = $status
+                MERGE (p)-[r:CONTAINS]->(o) SET r.status = $status, r.plane = 'canon'
                 """,
                 {"p": VILLAGE.id, "o": STRAHD.id, "status": PROPOSED},
             )

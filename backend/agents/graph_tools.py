@@ -82,7 +82,17 @@ def resolve(name: str, plane: str = CANON_PLANE) -> Result:
             dict(record)
             for record in session.run(
                 BY_ALIAS,
-                {"normalized": normalize(name), "plane": plane, "book": None}
+                # `campaign_prefix: None` DELIBERATELY, not by omission: these
+                # tools read canon and only canon, so a campaign's own names
+                # must not resolve through them. The parameter is required by
+                # the query rather than defaulted inside it, which is why this
+                # says so out loud instead of leaving it out.
+                {
+                    "normalized": normalize(name),
+                    "plane": plane,
+                    "book": None,
+                    "campaign_prefix": None,
+                },
             )
         ]
     # `BY_ALIAS` rather than `aliases.RESOLVE_BY_NAME`: that one returns ids

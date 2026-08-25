@@ -163,6 +163,17 @@ def split_by_status(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 #
 # Written out in full rather than composed, because a reader checking that
 # nothing fuzzy has crept into the read path should be able to see every MATCH.
+#
+# EVERY EDGE READ FILTERS `r.plane`, NOT JUST THE NODES AT ITS ENDS. The writer
+# stamps a plane on the relationship as well as on the entities, and for a long
+# time nothing read it back: `(n {plane:$plane})-[r]->(o {plane:$plane})` with
+# `r` unconstrained. That was invisible while every edge in the graph was canon,
+# and would have stopped being invisible the moment a campaign asserted a fact
+# between two CANON entities -- "at my table, Ireena owns the tavern" is an edge
+# whose ends are both canon, so a node-only filter returns it from every canon
+# read and hands it to the model under the heading that says the book said so.
+# Equality rather than `coalesce(r.plane,'canon')`: an edge written without a
+# plane is a bug, and this fails closed on it instead of guessing canon.
 # Labels are never interpolated: the only label text these carry is this
 # module's own constants, and a rung or a type is read back with `labels(n)`.
 
@@ -175,12 +186,12 @@ ORDER BY n.id
 #: Both directions of the spatial pair, from the entity's end.
 PLACEMENTS = f"""
 MATCH (n:Entity {{plane:$plane}})-[r:{LOCATED_IN}]->(p:Entity {{plane:$plane}})
-WHERE n.id IN $ids
+WHERE n.id IN $ids AND r.plane = $plane
 RETURN n.name AS entity, '{LOCATED_IN}' AS relationship,
        p.id AS place_id, p.name AS place, labels(p) AS place_labels, r.status AS status
 UNION
 MATCH (p:Entity {{plane:$plane}})-[r:{CONTAINS}]->(n:Entity {{plane:$plane}})
-WHERE n.id IN $ids
+WHERE n.id IN $ids AND r.plane = $plane
 RETURN n.name AS entity, '{CONTAINS}' AS relationship,
        p.id AS place_id, p.name AS place, labels(p) AS place_labels, r.status AS status
 """
@@ -202,12 +213,12 @@ ORDER BY chapter_index, section_index
 #: query rather than a re-use with the arrow flipped, so neither can drift.
 OCCUPANTS = f"""
 MATCH (p:Entity {{plane:$plane}})-[r:{CONTAINS}]->(x:Entity {{plane:$plane}})
-WHERE p.id IN $ids
+WHERE p.id IN $ids AND r.plane = $plane
 RETURN x.id AS id, x.name AS name, labels(x) AS labels,
        '{CONTAINS}' AS relationship, r.status AS status
 UNION
 MATCH (x:Entity {{plane:$plane}})-[r:{LOCATED_IN}]->(p:Entity {{plane:$plane}})
-WHERE p.id IN $ids
+WHERE p.id IN $ids AND r.plane = $plane
 RETURN x.id AS id, x.name AS name, labels(x) AS labels,
        '{LOCATED_IN}' AS relationship, r.status AS status
 """
@@ -232,13 +243,13 @@ ORDER BY chapter_index, section_index
 #: is the answer to "what is after Ireena" -- so an out-only read loses it.
 EDGES = """
 MATCH (n:Entity {plane:$plane})-[r]->(o:Entity {plane:$plane})
-WHERE n.id IN $ids
+WHERE n.id IN $ids AND r.plane = $plane
 RETURN n.name AS entity, 'out' AS direction, type(r) AS relationship,
        o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status,
        r.evidence_check AS evidence_check
 UNION
 MATCH (o:Entity {plane:$plane})-[r]->(n:Entity {plane:$plane})
-WHERE n.id IN $ids
+WHERE n.id IN $ids AND r.plane = $plane
 RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
        o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status,
        r.evidence_check AS evidence_check

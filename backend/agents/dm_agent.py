@@ -1,30 +1,29 @@
 """DM Agent for running games and assisting DMs."""
 
 import logging
-from typing import Optional
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from backend.core.config import settings
-from backend.rag import HybridRAGPipeline, QueryType
-from backend.agents import canon_context
-from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
-from backend.agents.conversation import ConversationManager, MessageRole
-from backend.agents.prompts import SYSTEM_PROMPT
-from backend.agents import graph_tools
+from backend.agents import canon_context, graph_tools, homebrew_tool
 from backend.agents import subgraph as subgraph_module
-from backend.agents.subgraph import Subgraph, note_named, seed as seed_subgraph
+from backend.agents.conversation import ConversationManager
+from backend.agents.prompts import SYSTEM_PROMPT
+from backend.agents.subgraph import Subgraph, note_named
+from backend.agents.subgraph import seed as seed_subgraph
+from backend.agents.tools import DiceResult, DMTools, EncounterResult, NPCResult
 from backend.canon import ontology
 from backend.canon.lookup import CANON_PLANE, TOGETHER
-from backend.core.database import read_only_session
 from backend.canon.retrieval import (
     PATH_GRAPH,
     PATH_TEXT,
     CanonRetriever,
     Retrieval,
 )
+from backend.core.config import settings
+from backend.core.database import read_only_session
 from backend.core.pricing import Usage, estimate
+from backend.rag import HybridRAGPipeline, QueryType
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +53,7 @@ class DMResponse(BaseModel):
     """Response from the DM Agent."""
 
     message: str
-    query_type: Optional[QueryType] = None
+    query_type: QueryType | None = None
     tool_results: list[dict] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
@@ -62,17 +61,23 @@ class DMResponse(BaseModel):
     #: on a tool command, which never reaches a model. Reported rather than
     #: merely logged: the number that matters to somebody paying for this is the
     #: one attached to the answer they just read.
-    usage: Optional[dict] = None
-    cost: Optional[dict] = None
+    usage: dict | None = None
+    cost: dict | None = None
     #: What retrieval did -- which names anchored, which path answered, what the
     #: budget cut. The dashboard shows it beside the answer so a thin answer can
     #: be traced to thin context rather than blamed on the model.
-    retrieval: Optional[dict] = None
+    retrieval: dict | None = None
     #: What the CONVERSATION is holding, after this turn. Sent every turn
     #: rather than only when it changes: a panel that updated on some turns and
     #: not others would leave a reader unsure whether nothing changed or
     #: nothing was sent.
-    subgraph: Optional[dict] = None
+    subgraph: dict | None = None
+    #: Draft cards the model asked for this turn, each with its provenance
+    #: split. NEVER folded into `message`: a generation that reached the reader
+    #: as prose would be invention wearing an answer's clothes, with none of
+    #: the envelope the generator exists to enforce. A person approves a card;
+    #: nothing here has been written to the graph.
+    generations: list[dict] = Field(default_factory=list)
 
 
 class DMAgent:
@@ -80,13 +85,13 @@ class DMAgent:
 
     def __init__(
         self,
-        campaign_id: Optional[str] = None,
-        campaign_context: Optional[dict] = None,
-        canon: Optional[CanonRetriever] = None,
-        model: Optional[str] = None,
-        depth: Optional[canon_context.Depth] = None,
+        campaign_id: str | None = None,
+        campaign_context: dict | None = None,
+        canon: CanonRetriever | None = None,
+        model: str | None = None,
+        depth: canon_context.Depth | None = None,
         temperature: float = _TEMPERATURE,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ):
         """Initialize the DM Agent.
 
@@ -118,6 +123,14 @@ class DMAgent:
         #: What this conversation is holding, as graph entities. The transcript
         #: is bounded and short; THIS is how a follow-up knows who "him" is.
         self.subgraph = Subgraph()
+        #: Validated generation asks from THIS turn, cleared at the start of
+        #: each one. Per-turn rather than per-session: a card the DM has
+        #: already been shown must not be re-generated on the next question.
+        self._requested_generations: list = []
+        #: Section ids this session has actually put in front of the model.
+        #: The anchor a generation may name is checked against it, so a model
+        #: cannot place a scene into a chapter nobody has opened.
+        self._seen_sections: set[str] = set()
 
         # Set system prompt
         self._set_system_prompt()
@@ -188,10 +201,17 @@ class DMAgent:
         # nothing to gate it on -- and a heuristic deciding when a question is
         # "about the book" would fail exactly on the questions a DM most needs
         # grounded. A question naming nothing simply retrieves little.
+        # Cleared per TURN: a card the DM has already been shown must not
+        # re-generate on the next question.
+        self._requested_generations = []
+
         retrieval = self._retrieve_canon(user_input) if use_canon else None
         if retrieval is not None:
             seed_subgraph(self.subgraph, retrieval)
             self.subgraph.evict(self.depth.subgraph_budget)
+            # Accumulates across the session, because a model may anchor a
+            # scene to a section it read two questions ago.
+            self._seen_sections.update(p.section_id for p in retrieval.passages)
 
         # Use RAG pipeline for context
         rag_response = None
@@ -219,7 +239,7 @@ class DMAgent:
 
         return response
 
-    def _check_tool_commands(self, user_input: str) -> Optional[dict]:
+    def _check_tool_commands(self, user_input: str) -> dict | None:
         """Check if input is a tool command.
 
         Args:
@@ -354,13 +374,13 @@ class DMAgent:
         thinner memory, never a stack trace.
         """
         from backend.canon.aliases import normalize
+        from backend.canon.lookup import type_labels
         from backend.canon.retrieval import (
             ALL_ALIASES,
             BY_ALIAS,
             anchorable_forms,
             find_names,
         )
-        from backend.canon.lookup import type_labels
 
         try:
             with self.canon._session() as session:
@@ -477,7 +497,7 @@ class DMAgent:
         # conversation, so the model reads the book's words before the question
         # rather than after its own previous answers.
         canon_sources: list[dict] = []
-        retrieval_report: Optional[dict] = None
+        retrieval_report: dict | None = None
 
         # Ordered blocks rather than three hardcoded indices, which had to
         # agree with each other by hand and would silently reorder the moment a
@@ -560,9 +580,16 @@ class DMAgent:
         if rag_response:
             suggestions = self._generate_suggestions(rag_response.query_type)
 
+        # AFTER the answer, because generation is a second model call and its
+        # cost belongs to the card rather than to the turn's reasoning. The
+        # model has already been told a card is coming and told not to write
+        # the content itself.
+        cards = await self._run_requested_generations(retrieval)
+
         # Canon citations FIRST: they are the ones a DM can open the book to.
         return DMResponse(
             message=message,
+            generations=cards,
             query_type=rag_response.query_type if rag_response else None,
             sources=canon_sources + (rag_response.sources if rag_response else []),
             suggestions=suggestions,
@@ -572,6 +599,53 @@ class DMAgent:
             retrieval=retrieval_report,
             subgraph=self._subgraph_view(),
         )
+
+    async def _run_requested_generations(self, retrieval) -> list[dict]:
+        """Draft each card the model asked for. Never raises into the turn.
+
+        A generation that fails is reported as a card carrying its error, for
+        the reason `Generated.error` exists at all: a malformed result is
+        evidence about the prompt, and swallowing it leaves a DM wondering
+        whether they asked for the wrong thing.
+        """
+        if not self._requested_generations:
+            return []
+
+        from backend.agents import generator
+
+        cards = []
+        for request in self._requested_generations:
+            names = tuple(
+                self.subgraph.nodes[entity_id].name
+                for entity_id in request.context_entity_ids
+                if entity_id in self.subgraph.nodes
+            )
+            context = generator.GenerationContext(entities=names, note=request.note)
+            try:
+                # ITS OWN RETRIEVAL, on its own subject. The generator is not
+                # handed the chat's passages: it reads the graph for what it is
+                # being asked to make, and the conversation is the ADDITIONAL
+                # context on top -- which is the division the two panes exist
+                # to express.
+                own = self.canon.retrieve(request.subject) if self.canon else retrieval
+                drafted = await generator.generate(
+                    self.openai,
+                    kind=request.kind,
+                    subject=request.subject,
+                    retrieval=own,
+                    depth=self.depth,
+                    model=self.model,
+                    context=context,
+                )
+                card = drafted.as_dict()
+            except Exception as exc:  # noqa: BLE001 - a bad card must not lose the answer
+                logger.warning("homebrew generation failed", exc_info=True)
+                card = {"kind": request.kind, "subject": request.subject,
+                        "error": f"{type(exc).__name__}: {exc}"}
+            card["anchor"] = request.insert_after
+            card["carried"] = list(names)
+            cards.append(card)
+        return cards
 
     @property
     def _sampling(self) -> dict:
@@ -612,7 +686,7 @@ class DMAgent:
                 model=self.model,
                 messages=messages,
                 max_tokens=1000,
-                tools=graph_tools.SCHEMA,
+                tools=[*graph_tools.SCHEMA, homebrew_tool.SCHEMA],
                 **self._sampling,
             )
             total = total + Usage.from_response(response)
@@ -654,6 +728,27 @@ class DMAgent:
         name = tool_call.function.name
         try:
             arguments = json.loads(tool_call.function.arguments or "{}")
+            if name == homebrew_tool.SCHEMA["function"]["name"]:
+                # RECORDED, NOT RUN. Generation is a second model call and a
+                # real cost; doing it inside the tool loop would spend money
+                # mid-round and hand prose back to a model told not to quote
+                # it. The request is validated here and generated after the
+                # loop, so what the reader gets is a card.
+                request, error = homebrew_tool.validate(
+                    arguments,
+                    held_ids=frozenset(self.subgraph.nodes),
+                    seen_sections=frozenset(self._seen_sections),
+                )
+                if error:
+                    payload = {"error": error}
+                else:
+                    self._requested_generations.append(request)
+                    payload = request.acknowledgement
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(payload, default=str),
+                }
             result = graph_tools.call(name, arguments)
             self._fold_tool_result(name, result)
             payload = result.as_dict
@@ -719,7 +814,7 @@ class DMAgent:
         keep = 1  # the current question
         return system + rest[-keep:] if keep < len(rest) else system + rest
 
-    def _generate_suggestions(self, query_type: Optional[QueryType]) -> list[str]:
+    def _generate_suggestions(self, query_type: QueryType | None) -> list[str]:
         """Generate contextual suggestions.
 
         Args:
@@ -775,7 +870,7 @@ class DMAgent:
     def generate_npc(
         self,
         role: str,
-        race: Optional[str] = None,
+        race: str | None = None,
     ) -> NPCResult:
         """Generate a random NPC.
 

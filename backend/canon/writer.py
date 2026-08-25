@@ -148,14 +148,26 @@ class CampaignDataAttached(Exception):
     anything outside plane='canon'" true.
     """
 
-    def __init__(self, chapter_slug: str, relationships: int) -> None:
+    def __init__(
+        self, chapter_slug: str, relationships: int, campaigns: tuple[str, ...] = ()
+    ) -> None:
+        whose = (
+            f" It is in the running order of: {', '.join(campaigns)}." if campaigns else ""
+        )
+        fix = (
+            " Re-seeding a campaign destroys every insertion, skip and move in it, so this "
+            "is never done for you: run `reconcile_chain` after re-writing the chapter."
+            if campaigns
+            else " Resolve by hand."
+        )
         super().__init__(
             f"refusing to replace {chapter_slug}: {relationships} relationship(s) outside this "
             "chapter's canon plane are attached to its nodes. Deleting them would destroy "
-            "campaign data; resolve by hand."
+            f"campaign data.{whose}{fix}"
         )
         self.chapter_slug = chapter_slug
         self.relationships = relationships
+        self.campaigns = campaigns
 
 
 def mint_id(
@@ -1526,6 +1538,27 @@ def _delete_chapter(tx, chapter_slug: str) -> tuple[int, int]:
     ).single()["c"]
     if attached:
         raise CampaignDataAttached(chapter_slug, attached)
+
+    # SECTIONS TOO, and by their own query. The check above walks this
+    # chapter's ENTITY nodes; a campaign's running order hangs off its SECTION
+    # nodes, which nothing above touches. Without this the `DELETE s` below
+    # raises a bare "still has relationships" from the driver -- technically a
+    # refusal, but one that names neither the campaign nor the repair, and only
+    # by the accident that the delete is not a DETACH DELETE.
+    chained = tx.run(
+        """
+        MATCH (:Chapter {slug:$slug})-[:HAS_SECTION]->(s:Section)
+        MATCH (s)-[r]-()
+        WHERE coalesce(r.plane, $plane) <> $plane
+        RETURN count(r) AS c,
+               [x IN collect(DISTINCT r.campaign) WHERE x IS NOT NULL] AS campaigns
+        """,
+        scope,
+    ).single()
+    if chained and chained["c"]:
+        raise CampaignDataAttached(
+            chapter_slug, chained["c"], tuple(sorted(chained["campaigns"]))
+        )
 
     # The node set is read BEFORE any delete: deleting this chapter's mentions
     # removes half of what identifies the nodes it owns.

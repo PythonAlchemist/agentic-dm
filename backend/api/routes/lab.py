@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from backend.agents import canon_context, generator
 from backend.agents.dm_agent import DMAgent, DMResponse
+from backend.canon import books
 from backend.canon.retrieval import CanonRetriever
 from backend.core import pricing
 from backend.core.config import settings
@@ -59,6 +60,12 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str = "lab"
     model: Optional[str] = None
+    #: Which book this session is running. A session reads ONE, the way a table
+    #: runs one adventure -- see `CanonRetriever`.
+    book: str = "cos"
+    #: The campaign whose material rides alongside canon. None is the DEFAULT
+    #: and means canon only -- the same default the evaluation harnesses use.
+    campaign: str | None = None
     depth: Depth = Field(default_factory=Depth)
     #: Off by default. The campaign RAG pipeline needs a populated vector store
     #: and answers about the campaign plane; this lab is about canon.
@@ -66,8 +73,10 @@ class ChatRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    kind: Literal["quest", "npc", "monster"]
+    kind: Literal["quest", "npc", "monster", "scene"]
     subject: str
+    book: str = "cos"
+    campaign: str | None = None
     model: Optional[str] = None
     depth: Depth = Field(default_factory=Depth)
 
@@ -76,38 +85,61 @@ class GenerateRequest(BaseModel):
 def config() -> dict:
     """Models on offer, their rates, how old those rates are, and what is loaded.
 
-    `chapters` is COUNTED, never written down. The lab header read "3 of 25
-    chapters loaded" long after the whole book was in the graph, and the
-    model's own no-canon instruction carried the same stale sentence -- a
-    number describing the state of a database does not belong in a string
-    somebody has to remember to update.
+    `books` is COUNTED, never written down -- both which books are here and how
+    much of each. The lab header read "3 of 25 chapters loaded" long after the
+    whole book was in the graph, and the model's own no-canon instruction
+    carried the same stale sentence: a number describing the state of a
+    database does not belong in a string somebody has to remember to update.
+    The book TITLES come from the graph for the same reason, now that there is
+    more than one and the header used to name Curse of Strahd unconditionally.
     """
     return {
         "models": pricing.models(),
         "default_model": settings.openai_model,
         "kinds": list(generator.KINDS),
         "defaults": Depth().model_dump(),
-        "chapters": _chapters_loaded(),
+        "books": _books_loaded(),
     }
 
 
-def _chapters_loaded() -> int:
-    """How many chapters the graph holds. 0 if it cannot be reached.
+def _books_loaded() -> list[dict]:
+    """Every book in the graph, with its title and how much of it is here.
 
-    Degraded rather than fatal: a lab that will not render because the count is
-    unavailable is worse than one that says nothing is loaded, and the chat
-    below it already reports a graph failure honestly.
+    COUNTED, for the reason `config` gives: a list of books written into a
+    constant goes stale the first time somebody loads one, and this lab has
+    already shipped one stale count.
     """
     from backend.core.database import read_only_session
 
     try:
         with read_only_session() as session:
-            return session.run(
-                "MATCH (c:Chapter {plane:'canon'}) RETURN count(c) AS n"
-            ).single()["n"]
-    except Exception:  # noqa: BLE001 - a header is not worth failing a page for
-        logger.warning("could not count loaded chapters", exc_info=True)
-        return 0
+            rows = [
+                dict(record)
+                for record in session.run(
+                    """
+                    MATCH (b:Book {plane:'canon'})
+                    OPTIONAL MATCH (b)-[:HAS_CHAPTER]->(c:Chapter)
+                    RETURN b.slug AS slug, b.display_name AS title,
+                           count(c) AS chapters
+                    ORDER BY chapters DESC
+                    """
+                )
+            ]
+    except Exception:  # noqa: BLE001 - a picker is not worth failing a page for
+        logger.warning("could not list loaded books", exc_info=True)
+        return []
+
+    # The starter subjects come from each book's OWN seed, so a lab showing
+    # Keys from the Golden Vault stops offering a Barovia tavern. A book whose
+    # seed is missing or names none simply offers none.
+    for row in rows:
+        seed = books.SEEDS / f"{row['slug']}.yaml"
+        try:
+            row["examples"] = books.load(seed).examples if seed.exists() else {}
+        except Exception:  # noqa: BLE001
+            logger.warning("could not read examples for %s", row["slug"], exc_info=True)
+            row["examples"] = {}
+    return rows
 
 
 @router.post("/chat")
@@ -115,7 +147,7 @@ async def chat(request: ChatRequest) -> dict:
     """One grounded turn, with its cost and its retrieval laid open."""
     model = request.model or settings.openai_model
     depth = request.depth.to_domain()
-    agent = _agent_for(request.session_id, model, depth)
+    agent = _agent_for(request.session_id, model, depth, request.book, request.campaign)
 
     try:
         result: DMResponse = await agent.process_message(
@@ -134,6 +166,11 @@ async def chat(request: ChatRequest) -> dict:
         "cost": result.cost,
         "retrieval": result.retrieval,
         "subgraph": result.subgraph,
+        # AN EXPLICIT ALLOWLIST DROPS WHATEVER IT DOES NOT NAME. The draft
+        # cards were generated, cost money, and vanished here -- the model
+        # said "a draft is ready for review" and the reader was shown nothing.
+        # Anything added to `DMResponse` has to be added here too.
+        "generations": result.generations,
         "model": model,
     }
 
@@ -148,7 +185,16 @@ async def generate(request: GenerateRequest) -> dict:
     # conversation: reusing a chat session's agent would quietly feed it
     # whatever was discussed before and make two identical requests return
     # different things for reasons nobody could see.
-    agent = DMAgent(model=model, depth=depth)
+    agent = DMAgent(
+        model=model,
+        depth=depth,
+        canon=CanonRetriever(
+            limit=depth.passages,
+            passage_width=depth.passage_width,
+            book=request.book,
+            campaign=request.campaign,
+        ),
+    )
     retrieval = agent._retrieve_canon(request.subject)
 
     try:
@@ -174,7 +220,13 @@ def reset(session_id: str = "lab") -> dict:
     return {"ok": True, "session_id": session_id}
 
 
-def _agent_for(session_id: str, model: str, depth: canon_context.Depth) -> DMAgent:
+def _agent_for(
+    session_id: str,
+    model: str,
+    depth: canon_context.Depth,
+    book: str = "cos",
+    campaign: str | None = None,
+) -> DMAgent:
     """The session's agent, rebuilt when a knob it was built with has changed.
 
     Model and passage count are fixed at construction -- the retriever carries
@@ -188,15 +240,30 @@ def _agent_for(session_id: str, model: str, depth: canon_context.Depth) -> DMAge
     who the conversation was about the moment a slider moved.
     """
     existing = _SESSIONS.get(session_id)
-    if existing is not None and existing.model == model and existing.depth == depth:
+    # A CAMPAIGN CHANGE IS A WORLD CHANGE, exactly as a book change is: the
+    # subgraph holds entities by id, and carrying a table's own scenes into
+    # another table's session is the same bleed, one scope in.
+    same_book = existing is not None and (
+        existing.canon.book == book and existing.canon.campaign == campaign
+    )
+    if existing is not None and same_book and existing.model == model and existing.depth == depth:
         return existing
 
     rebuilt = DMAgent(
         model=model,
         depth=depth,
-        canon=CanonRetriever(limit=depth.passages, passage_width=depth.passage_width),
+        canon=CanonRetriever(
+            limit=depth.passages,
+            passage_width=depth.passage_width,
+            book=book,
+            campaign=campaign,
+        ),
     )
-    if existing is not None:
+    # CHANGING BOOK STARTS A NEW THREAD, unlike changing model. The subgraph
+    # holds entities by id, so carrying it into another book would put Barovia
+    # in front of a heist -- the cross-book bleed that scoping the retriever
+    # exists to stop, re-entering through the conversation's own memory.
+    if existing is not None and same_book:
         rebuilt.conversation = existing.conversation
         rebuilt.subgraph = existing.subgraph
     _SESSIONS[session_id] = rebuilt

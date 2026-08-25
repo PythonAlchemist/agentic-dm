@@ -10,7 +10,9 @@ entity would be found by the real book sitting in the same local database.
 
 import pytest
 
+from backend.canon import lookup
 from backend.canon.aliases import WriteAlias
+from backend.canon.lookup import CANON_PLANE
 from backend.canon.models import Section
 from backend.canon.retrieval import (
     PATH_GRAPH,
@@ -862,3 +864,86 @@ class TestCarryingTheConversation:
         result = CanonRetriever(book="cos").retrieve("describe it", carry=[self.TAVERN])
         anchor = next(a for a in result.anchors if a.entity_id == self.TAVERN)
         assert anchor.surface == anchor.name
+
+
+class TestCampaignEdgesCannotReachCanonReads:
+    """A campaign edge between two CANON entities must be invisible to canon.
+
+    THE POLLUTION VECTOR THIS EXISTS FOR. The writer stamps a plane on the
+    relationship as well as on both entities, and for a long time every edge
+    read filtered only the entities: `(n {plane:$plane})-[r]->(o {plane:$plane})`
+    with `r` unconstrained. Harmless while every edge was canon, and wrong the
+    moment a DM asserts a fact about two canon things -- "at my table, Donavich
+    owns the undercroft". Both ends are canon, so a node-only filter hands that
+    edge to the model under the heading promising the book said it.
+
+    Asserted as BYTE-IDENTICAL results rather than as an absence, because the
+    interesting failure is not "the campaign edge appears" but "canon reads
+    changed at all".
+    """
+
+    PRIEST = f"{PREFIX}donavich"
+    ROOM = f"{PREFIX}undercroft"
+
+    def _canon(self, session, query, ids):
+        return [
+            dict(r)
+            for r in session.run(query, {"plane": CANON_PLANE, "ids": ids})
+        ]
+
+    def _plant(self, session):
+        session.run(
+            """
+            MATCH (a:Entity {id:$a}), (b:Entity {id:$b})
+            CREATE (a)-[:OWNS {plane:'campaign', status:'authored',
+                               campaign:'pytest-table'}]->(b)
+            """,
+            {"a": self.PRIEST, "b": self.ROOM},
+        )
+
+    def test_edges_are_unchanged(self, written):
+        ids = [self.PRIEST, self.ROOM]
+        before = self._canon(written, lookup.EDGES, ids)
+        self._plant(written)
+        assert self._canon(written, lookup.EDGES, ids) == before
+
+    def test_placements_are_unchanged(self, written):
+        ids = [self.PRIEST, self.ROOM]
+        before = self._canon(written, lookup.PLACEMENTS, ids)
+        self._plant(written)
+        assert self._canon(written, lookup.PLACEMENTS, ids) == before
+
+    def test_the_planted_edge_really_is_there(self, written):
+        """Guards the guard: if the CREATE silently failed, the three tests
+        above would pass by testing nothing at all."""
+        self._plant(written)
+        found = written.run(
+            "MATCH (:Entity {id:$a})-[r:OWNS]->(:Entity {id:$b}) RETURN r.plane AS plane",
+            {"a": self.PRIEST, "b": self.ROOM},
+        ).single()
+        assert found is not None and dict(found)["plane"] == "campaign"
+
+    def test_a_cross_plane_edge_is_readable_from_NEITHER_plane(self, written):
+        """PINS A KNOWN GAP, and is here so the gap cannot be forgotten.
+
+        `EDGES` filters the plane of both entities AND of the relationship. An
+        edge asserted by a campaign between two CANON entities therefore
+        matches on neither plane: canon rejects it on `r.plane`, campaign
+        rejects it on the entities. Pollution is prevented and the edge is also
+        unreachable.
+
+        That is the RIGHT trade for canon -- an unreadable campaign edge is a
+        missing feature, a leaking one is a lie -- but it means "at my table,
+        Donavich owns the undercroft" cannot currently be read back, and any
+        design that promises that case needs its own query with the entity
+        filter relaxed. Change this test when that query exists; do not relax
+        `EDGES` itself."""
+        self._plant(written)
+        for plane in (CANON_PLANE, "campaign"):
+            rows = [
+                dict(r)
+                for r in written.run(
+                    lookup.EDGES, {"plane": plane, "ids": [self.PRIEST, self.ROOM]}
+                )
+            ]
+            assert not any(r["relationship"] == "OWNS" for r in rows), plane

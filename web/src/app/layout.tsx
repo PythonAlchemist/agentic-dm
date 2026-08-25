@@ -7,7 +7,7 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 
 export const metadata: Metadata = {
   title: 'Agent Lab',
-  description: 'Grounded answers from the Curse of Strahd canon graph, with their provenance.',
+  description: 'Grounded answers from a D&D canon graph, with their provenance.',
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {

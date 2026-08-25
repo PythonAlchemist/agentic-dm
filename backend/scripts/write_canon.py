@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.aliases import plan_aliases
-from backend.canon.books import BookScheme, load as load_book
+from backend.canon.books import SEEDS, BookScheme, load as load_book
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.models import CandidateEdge, CandidateNode, Chapter, Section
 from backend.canon.sections import split_chapter
@@ -64,7 +64,7 @@ DEFAULT_RUNS_DIR = Path("data/canon/runs")
 #: constants, because `BOOK` and `BOOK_TITLE` were two hardcoded facts about
 #: one book with nothing keeping them agreeing -- and because the scoping rule
 #: has to travel with them. See `backend/canon/books.py`.
-BOOKS_DIR = Path(__file__).parent.parent / "canon" / "seeds" / "books"
+BOOKS_DIR = SEEDS
 DEFAULT_BOOK = BOOKS_DIR / "cos.yaml"
 
 #: The splitter the SPINE uses, which is not necessarily the one the EXTRACTION

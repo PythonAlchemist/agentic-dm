@@ -10,7 +10,7 @@ database rather than described.
 import pytest
 
 from backend.agents import graph_tools
-from backend.agents.graph_tools import Result, call, expand, passages, resolve
+from backend.agents.graph_tools import call, expand, passages, resolve
 
 pytestmark = pytest.mark.neo4j
 

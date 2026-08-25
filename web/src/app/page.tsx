@@ -1,12 +1,20 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ChatPane } from '@/components/ChatPane'
 import { Controls } from '@/components/Controls'
+import { RunningOrder } from '@/components/RunningOrder'
 import { GeneratePane } from '@/components/GeneratePane'
 import { SessionMeter, type Running } from '@/components/Meters'
 import { TabBar, TooltipProvider } from '@/components/ui'
-import { labAPI, type Cost, type Depth, type LabConfig, type Usage } from '@/lib/api'
+import {
+  labAPI,
+  type CampaignInfo,
+  type Cost,
+  type Depth,
+  type LabConfig,
+  type Usage,
+} from '@/lib/api'
 
 const SESSION_ID = 'lab'
 
@@ -38,6 +46,13 @@ export default function Lab() {
   const [config, setConfig] = useState<LabConfig | null>(null)
   const [failed, setFailed] = useState('')
   const [model, setModel] = useState('')
+  const [book, setBook] = useState('')
+  const [campaign, setCampaign] = useState<string | null>(null)
+  const [campaigns, setCampaigns] = useState<CampaignInfo[]>([])
+  //: Bumped whenever something changes the chain, so the panel re-reads it.
+  //  The order is derived from the graph, never mirrored in React state: two
+  //  copies of a running order are two running orders.
+  const [orderVersion, setOrderVersion] = useState(0)
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
   const [tab, setTab] = useState<'chat' | 'generate'>('chat')
   const [running, setRunning] = useState<Running>(ZERO)
@@ -48,10 +63,19 @@ export default function Lab() {
       .then((c) => {
         setConfig(c)
         setModel(c.default_model)
+        // The first book the graph holds, rather than a slug written here:
+        // this list is counted, and a hardcoded default outlives the book.
+        setBook(c.books[0]?.slug ?? '')
         setDepth(c.defaults ?? FALLBACK_DEPTH)
       })
       .catch((e) => setFailed(e instanceof Error ? e.message : String(e)))
   }, [])
+
+  useEffect(() => {
+    labAPI.campaigns().then((c) => setCampaigns(c.campaigns)).catch(() => undefined)
+  }, [])
+
+  const noteChainChanged = useCallback(() => setOrderVersion((v) => v + 1), [])
 
   const spend = (reply: { usage: Usage; cost: Cost }) =>
     setRunning((r) => accumulate(r, reply.usage, reply.cost))
@@ -81,21 +105,31 @@ export default function Lab() {
     return <div className="p-8 text-sm text-neutral-600">Loading…</div>
   }
 
+  const here = config.books.find((b) => b.slug === book)
+
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">
         <header className="flex shrink-0 items-baseline gap-4 border-b border-neutral-800 px-6 py-3">
           <h1 className="text-base font-medium">Agent Lab</h1>
-          {/* COUNTED, never written down. This read "3 of 25 chapters loaded"
-              long after the whole book was in, in three separate places. */}
+          {/* COUNTED, never written down -- both the number and the NAME.
+              This read "3 of 25 chapters loaded" long after the whole book was
+              in, in three separate places, and then read "Curse of Strahd"
+              while answering out of a heist anthology. */}
           <p className="text-xs text-neutral-600">
-            Curse of Strahd canon · {config.chapters} chapters loaded
+            {here ? `${here.title} canon · ${here.chapters} chapters loaded` : 'no books loaded'}
           </p>
         </header>
 
         <div className="flex min-h-0 flex-1 gap-6 p-6">
           <aside className="w-72 shrink-0 space-y-4 overflow-y-auto">
             <Controls
+              campaigns={campaigns}
+              campaign={campaign}
+              onCampaign={setCampaign}
+              books={config.books}
+              book={book}
+              onBook={setBook}
               models={config.models}
               model={model}
               onModel={setModel}
@@ -103,6 +137,7 @@ export default function Lab() {
               onDepth={setDepth}
             />
             <SessionMeter running={running} onReset={resetSession} />
+            <RunningOrder campaign={campaign} refreshKey={orderVersion} />
           </aside>
 
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -122,6 +157,11 @@ export default function Lab() {
                 going back and forth. */}
             <div className={tab === 'chat' ? 'min-h-0 flex-1' : 'hidden'}>
               <ChatPane
+                key={`${book}:${campaign ?? 'canon'}`}
+                book={book}
+                campaign={campaign}
+                onChainChanged={noteChainChanged}
+                suggestion={here?.examples.ask ?? ''}
                 model={model}
                 depth={depth}
                 sessionId={SESSION_ID}
@@ -129,7 +169,16 @@ export default function Lab() {
               />
             </div>
             <div className={tab === 'generate' ? 'min-h-0 flex-1' : 'hidden'}>
-              <GeneratePane model={model} depth={depth} onSpend={spend} />
+              <GeneratePane
+                key={`${book}:${campaign ?? 'canon'}`}
+                book={book}
+                campaign={campaign}
+                onChainChanged={noteChainChanged}
+                examples={here?.examples ?? {}}
+                model={model}
+                depth={depth}
+                onSpend={spend}
+              />
             </div>
           </main>
         </div>
