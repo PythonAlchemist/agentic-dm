@@ -4,7 +4,6 @@ Pure rendering, so the grounding can be asserted directly rather than inferred
 from an answer a model happened to produce.
 """
 
-import pytest
 
 from backend.agents import canon_context
 from backend.canon.retrieval import PATH_GRAPH, PATH_TEXT, Passage, Retrieval

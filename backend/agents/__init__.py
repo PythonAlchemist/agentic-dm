@@ -5,9 +5,9 @@ This module provides:
 - DM Tools for rules lookup, campaign state, combat, etc.
 """
 
-from backend.agents.tools import DMTools, DiceResult, EncounterResult, NPCResult
-from backend.agents.dm_agent import DMAgent, DMResponse
 from backend.agents.conversation import ConversationManager, Message, MessageRole
+from backend.agents.dm_agent import DMAgent, DMResponse
+from backend.agents.tools import DiceResult, DMTools, EncounterResult, NPCResult
 
 __all__ = [
     # Agent

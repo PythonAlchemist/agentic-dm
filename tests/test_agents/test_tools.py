@@ -2,7 +2,7 @@
 
 import pytest
 
-from backend.agents.tools import DMTools, DiceResult, NPCResult, EncounterResult
+from backend.agents.tools import DiceResult, DMTools, EncounterResult, NPCResult
 
 
 class TestDiceRolling:

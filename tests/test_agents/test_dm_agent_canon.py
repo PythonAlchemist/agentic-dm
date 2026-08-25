@@ -10,9 +10,8 @@ agent would send.
 """
 
 from contextlib import contextmanager
-from types import SimpleNamespace
-
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 

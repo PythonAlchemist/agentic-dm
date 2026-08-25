@@ -2,12 +2,10 @@
 
 import random
 import re
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from backend.canon.lookup import CanonLookup
-from backend.graph.schema import EntityType
 
 
 class DiceResult(BaseModel):
@@ -30,7 +28,7 @@ class NPCResult(BaseModel):
     motivations: list[str] = Field(default_factory=list)
     appearance: str = ""
     voice_notes: str = ""
-    secret: Optional[str] = None
+    secret: str | None = None
 
 
 class EncounterResult(BaseModel):
@@ -54,10 +52,10 @@ class Combatant(BaseModel):
     hp: int = 10
     max_hp: int = 10
     is_player: bool = False
-    player_id: Optional[str] = None
-    player_name: Optional[str] = None
-    pc_id: Optional[str] = None
-    character_name: Optional[str] = None
+    player_id: str | None = None
+    player_name: str | None = None
+    pc_id: str | None = None
+    character_name: str | None = None
     conditions: list[str] = Field(default_factory=list)
 
 
@@ -71,13 +69,13 @@ class CombatState(BaseModel):
     grid_width: int = 20
     grid_height: int = 15
 
-    def current_combatant(self) -> Optional[dict]:
+    def current_combatant(self) -> dict | None:
         """Get the current combatant."""
         if not self.initiative_order:
             return None
         return self.initiative_order[self.current_turn_idx]
 
-    def current_player_info(self) -> Optional[dict]:
+    def current_player_info(self) -> dict | None:
         """Get current player info if it's a player's turn."""
         current = self.current_combatant()
         if current and current.get("is_player"):
@@ -151,7 +149,7 @@ class DMTools:
                 default; it opens no connection until a question is asked, so a
                 DMTools used only for dice and combat never touches Neo4j.
         """
-        self.combat_state: Optional[CombatState] = None
+        self.combat_state: CombatState | None = None
         self.canon = canon or CanonLookup()
 
     def where_is(self, name: str) -> dict:
@@ -243,8 +241,8 @@ class DMTools:
     def generate_npc(
         self,
         role: str,
-        race: Optional[str] = None,
-        context: Optional[str] = None,
+        race: str | None = None,
+        context: str | None = None,
     ) -> NPCResult:
         """Generate a random NPC.
 
@@ -521,7 +519,7 @@ class DMTools:
     def start_combat_from_session(
         self,
         session_attendees: list[dict],
-        additional_combatants: Optional[list[dict]] = None,
+        additional_combatants: list[dict] | None = None,
     ) -> CombatState:
         """Start combat with session attendees as combatants.
 
@@ -564,7 +562,7 @@ class DMTools:
 
         return self.start_combat(combatants)
 
-    def next_turn(self) -> Optional[dict]:
+    def next_turn(self) -> dict | None:
         """Advance to the next turn in combat.
 
         Returns:
@@ -639,7 +637,7 @@ class DMTools:
 
         return {"error": f"Combatant '{target_name}' not found"}
 
-    def get_combat_status(self) -> Optional[dict]:
+    def get_combat_status(self) -> dict | None:
         """Get current combat status without advancing turn.
 
         Returns:

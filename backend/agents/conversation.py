@@ -1,7 +1,6 @@
 """Conversation history management."""
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -21,7 +20,7 @@ class Message(BaseModel):
 
     role: MessageRole
     content: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict = Field(default_factory=dict)
 
 
@@ -45,7 +44,7 @@ class ConversationManager:
         self.max_tokens = max_tokens
         self.tokens_per_char = tokens_per_char
         self.messages: list[Message] = []
-        self.system_prompt: Optional[str] = None
+        self.system_prompt: str | None = None
 
     def set_system_prompt(self, prompt: str) -> None:
         """Set the system prompt.
@@ -59,7 +58,7 @@ class ConversationManager:
         self,
         role: MessageRole,
         content: str,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> Message:
         """Add a message to the conversation.
 
@@ -97,7 +96,7 @@ class ConversationManager:
     def add_assistant_message(
         self,
         content: str,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> Message:
         """Add an assistant message.
 
@@ -221,6 +220,6 @@ class ConversationManager:
             self.messages.append(Message(
                 role=MessageRole(m["role"]),
                 content=m["content"],
-                timestamp=datetime.fromisoformat(m.get("timestamp", datetime.now(timezone.utc).isoformat())),
+                timestamp=datetime.fromisoformat(m.get("timestamp", datetime.now(UTC).isoformat())),
                 metadata=m.get("metadata", {}),
             ))
