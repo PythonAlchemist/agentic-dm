@@ -752,3 +752,190 @@ questions:
     sections: ["cos:the-village-of-krezk#7"]
     needs: text
     note: "A pool that shimmers even under grey skies, with a shrine by it."
+
+# ---------------------------------------------------------------------------
+# KEYS FROM THE GOLDEN VAULT.
+#
+# Added because every number this project reported described ONE book. The 96
+# questions above are all Curse of Strahd, so 85%/90%/MRR 0.61 was a Barovia
+# measurement being read as the system's -- while a campaign was being run out
+# of the heist anthology on the strength of it.
+#
+# Written the same way as the set above and for the same reason: while reading
+# the chapter text, before running retrieval, without checking what the graph
+# contains. `book_of` in the harness reads the book off the gold id, so these
+# run against a Golden Vault retriever without anything being written down.
+#
+# THE ANTHOLOGY DIFFERS FROM THE CAMPAIGN in a way worth watching in the
+# results: thirteen adventures share no continuity, every one of them heads a
+# section `Using the Golden Vault` and `Adventure Background`, and only the
+# introduction is common ground. A question that anchors on a name used in two
+# heists is a different problem from anything Barovia poses.
+
+  - id: k01
+    question: "What is the Golden Vault and where does it operate from?"
+    sections: ["kftgv:introduction-a-collection-of-heists#3"]
+    needs: graph
+    note: "Secretive, rumoured tied to metallic dragons, based on a good-aligned Outer Plane."
+
+  - id: k02
+    question: "What is the Golden Vault's motto?"
+    sections: ["kftgv:introduction-a-collection-of-heists#3"]
+    needs: text
+    note: "Do good, no matter the cost."
+
+  - id: k03
+    question: "Who might make up a rival crew competing with my players?"
+    sections: ["kftgv:introduction-a-collection-of-heists#6"]
+    needs: graph
+    note: "Arlo Kettletoe the halfling, Enna 'The Silence' Galakiir the elf, and others."
+
+  - id: k04
+    question: "What do I actually need on the table to run these adventures?"
+    sections: ["kftgv:introduction-a-collection-of-heists#2"]
+    needs: text
+    note: "The three fifth edition core rulebooks."
+
+  - id: k05
+    question: "Who is the curator of the museum in Varkenbluff?"
+    sections: ["kftgv:the-murkmire-malevolence#15"]
+    needs: graph
+    note: "Alda Arkin, a retired university professor, neutral evil elf noble."
+
+  - id: k06
+    question: "Is anyone at the gala carrying something the party would want?"
+    sections: ["kftgv:the-murkmire-malevolence#15"]
+    needs: text
+    note: "Alda's clutch holds a map of the guards' after-hours stations."
+
+  - id: k07
+    question: "Where is the Murkmire Stone kept, and what happens to it at midnight?"
+    sections: ["kftgv:the-murkmire-malevolence#32"]
+    needs: graph
+    note: "On a pedestal in the Gemstone Wing; the egg hatches at midnight."
+
+  - id: k08
+    question: "What does Dr. Dannell want the party to do about the stone?"
+    sections: ["kftgv:the-murkmire-malevolence#5"]
+    needs: graph
+    note: "Scout the museum's security and steal the stone at an opportune moment."
+
+  - id: k09
+    question: "Who is Verity Kye and where do the players meet her?"
+    sections: ["kftgv:the-stygian-gambit#4"]
+    needs: graph
+    note: "A tiefling spy, in the back room of the Brine Widow."
+
+  - id: k10
+    question: "How do you get into the Afterlife Casino?"
+    sections: ["kftgv:the-stygian-gambit#7"]
+    needs: text
+    note: "Wooden boats up the river into the cavern; Verity knows no other way in."
+
+  - id: k11
+    question: "Who does the casino employ?"
+    sections: ["kftgv:the-stygian-gambit#7"]
+    needs: text
+    note: "Tieflings only."
+
+  - id: k12
+    question: "What does an employee pass card do, and how hard is it to lift one?"
+    sections: ["kftgv:the-stygian-gambit#10"]
+    needs: text
+    note: "Opens any locked door in the casino; DC 15 Sleight of Hand to steal."
+
+  - id: k13
+    question: "Who hires the party in Prisoner 13?"
+    sections: ["kftgv:prisoner-13#4"]
+    needs: graph
+    note: "Varrin Axebreaker, a lawful good dwarf noble, wants a key recovered."
+
+  - id: k14
+    question: "How does suspicion work at the prison, and where does it start?"
+    sections: ["kftgv:prisoner-13#11"]
+    needs: text
+    note: "Levels 1 to 6; the characters arrive at level 1."
+
+  - id: k15
+    question: "What sort of place is Revel's End?"
+    sections: ["kftgv:prisoner-13#8"]
+    needs: graph
+    note: "A panopticon on the coast of the Sea of Moving Ice, with a central tower."
+
+  - id: k16
+    question: "Who gives the party the job in Vidorant's Vault, and where?"
+    sections: ["kftgv:vidorants-vault#4"]
+    needs: graph
+    note: "Goldenbeard, in the back room of a restaurant called the Spoke and Wheel."
+
+  - id: k17
+    question: "What happens if Vidorant finds out the diadem has been taken?"
+    sections: ["kftgv:vidorants-vault#28"]
+    needs: graph
+    note: "A ring like a helm of teleportation brings her to the balcony after five rounds."
+
+  - id: k18
+    question: "Who speaks for the gnomes of Little Lockford?"
+    sections: ["kftgv:tockworths-clockworks#4"]
+    needs: graph
+    note: "Mayor Braith Broadfoot, a deep gnome; the exiles gathered outside the gates."
+
+  - id: k19
+    question: "Who built the clockwork automatons, and what went wrong?"
+    sections: ["kftgv:tockworths-clockworks#1"]
+    needs: graph
+    note: "Tixie Tockworth, replacing her own body with machinery, losing empathy."
+
+  - id: k20
+    question: "Who is the mayor of Toadhop?"
+    sections: ["kftgv:axe-from-the-grave#3"]
+    needs: text
+    note: "Jenna Bean, a brown sow, with 'Mayor' painted on her flank."
+
+  - id: k21
+    question: "Where can the party drink in Toadhop, and who runs it?"
+    sections: ["kftgv:axe-from-the-grave#3"]
+    needs: text
+    note: "My Left Boot, kept by Huberta Hadley; there is also an inn, Misty's Bunks."
+
+  - id: k22
+    question: "Who is Elra Lionheart and how does she appear to the party?"
+    sections: ["kftgv:reach-for-the-stars#4"]
+    needs: graph
+    note: "A dead adventurer whose spirit manifests as a disembodied head near the mansion."
+
+  - id: k23
+    question: "Who approaches the party about the king's stolen heart?"
+    sections: ["kftgv:heart-of-ashes#3"]
+    needs: graph
+    note: "Naevys, an elf knight, on business from the city of Ghalasine."
+
+  - id: k24
+    question: "Who are the Fixers and what are they after?"
+    sections: ["kftgv:affair-on-the-concordant-express#4"]
+    needs: graph
+    note: "A planar faction after three fiends' true names, to balance the Blood War."
+
+  - id: k25
+    question: "What was stolen in Masterpiece Imbroglio, and from whom?"
+    sections: ["kftgv:masterpiece-imbroglio#3"]
+    needs: text
+    note: "A painting, from a member of the Cognoscenti Esoterica."
+
+  - id: k26
+    question: "Who was Xeluan?"
+    sections: ["kftgv:shard-of-the-accursed#1"]
+    needs: graph
+    note: "A giant left to die by his kin, nursed back by heroes, pledged to their service."
+
+  - id: k27
+    question: "What does the Golden Vault want stolen in Fire and Darkness?"
+    sections: ["kftgv:fire-and-darkness#3"]
+    needs: graph
+    note: "The Book of Vile Darkness, from an efreeti named Vrakir."
+
+  - id: k28
+    question: "What can Fifel tell the party about the shard solitaire?"
+    sections: ["kftgv:party-at-paliset-hall#4"]
+    needs: graph
+    note: "Its origin story, the Adulares, the solstice gala and Paliset Hall."

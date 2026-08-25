@@ -214,6 +214,18 @@ def render(rows: list[dict], summary: dict, *, verbose: bool) -> str:
     return "\n".join(out)
 
 
+def book_of(question: dict) -> str:
+    """Which book holds this question's answer, read off its gold section.
+
+    `cos:the-village-of-barovia#4` is a Curse of Strahd question. Derived
+    rather than declared, so a question cannot disagree with itself about
+    which book to search.
+    """
+    sections = question["sections"]
+    first = sections[0] if isinstance(sections, list) else sections
+    return str(first).split(":", 1)[0]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--questions", type=Path, default=DEFAULT_QUESTIONS)
@@ -222,16 +234,54 @@ def main() -> int:
         help="passages per question; defaults to what the retriever ships with",
     )
     parser.add_argument("--verbose", action="store_true", help="print every miss in full")
+    parser.add_argument(
+        "--book", help="run only the questions whose answers are in this book"
+    )
     args = parser.parse_args()
 
     questions = yaml.safe_load(args.questions.read_text())["questions"]
-    retriever = CanonRetriever(limit=args.limit)
-    rows = [score(q, retriever.retrieve(q["question"])) for q in questions]
-    summary = summarize(rows)
+    if args.book:
+        questions = [q for q in questions if book_of(q) == args.book]
+        if not questions:
+            print(f"no questions with gold sections in {args.book!r}")
+            return 2
 
+    # ONE RETRIEVER PER BOOK, and the book comes from the QUESTION rather than
+    # from a flag: a question's gold section id already says which book holds
+    # the answer, so a suite spanning two books needs nothing written down and
+    # cannot be run against the wrong one by forgetting an argument. This was
+    # `CanonRetriever(limit=...)` -- hardcoded to Curse of Strahd -- which is
+    # why every number this project reported described one book.
+    retrievers: dict[str, CanonRetriever] = {}
+    rows = []
+    for question in questions:
+        book = book_of(question)
+        if book not in retrievers:
+            retrievers[book] = CanonRetriever(limit=args.limit, book=book)
+        rows.append(score(question, retrievers[book].retrieve(question["question"])))
+
+    books = sorted({book_of(q) for q in questions})
     print(f"canon retrieval @ limit={args.limit}, {len(questions)} questions")
     print()
-    print(render(rows, summary, verbose=args.verbose))
+    print(render(rows, summarize(rows), verbose=args.verbose))
+
+    # PER BOOK TOO, whenever there is more than one. The headline number over a
+    # mixed suite is an average of two different books and comparable to
+    # neither on its own -- and the whole reason for adding a second book's
+    # questions was to stop reporting one book's number as the system's.
+    if len(books) > 1:
+        print()
+        print("  by book")
+        for book in books:
+            subset = [r for r, q in zip(rows, questions) if book_of(q) == book]
+            found = summarize(subset)
+            print(
+                f"    {book:8} {len(subset):3} questions   "
+                f"recall {found['recall_overall']:.0%} all, "
+                f"{found['recall_anchored']:.0%} anchored   "
+                f"anchored {found['anchored']}/{len(subset)}   "
+                f"MRR {found['mrr']:.2f}"
+            )
     return 0
 
 
