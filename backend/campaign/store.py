@@ -110,6 +110,38 @@ def read_skipped(session, slug: str) -> frozenset[str]:
     return frozenset(dict(r)["id"] for r in session.run(SKIPPED_SECTIONS, {"slug": slug}))
 
 
+CANON_ALIASES = """
+MATCH (b:Book {slug:$book, plane:$plane})-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(s:Section)
+MATCH (s)<-[:IN_SECTION]-(:Mention)-[:REFERS_TO]->(e:Entity {plane:$plane})
+MATCH (a:Alias)-[:ALIAS_OF]->(e)
+RETURN DISTINCT a.normalized AS normalized, e.id AS id
+"""
+
+
+def canon_aliases(session, books) -> frozenset[tuple[str, str]]:
+    """Every canon name the drawn books use, folded, with the entity it names.
+
+    Read for the cluster planner's collision scan. `hb:` and `<book>:` are
+    different namespaces, so a generated "Varrin Axebreaker" would otherwise
+    mint happily and leave two nodes answering to one name through
+    `resolve_name` -- exactly the silent duplication the anthology work spent a
+    day undoing.
+
+    THE FOLD IS `aliases.normalize`, READ OFF THE STORED PROPERTY, never a
+    second normaliser computed here. `a.normalized` is what `BY_ALIAS` matches
+    on; a scan folding names its own way would miss precisely the collisions
+    that matter -- the curly apostrophe in `Vidorant's Vault` is the standing
+    example.
+    """
+    found: set[tuple[str, str]] = set()
+    for book in books:
+        for record in session.run(CANON_ALIASES, {"book": book, "plane": CANON_PLANE}):
+            row = dict(record)
+            if row["normalized"]:
+                found.add((row["normalized"], row["id"]))
+    return frozenset(found)
+
+
 def read_campaigns(session) -> list[Campaign]:
     return [
         Campaign(

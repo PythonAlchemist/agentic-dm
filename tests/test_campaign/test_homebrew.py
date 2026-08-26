@@ -266,3 +266,48 @@ class TestCanonIsBlindToAllOfIt:
             """
         ).single()["c"]
         assert found == 0
+
+
+class TestAnAliasThatAlreadyExistsDoesNotCrash:
+    """`Alias.name` is globally unique, across every plane and book.
+
+    THE DEFECT THIS CLOSES. The write merged on `{name, plane}`, found no
+    campaign-plane node for a name canon already used, tried to create a second
+    one, and died on the constraint with a raw driver error. Storing anything
+    named like an existing canon entity was unsurvivable.
+
+    Merging on `name` alone with `ON CREATE SET` fixes it without mutating
+    canon: an existing alias keeps its own plane and normalized form and merely
+    gains a second `ALIAS_OF`. `BY_ALIAS` already calls that legitimate -- "one
+    name, several entities, and the ambiguity travels" -- and the entity-plane
+    filter keeps the campaign entity out of canon reads.
+    """
+
+    def test_storing_under_an_existing_alias_succeeds(self, table):
+        table.run(
+            "CREATE (:Alias {name:'The Sea Battle', normalized:'the sea battle', "
+            "plane:'canon'})"
+        )
+        try:
+            stored = _store(table, anchor=ANCHOR)
+            assert stored.entity_id.startswith("hb:")
+        finally:
+            table.run("MATCH (a:Alias {name:'The Sea Battle'}) DETACH DELETE a")
+
+    def test_and_the_existing_alias_is_not_rewritten(self, table):
+        """The canon-never-mutated rule reaching one node further than
+        entities: an alias the book owns keeps its plane."""
+        table.run(
+            "CREATE (:Alias {name:'The Sea Battle', normalized:'the sea battle', "
+            "plane:'canon'})"
+        )
+        try:
+            _store(table, anchor=ANCHOR)
+            row = dict(
+                table.run(
+                    "MATCH (a:Alias {name:'The Sea Battle'}) RETURN a.plane AS plane"
+                ).single()
+            )
+            assert row["plane"] == "canon"
+        finally:
+            table.run("MATCH (a:Alias {name:'The Sea Battle'}) DETACH DELETE a")

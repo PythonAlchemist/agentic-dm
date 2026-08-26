@@ -283,3 +283,48 @@ class TestReconcile:
 
         report = survey(table, SLUG)
         assert report["problems"] == () and report["unseeded"] == []
+
+
+class TestCanonAliasesForCollisionScanning:
+    """The scan that stops a generated name silently duplicating a canon one."""
+
+    @pytest.fixture
+    def book(self, table):
+        """Teardown in a FIXTURE, not after the assertion.
+
+        Written inline first, and a failing assertion then skipped the cleanup
+        and left a `:Book` behind that broke every later run on a uniqueness
+        constraint. A fixture's teardown runs whether the test passes or not.
+        """
+        def clean():
+            table.run("MATCH (n) WHERE n.id STARTS WITH 'pytest-alias' DETACH DELETE n")
+            table.run("MATCH (b:Book {slug:'pytest-alias-book'}) DETACH DELETE b")
+            table.run("MATCH (c:Chapter {slug:'pytest-alias-ch'}) DETACH DELETE c")
+            table.run("MATCH (a:Alias {normalized:'pytestvarrin'}) DETACH DELETE a")
+
+        clean()
+        table.run(
+            """
+            CREATE (b:Book {slug:'pytest-alias-book', plane:'canon'})
+            CREATE (c:Chapter {slug:'pytest-alias-ch', plane:'canon', index:0})
+            CREATE (s:Section {id:'pytest-alias-book:ch#0', plane:'canon', index:0})
+            CREATE (e:Entity {id:'pytest-alias-book:v', name:'Pytestvarrin', plane:'canon'})
+            CREATE (m:Mention {plane:'canon'})
+            CREATE (a:Alias {name:'Pytestvarrin', normalized:'pytestvarrin', plane:'canon'})
+            CREATE (b)-[:HAS_CHAPTER]->(c)
+            CREATE (c)-[:HAS_SECTION]->(s)
+            CREATE (m)-[:IN_SECTION]->(s)
+            CREATE (m)-[:REFERS_TO]->(e)
+            CREATE (a)-[:ALIAS_OF]->(e)
+            """
+        )
+        yield table
+        clean()
+
+    def test_it_returns_folded_names_with_their_entity(self, book):
+        found = dict(store.canon_aliases(book, ["pytest-alias-book"]))
+        assert found["pytestvarrin"] == "pytest-alias-book:v"
+
+    def test_an_undrawn_book_contributes_nothing(self, table):
+        """A campaign collides only with what it actually draws on."""
+        assert store.canon_aliases(table, []) == frozenset()

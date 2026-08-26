@@ -170,11 +170,25 @@ def write(
     # the entity would exist, be chained, be retrievable by position, and be
     # unreachable by its own name. Found by a test asking for the scene by name
     # and getting nothing.
+    #
+    # MERGED ON `name` ALONE, AND ONLY SET ON CREATE. `Alias.name` carries a
+    # GLOBAL uniqueness constraint -- one node per spelling, across every plane
+    # and book -- so merging on `{{name, plane}}` finds no campaign-plane node,
+    # tries to create a second one, and dies on the constraint. Storing anything
+    # named like an existing canon alias raised a raw driver error.
+    #
+    # `ON CREATE SET` is what keeps canon unmutated: an existing alias node
+    # keeps its own `plane` and `normalized`, and merely gains a second
+    # `ALIAS_OF`. That is the shape `BY_ALIAS` already documents as legitimate
+    # -- "several is a legitimate answer, and the ambiguity travels" -- and the
+    # entity-plane filter keeps the campaign entity out of canon reads. Delete
+    # stays clean: DETACH DELETE on the entity takes the edge and leaves the
+    # canon alias standing.
     tx.run(
         f"""
         MATCH (e:Entity {{id:$id}})
-        MERGE (a:Alias {{name:$name, plane:$plane}})
-        SET a.normalized = $normalized
+        MERGE (a:Alias {{name:$name}})
+        ON CREATE SET a.normalized = $normalized, a.plane = $plane
         MERGE (a)-[:{ALIAS_OF}]->(e)
         """,
         {
