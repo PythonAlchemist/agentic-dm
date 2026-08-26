@@ -242,3 +242,60 @@ class TestANamedCampaignEntityBringsItsOwnProse:
             "tell me about Corsair Boarding"
         )
         assert not any(p.origin == "campaign" for p in result.passages)
+
+
+class TestAStubDoesNotReadAsAbsent:
+    """A thing the DM made is not a passage, and must not look like a gap.
+
+    THE DEFECT. A cluster element gets a node, a name and a role, but the prose
+    stored beside it is the SCENE's -- "Corsairs swarm the deck at dawn" never
+    says Captain Saltmarrow. So the passage arrived, carried no mention of him,
+    and a fresh session answered "the canon does not cover any specific details
+    about Captain Saltmarrow" about a character the DM had invented an hour
+    earlier. The node knew his kind, his role, what was invented and which
+    scene minted him. None of it reached the model.
+    """
+
+    def test_the_record_travels_with_the_retrieval(self, overlaid):
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        assert result.campaign_entities
+        assert result.campaign_entities[0]["name"] == "Corsair Boarding"
+
+    def test_the_model_is_told_it_is_the_dms_own(self, overlaid):
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        block = canon_context.render(result)
+        assert "YOUR CAMPAIGN" in block
+        assert "never as canon" in block
+
+    def test_a_stub_says_so_rather_than_saying_nothing(self):
+        """"You made this and have not fleshed it out" and "the book does not
+        mention this" are different answers, and only one of them is true."""
+        from backend.agents.canon_context import _your_material
+
+        block = _your_material(
+            ({"name": "Captain Soldreth", "kind": "npc", "role": "the corsair captain",
+              "described_in": []},)
+        )
+        assert "Nothing has been written about it yet" in block
+        assert "the corsair captain" in block
+
+    def test_something_with_prose_names_where_it_appears(self):
+        from backend.agents.canon_context import _your_material
+
+        block = _your_material(
+            ({"name": "The Red Barge", "kind": "location", "role": "",
+              "described_in": ["The Corsair Boarding"]},)
+        )
+        assert "Appears in: The Corsair Boarding" in block
+
+    def test_a_campaign_less_session_gets_no_record(self, overlaid):
+        """The wall again: a canon-only session must not learn the DM made
+        anything at all."""
+        result = CanonRetriever(book=BOOK, limit=6).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        assert result.campaign_entities == ()

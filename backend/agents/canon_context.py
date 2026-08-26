@@ -183,6 +183,37 @@ _SKIPPED_MARK = "  ← SKIPPED in this campaign: not in play at this table."
 _RODE_MARK = "  ← in this campaign's running order beside [{}]. Positional, not a keyword match."
 
 
+def _your_material(entities: tuple[dict, ...]) -> str:
+    """What the DM has made, said as a record rather than as prose.
+
+    STATES WHEN NOTHING HAS BEEN WRITTEN YET, because a stub and a gap look
+    identical to a model otherwise, and the honest answers differ: "you made
+    this and have not fleshed it out" is useful, "the book does not mention
+    this" is wrong.
+    """
+    lines = [
+        "YOUR CAMPAIGN — things this table has made. These are the DM's own, "
+        "not the published book. Speak about them as established at this "
+        "table, and never as canon."
+    ]
+    for entity in entities:
+        described = [d for d in (entity.get("described_in") or ()) if d]
+        role = (entity.get("role") or "").strip()
+        line = f"  {entity['name']} ({entity.get('kind') or 'thing'})"
+        if role:
+            line += f" — {role}"
+        if described:
+            line += f". Appears in: {', '.join(described)}."
+        else:
+            line += ". Nothing has been written about it yet."
+        lines.append(line)
+    lines.append(
+        "  If the DM asks for more about one of these and there is no prose "
+        "above, say what is known and offer to flesh it out."
+    )
+    return "\n".join(lines)
+
+
 def _authored(edge: dict) -> bool:
     """An edge the DM asserted, rather than one derived or guessed."""
     return edge.get("status") == "authored"
@@ -204,6 +235,15 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
         parts.append(_TEXT_WARNING)
         if retrieval.terms:
             parts.append(f"Words searched for: {', '.join(retrieval.terms)}.")
+
+    # THE DM'S OWN RECORD, BEFORE THE PASSAGES. A thing they made is not a
+    # passage and must not read as an absence: an element carries a kind, a
+    # role and the scene that introduced it long before anyone writes prose
+    # about it, and without this the model answered "the canon does not cover
+    # any specific details about Captain Saltmarrow" about a character the DM
+    # had invented an hour earlier.
+    if retrieval.campaign_entities:
+        parts.append(_your_material(retrieval.campaign_entities))
 
     numbers = {p.section_id: n for n, p in enumerate(retrieval.passages, start=1)}
     for number, passage in enumerate(retrieval.passages, start=1):

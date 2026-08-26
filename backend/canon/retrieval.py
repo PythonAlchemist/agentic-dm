@@ -147,6 +147,25 @@ WHERE e.id IN $ids
 RETURN DISTINCT s.id AS section_id, s.heading AS section, s.text AS text
 """
 
+#: What the DM's own record says about an entity they made.
+#:
+#: NOT A PASSAGE, AND DELIBERATELY SO. A cluster element gets a node, a name
+#: and a role, but the prose stored beside it is the SCENE's -- "Corsairs swarm
+#: the deck at dawn" never says Captain Saltmarrow. So the passage arrived,
+#: carried no mention of him, and a fresh session was told "the canon does not
+#: cover any specific details about Captain Saltmarrow" about a character the
+#: DM had invented an hour earlier. The node knew his kind, his role, what was
+#: invented about him and which scene minted him, and none of it reached the
+#: model.
+CAMPAIGN_ENTITY_FACTS = """
+MATCH (e:Entity {plane:'campaign', campaign:$campaign})
+WHERE e.id IN $ids
+OPTIONAL MATCH (e)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(s:Section)
+RETURN e.id AS id, e.name AS name, e.kind AS kind, e.role AS role,
+       e.invented AS invented, e.cluster AS cluster,
+       collect(DISTINCT s.heading) AS described_in
+"""
+
 #: Sections this campaign has cut. Retrieved all the same -- the chain is the
 #: running order, not the knowledge scope, and "what was in the bit I skipped"
 #: is a real question -- but marked, so nothing reads as in play that is not.
@@ -400,6 +419,12 @@ class Retrieval:
     #: turns ago is a different kind of answer, and a reader must be able to
     #: see which they got.
     carried: bool = False
+    #: The DM's own record for campaign entities this question named: kind,
+    #: role, what was invented, and where they were introduced. Carried apart
+    #: from `passages` because it is not prose -- it is what the graph holds
+    #: about a thing the DM made, which for a freshly minted element is
+    #: everything there is.
+    campaign_entities: tuple[dict, ...] = ()
     #: The display name of the book this came from, so a caller rendering a
     #: prompt does not have to know one. Two model-facing strings said "Curse
     #: of Strahd" unconditionally and went on saying it after a second book was
@@ -713,9 +738,17 @@ class CanonRetriever:
                 if rider is not None:
                     riders.append(replace(rider, rode_with=passage.section_id))
 
+        facts: list[dict] = []
+        if campaign_ids:
+            with self._session() as session:
+                facts = self._rows(
+                    session, CAMPAIGN_ENTITY_FACTS, {"ids": campaign_ids}
+                )
+
         return replace(
             found,
             passages=tuple(labelled + named + riders),
+            campaign_entities=tuple(facts),
             dropped=found.dropped + cut,
         )
 
