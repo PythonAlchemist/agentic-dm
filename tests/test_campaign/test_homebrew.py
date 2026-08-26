@@ -514,3 +514,99 @@ class TestTheClusterEndpointsReDeriveEverything:
         )
         plan = _plan_for(ClusterRequest(**self._payload()))
         assert plan.dropped == {"already in this campaign": 1}
+
+
+class TestFleshingOutAStub:
+    """A cluster mints names; this is how one becomes something to read from.
+
+    The distinction that matters: `write` mints an entity and refuses a second
+    of the same name; `expand` mints NOTHING and gives an existing one the
+    prose it never had. Without it, fleshing out Captain Saltmarrow hits
+    `AlreadyStored` -- correctly, and uselessly.
+    """
+
+    def _element(self, table):
+        cluster = TestWritingACluster()
+        result = cluster._write(table, cluster._plan())
+        return result["elements"][0]
+
+    def _expand(self, table, entity_id, **overrides):
+        payload = dict(
+            slug=SLUG, entity_id=entity_id,
+            body="A weathered corsair with a missing ear.",
+            generated_body="A weathered corsair with a missing ear.",
+            from_canon=[], invented=["his ear"], from_context=[], sources=[],
+            anchor=None, **overrides,
+        )
+        return table.execute_write(lambda tx: homebrew.expand(tx, **payload))
+
+    def test_it_creates_the_section_the_entity_never_had(self, table):
+        entity_id = self._element(table)
+        stored = self._expand(table, entity_id)
+        row = dict(
+            table.run(
+                "MATCH (s:Section {id:$id}) RETURN s.text AS text, s.expands AS e",
+                {"id": stored.section_id},
+            ).single()
+        )
+        assert "missing ear" in row["text"]
+        assert row["e"] == entity_id
+
+    def test_it_creates_no_second_entity(self, table):
+        """The whole difference from `write`, and the reason this exists."""
+        entity_id = self._element(table)
+        before = table.run(
+            "MATCH (e:Entity {plane:'campaign', campaign:$c}) RETURN count(e) AS c",
+            {"c": SLUG},
+        ).single()["c"]
+        self._expand(table, entity_id)
+        after = table.run(
+            "MATCH (e:Entity {plane:'campaign', campaign:$c}) RETURN count(e) AS c",
+            {"c": SLUG},
+        ).single()["c"]
+        assert after == before
+
+    def test_the_prose_is_now_reachable_from_the_entity(self, table):
+        entity_id = self._element(table)
+        stored = self._expand(table, entity_id)
+        found = table.run(
+            """
+            MATCH (:Entity {id:$e})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(:Section {id:$s})
+            RETURN count(m) AS c
+            """,
+            {"e": entity_id, "s": stored.section_id},
+        ).single()["c"]
+        assert found == 1
+
+    def test_it_is_not_put_in_the_running_order_by_default(self, table):
+        """A character's write-up is not an episode. Anchoring it would tell
+        the table to play it."""
+        entity_id = self._element(table)
+        stored = self._expand(table, entity_id)
+        assert stored.chain_changes == 0
+        assert stored.section_id not in store.running_order(table, SLUG)
+
+    def test_a_second_write_up_is_refused_rather_than_stacked(self, table):
+        """Two descriptions of one thing leaves a DM unable to tell which is
+        current. Delete and rewrite, deliberately."""
+        entity_id = self._element(table)
+        self._expand(table, entity_id)
+        with pytest.raises(homebrew.AlreadyExpanded):
+            self._expand(table, entity_id)
+
+    def test_expanding_something_absent_is_refused(self, table):
+        with pytest.raises(homebrew.NotStored):
+            self._expand(table, f"hb:{SLUG}:never-existed")
+
+    def test_it_cannot_reach_another_campaigns_element(self, table):
+        """`campaign` is on the MATCH, not merely on the id, so a payload
+        naming another table's node finds nothing."""
+        entity_id = self._element(table)
+        with pytest.raises(homebrew.NotStored):
+            table.execute_write(
+                lambda tx: homebrew.expand(
+                    tx, slug="some-other-table", entity_id=entity_id,
+                    body="x", generated_body="x", from_canon=[], invented=["y"],
+                    from_context=[], sources=[], anchor=None,
+                )
+            )

@@ -365,6 +365,85 @@ def delete_generation(campaign: str, entity_id: str) -> dict:
         )
 
 
+class ExpandRequest(StoreRequest):
+    """Prose for something the campaign already holds.
+
+    `title` is ignored -- the entity's own name is authoritative, and letting a
+    payload rename a thing while describing it is how two names for one node
+    start.
+    """
+
+    entity_id: str
+
+
+@router.get("/elements")
+def elements(campaign: str, unwritten: bool = False) -> dict:
+    """What this campaign has made, and which of it is still a stub.
+
+    THE FRESH-SESSION ENTRY POINT. A conversation started tomorrow holds no
+    subgraph and no history; this is how a DM finds what they built and picks
+    something up. `unwritten` narrows it to the things with no prose of their
+    own, which is the useful question after a cluster lands: a scene mints four
+    stubs and the DM flesh them out one at a time over several sittings.
+    """
+    with read_only_session() as session:
+        rows = [
+            dict(r)
+            for r in session.run(
+                """
+                MATCH (e:Entity {plane:'campaign', campaign:$c})
+                OPTIONAL MATCH (s:Section {expands:e.id})
+                OPTIONAL MATCH (root:Section {id:e.cluster})
+                RETURN e.id AS entity_id, e.name AS name, e.kind AS kind,
+                       e.role AS role, root.heading AS introduced_in,
+                       s.id AS own_section
+                ORDER BY e.name
+                """,
+                {"c": campaign},
+            )
+        ]
+    if unwritten:
+        rows = [r for r in rows if not r["own_section"]]
+    return {
+        "campaign": campaign,
+        "elements": rows,
+        "unwritten": sum(1 for r in rows if not r["own_section"]),
+    }
+
+
+@router.post("/expand")
+def expand_element(request: ExpandRequest) -> dict:
+    """Write prose for an existing element. Creates no entity."""
+    _resolved, bad = homebrew.cited_sections(request.from_canon, request.sources)
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(bad)} citation(s) point at nothing that was shown: {bad[:3]}",
+        )
+    try:
+        with neo4j_session() as session:
+            stored = session.execute_write(
+                lambda tx: homebrew.expand(
+                    tx,
+                    slug=request.campaign,
+                    entity_id=request.entity_id,
+                    body=request.body,
+                    generated_body=request.generated_body or request.body,
+                    from_canon=request.from_canon,
+                    invented=request.invented,
+                    from_context=request.from_context,
+                    sources=request.sources,
+                    anchor=request.anchor,
+                    model=request.model,
+                )
+            )
+    except homebrew.NotStored as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except homebrew.AlreadyExpanded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return stored.as_dict()
+
+
 @router.post("/skip")
 def skip(request: OrderRequest) -> dict:
     """Cut a section from the running order, RECORDING that it was cut."""

@@ -64,6 +64,18 @@ _SHAPES = {
     "scene": "an episode that happens at a point in the adventure: what "
              "occurs, where it interrupts the journey or the plan, who "
              "appears, how it can play out, and what it changes afterwards",
+    # THE THREE BELOW EXIST TO FLESH OUT AN ELEMENT, not to be asked for cold.
+    # A cluster mints a location, an item or a piece of lore as a name and a
+    # role; these are the shapes for turning one of those stubs into something
+    # a DM can run from. They are in `_SHAPES` and NOT in `KINDS`, so the chat
+    # tool never offers "generate me a lore" while `expand` can still ask for
+    # exactly that.
+    "location": "a place: what a party sees on arriving, who or what is "
+                "there, what can be done in it, and what it connects to",
+    "item": "an object: what it looks like, what it does, who wants it, and "
+            "what carrying it costs or risks",
+    "lore": "a piece of lore: what is believed, who tells it, how much of it "
+            "is true, and what it explains about the world",
 }
 
 _INSTRUCTIONS = """You generate material for a Dungeon Master running {book}.
@@ -304,8 +316,13 @@ def build_messages(
     the same rule the accepted/proposed headings follow, applied to a source
     the generator did not have until chat could call it.
     """
-    if kind not in KINDS:
-        raise ValueError(f"unknown kind {kind!r}; expected one of {KINDS}")
+    # CHECKED AGAINST `_SHAPES`, NOT `KINDS`. The guard exists so an unknown
+    # kind cannot become an unconstrained prompt, and `_SHAPES` is exactly the
+    # set of shapes that exist. `KINDS` is the narrower question of what a DM
+    # may ask for COLD -- `expand` fleshes out a location or a piece of lore
+    # that a cluster already minted, and neither is offered as a bare request.
+    if kind not in _SHAPES:
+        raise ValueError(f"unknown kind {kind!r}; expected one of {sorted(_SHAPES)}")
     shown = canon_context.apply(retrieval, depth)
     carried = context or GenerationContext()
     system = canon_context.render(shown, max_edges=depth.max_edges)

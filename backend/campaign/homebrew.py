@@ -483,6 +483,142 @@ def write_cluster(
     }
 
 
+class NotStored(Exception):
+    """Asked to flesh out something this campaign does not hold."""
+
+    def __init__(self, entity_id: str) -> None:
+        super().__init__(f"{entity_id} is not in this campaign; nothing was written")
+        self.entity_id = entity_id
+
+
+class AlreadyExpanded(Exception):
+    """It already has prose of its own. Refused rather than appended to.
+
+    A second write-up is a second opinion about one thing, and silently
+    stacking them leaves a DM reading two descriptions with no way to tell
+    which is current. Delete the old one and write again, deliberately.
+    """
+
+    def __init__(self, entity_id: str, section_id: str) -> None:
+        super().__init__(
+            f"{entity_id} already has its own section ({section_id}). Delete it "
+            "first if you want to write a new one."
+        )
+        self.entity_id = entity_id
+        self.section_id = section_id
+
+
+def expand(
+    tx,
+    *,
+    slug: str,
+    entity_id: str,
+    body: str,
+    generated_body: str,
+    from_canon,
+    invented,
+    from_context,
+    sources,
+    anchor: str | None = None,
+    model: str = "",
+    log_path: Path | None = None,
+) -> Stored:
+    """Give something that already exists prose of its own.
+
+    A CLUSTER MINTS STUBS. An element gets a node, a name and a role, and the
+    only prose beside it is the scene's -- "Corsairs swarm the deck at dawn"
+    never says Captain Saltmarrow. This is how that stub becomes something a
+    DM can read from at the table.
+
+    IT CREATES NO ENTITY AND NO ALIAS. That is the whole difference from
+    `write`, and it is what makes fleshing out an existing thing distinct from
+    minting a second one with the same name -- which `AlreadyStored` refuses,
+    correctly, and which is what a DM would otherwise hit here.
+
+    ANCHORING IS OPTIONAL AND OFF BY DEFAULT. A character's write-up is not an
+    episode: putting it in the running order would tell the table to play it.
+    """
+    row = tx.run(
+        "MATCH (e:Entity {id:$id, plane:$plane, campaign:$slug}) "
+        "RETURN e.name AS name, e.kind AS kind",
+        {"id": entity_id, "plane": CAMPAIGN_PLANE, "slug": slug},
+    ).single()
+    if row is None:
+        raise NotStored(entity_id)
+    name = dict(row)["name"]
+    kind = dict(row)["kind"] or "lore"
+
+    section_id = f"{campaign_prefix(slug)}{slugify(name)}#0"
+    existing = tx.run(
+        "MATCH (s:Section {id:$id}) RETURN s.id AS id", {"id": section_id}
+    ).single()
+    if existing is not None:
+        raise AlreadyExpanded(entity_id, section_id)
+
+    tx.run(
+        """
+        MATCH (c:Campaign {slug:$slug})
+        CREATE (s:Section {
+            id:$id, heading:$heading, text:$body, generated_body:$generated,
+            plane:$plane, campaign:$slug, kind:$kind, model:$model,
+            from_canon:$from_canon, invented:$invented, from_context:$from_context,
+            edited:$edited, expands:$entity
+        })
+        MERGE (c)-[:HAS_SECTION]->(s)
+        """,
+        {
+            "slug": slug, "id": section_id, "heading": name, "body": body,
+            "generated": generated_body, "plane": CAMPAIGN_PLANE, "kind": kind,
+            "model": model,
+            "from_canon": json.dumps(list(from_canon or ())),
+            "invented": json.dumps(list(invented or ())),
+            "from_context": json.dumps(list(from_context or ())),
+            "edited": body.strip() != generated_body.strip(),
+            "entity": entity_id,
+        },
+    )
+    tx.run(
+        f"""
+        MATCH (e:Entity {{id:$e}}), (s:Section {{id:$s}})
+        CREATE (m:Mention {{plane:$plane, campaign:$slug, surface:$name}})
+        CREATE (m)-[:{REFERS_TO}]->(e)
+        CREATE (m)-[:{IN_SECTION}]->(s)
+        MERGE (s)-[:{DESCRIBES}]->(e)
+        """,
+        {"e": entity_id, "s": section_id, "plane": CAMPAIGN_PLANE,
+         "slug": slug, "name": name},
+    )
+
+    resolved, _bad = cited_sections(from_canon, sources)
+    for target in resolved:
+        tx.run(
+            f"""
+            MATCH (s:Section {{id:$s}}), (canon:Section {{id:$t}})
+            MERGE (s)-[r:{DERIVED_FROM}]->(canon)
+            SET r.plane = $plane, r.campaign = $slug, r.status = $status
+            """,
+            {"s": section_id, "t": target, "plane": CAMPAIGN_PLANE,
+             "slug": slug, "status": AUTHORED},
+        )
+
+    changes = 0
+    if anchor:
+        links, start = store.read_chain(tx, slug)
+        in_chain = frozenset(walk(links, start, bound=len(links) + 2).order)
+        plan = insert_plan(links, start, section_id, anchor)
+        changes = store.apply_rewire(
+            tx, slug, plan, in_chain | {section_id}, log_path=log_path
+        )["changed"]
+
+    return Stored(
+        entity_id=entity_id,
+        section_id=section_id,
+        citations=len(resolved),
+        chain_changes=changes,
+        anchored_after=anchor or "",
+    )
+
+
 def delete_cluster(tx, *, slug: str, entity_id: str, cascade: bool = False) -> dict:
     """Remove a cluster root, and refuse by default while its elements remain.
 
