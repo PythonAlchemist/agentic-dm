@@ -140,6 +140,43 @@ export interface GeneratedReply {
   /** Set on a card the chat agent asked for: the canon section it goes after. */
   anchor?: string
   carried?: string[]
+  /** What the generation says it contains. Absent on a single-artifact card,
+   *  which is every card that existed before clusters. */
+  elements?: ClusterElement[]
+  /** Declared but NOT stored: measured at 27% type-impossible against a 20%
+   *  gate, so they are shown and counted rather than written. */
+  edges?: unknown[]
+  /** Manifest entries thrown away, by reason. */
+  manifest_dropped?: Record<string, number>
+}
+
+export interface ClusterElement {
+  name: string
+  kind: string
+  role?: string
+  from_canon?: { claim: string; cite: string }[]
+  invented?: string[]
+}
+
+export interface PlannedElement extends ClusterElement {
+  entity_id: string
+  collides_with: string
+}
+
+export interface ClusterCollision {
+  name: string
+  kind: string
+  canon_id: string
+  choices: string[]
+}
+
+export interface ClusterPlan {
+  campaign: string
+  elements: PlannedElement[]
+  collisions: ClusterCollision[]
+  dropped: Record<string, number>
+  edges_deferred: number
+  storable: boolean
 }
 
 export interface CampaignInfo {
@@ -254,6 +291,15 @@ export const labAPI = {
     model: string
   }): Promise<StoredResult> {
     return postTo<StoredResult>('/homebrew/store', body)
+  },
+
+  /** What storing WOULD do. Called on every card edit; writes nothing. */
+  planCluster(body: Record<string, unknown>): Promise<ClusterPlan> {
+    return postTo<ClusterPlan>('/homebrew/plan-cluster', body)
+  },
+
+  storeCluster(body: Record<string, unknown>): Promise<StoredResult> {
+    return postTo<StoredResult>('/homebrew/store-cluster', body)
   },
 
   skip(campaign: string, sectionId: string) {

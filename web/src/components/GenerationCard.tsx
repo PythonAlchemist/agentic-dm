@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import type { GeneratedReply, OrderRow } from '@/lib/api'
+import type { ClusterPlan, GeneratedReply, OrderRow } from '@/lib/api'
 import { labAPI } from '@/lib/api'
+import { ClusterReview } from './ClusterReview'
 
 /**
  * One draft, with its three sources kept apart, and the button that is the gate.
@@ -31,6 +32,13 @@ export function GenerationCard({
   const [busy, setBusy] = useState(false)
   const [stored, setStored] = useState('')
   const [failed, setFailed] = useState('')
+  const [plan, setPlan] = useState<ClusterPlan | null>(null)
+  const [clusterBody, setClusterBody] = useState<Record<string, unknown> | null>(null)
+
+  const isCluster = (card.elements?.length ?? 0) > 0
+  // A collision is a question only a person can answer, so it BLOCKS the
+  // write rather than resolving itself in either direction.
+  const blocked = isCluster && plan !== null && !plan.storable
 
   const edited = body.trim() !== card.body.trim()
 
@@ -39,19 +47,24 @@ export function GenerationCard({
     setBusy(true)
     setFailed('')
     try {
-      const result = await labAPI.store({
-        campaign,
-        kind: card.kind,
-        title: card.title,
-        body,
-        generated_body: card.body,
-        from_canon: card.from_canon,
-        invented: card.invented,
-        from_context: card.from_context ?? [],
-        sources: card.sources,
-        anchor: anchor || null,
-        model: card.model,
-      })
+      // A cluster posts the payload the REVIEW built, with the edited body
+      // laid over it -- so what is written is what was planned and shown, not
+      // a second guess assembled here.
+      const result = isCluster
+        ? await labAPI.storeCluster({ ...(clusterBody ?? {}), body })
+        : await labAPI.store({
+            campaign,
+            kind: card.kind,
+            title: card.title,
+            body,
+            generated_body: card.body,
+            from_canon: card.from_canon,
+            invented: card.invented,
+            from_context: card.from_context ?? [],
+            sources: card.sources,
+            anchor: anchor || null,
+            model: card.model,
+          })
       setStored(result.entity_id)
       onStored?.()
     } catch (error) {
@@ -118,6 +131,18 @@ export function GenerationCard({
         />
       </div>
 
+      {campaign && isCluster && (
+        <ClusterReview
+          card={card}
+          campaign={campaign}
+          anchor={anchor}
+          onPlan={(next, body) => {
+            setPlan(next)
+            setClusterBody(body)
+          }}
+        />
+      )}
+
       {campaign ? (
         <div className="mt-3 border-t border-neutral-800 pt-3">
           <label className="block text-xs text-neutral-400">
@@ -141,7 +166,7 @@ export function GenerationCard({
           <div className="mt-2 flex items-center gap-3">
             <button
               onClick={store}
-              disabled={busy || !!stored}
+              disabled={busy || !!stored || blocked}
               className="rounded-md bg-amber-600/90 px-3 py-1.5 text-xs font-medium text-neutral-950 transition-colors hover:bg-amber-500 disabled:opacity-40"
             >
               {stored ? 'Stored' : busy ? 'Storing…' : 'Store in my campaign'}
@@ -149,6 +174,13 @@ export function GenerationCard({
             {stored && (
               <span className="text-xs text-neutral-500">
                 Written as <code className="text-neutral-400">{stored}</code>
+              </span>
+            )}
+            {/* Named, not merely disabled: a greyed button with no reason
+                beside it is a dead end rather than a decision. */}
+            {blocked && (
+              <span className="text-xs text-amber-500/90">
+                Resolve the name{plan!.collisions.length === 1 ? '' : 's'} above first.
               </span>
             )}
           </div>

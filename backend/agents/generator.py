@@ -458,14 +458,16 @@ List what it contains, so each thing can be stored separately.
 
 RULES:
 
-1. Include only what a DM would want as its OWN entry -- a place, a person, a
-   creature, an object, a piece of lore. Something mentioned once in passing is
-   scenery; leave it out.
-2. Use the names exactly as the text writes them.
-3. For each thing, say what in it came from the CANON passages below (citing
-   one, like [1]) and what was invented. If the text says it and the passages
-   do not, it was invented.
-4. Relationships go in `edges`. USE ONLY THESE, AND ONLY BETWEEN THE TYPES
+1. LIST ONLY WHAT THIS MATERIAL ADDS. If the CANON passages below already name
+   something, it belongs to the book and is not yours to list -- the scene uses
+   it, and using a thing is not inventing it. List a place, person, creature,
+   object or piece of lore only when this text is where it first exists.
+2. Something mentioned once in passing is scenery; leave it out.
+3. Use the names exactly as the text writes them.
+4. For each thing, say what in it leans on the CANON passages below (citing
+   one, like [1]) and what was invented. A new innkeeper standing in the
+   book's own tavern is new, and the tavern is the citation.
+5. Relationships go in `edges`. USE ONLY THESE, AND ONLY BETWEEN THE TYPES
    SHOWN. The arrow is `source -> target` and the direction matters; an edge
    whose endpoints are the wrong types is discarded, so check the line first.
 {vocabulary}
