@@ -404,11 +404,12 @@ class TestWritingACluster:
         assert result["elements"] == ["hb:pytest-hb:the-red-barge"]
         assert result["dropped"] == {"rejected by the DM": 2}
 
-    def test_deferred_edges_are_reported(self, table):
+    def test_an_edge_that_could_not_be_written_is_reported_by_reason(self, table):
         result = self._write(
             table, self._plan(edges=[{"source": "a", "target": "b", "rel_type": "GUARDS"}])
         )
-        assert result["edges_deferred"] == 1
+        assert result["edges"] == 0
+        assert result["edges_dropped"] == {"an endpoint is not in this cluster": 1}
 
     def test_an_unstorable_plan_is_refused_before_anything_is_written(self, table):
         plan = self._plan(

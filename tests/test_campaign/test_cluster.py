@@ -68,16 +68,62 @@ class TestDropsAreCountedAndNamed:
         assert plan.elements == ()
         assert plan.dropped == {"already in this campaign": 1}
 
-    def test_declared_edges_are_counted_rather_than_silently_lost(self):
-        """Edges are not stored in this slice -- measured at 27% type-impossible
-        against a 20% gate. A model that proposed six relationships and had
-        none kept should say so on the card."""
+    def test_an_edge_reaching_outside_the_cluster_is_dropped_and_named(self):
+        """A cross-plane edge into canon is readable from neither plane, so it
+        is refused with that said rather than written where nobody looks."""
         plan = plan_cluster(
             campaign=CAMPAIGN,
             elements=[element("A Guard")],
-            edges=[{"source": "a", "target": "b", "rel_type": "GUARDS"}] * 6,
+            edges=[{"source": "Strahd", "target": "A Guard", "rel_type": "SEEKS"}],
         )
-        assert plan.edges_deferred == 6
+        assert plan.edges == ()
+        assert plan.edges_dropped == {"an endpoint is not in this cluster": 1}
+
+    def test_a_type_impossible_edge_is_dropped_and_says_which_way_round(self):
+        """The same domain/range check canon extraction runs -- there is one
+        table, not a laxer one for material a DM wrote. Reversal is named
+        because it is one of the extractor's four measured failure modes and a
+        fixable prompt problem rather than noise."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("A Cutlass", kind="item"), element("A Guard")],
+            edges=[{"source": "A Cutlass", "target": "A Guard", "rel_type": "SEEKS"}],
+        )
+        assert plan.edges == ()
+        assert plan.edges_dropped == {"SEEKS: domain, would pass reversed": 1}
+
+    def test_a_type_valid_edge_between_two_of_its_own_survives(self):
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("A Guard"), element("The Vault", kind="location")],
+            edges=[{"source": "A Guard", "target": "The Vault", "rel_type": "LOCATED_IN"}],
+        )
+        assert plan.edges == (("A Guard", "The Vault", "LOCATED_IN"),)
+        assert plan.edges_dropped == {}
+
+    def test_the_generation_itself_is_an_endpoint(self):
+        """Most of what a model declares points at the scene. Leaving the root
+        out of the node set dropped nearly all of it."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("A Guard")],
+            edges=[{"source": "The Ambush", "target": "A Guard", "rel_type": "INVOLVES"}],
+            root_name="The Ambush",
+            root_kind="scene",
+        )
+        assert plan.edges == (("The Ambush", "A Guard", "INVOLVES"),)
+
+    def test_unticking_an_element_takes_its_edges_with_it(self):
+        """Which is what unticking it means. `planned` is already the approved
+        set, so this falls out rather than needing its own pass."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("A Guard"), element("The Vault", kind="location")],
+            edges=[{"source": "A Guard", "target": "The Vault", "rel_type": "LOCATED_IN"}],
+            approved=frozenset({"The Vault"}),
+        )
+        assert plan.edges == ()
+        assert plan.edges_dropped == {"an endpoint is not in this cluster": 1}
 
 
 class TestApproval:

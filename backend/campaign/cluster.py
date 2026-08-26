@@ -11,14 +11,30 @@ the caller reads what this needs and hands it in as plain data. Same reason
 `chain.py` is pure -- a rule that only exists inside a transaction cannot be
 argued with, and the card calls this on every edit, so it has to be cheap.
 
-ELEMENTS ONLY, AND THE REASON IS MEASURED. Forty generations across both books
-said a model declares elements it agrees with itself about (0.78 agreement over
-fixed prose, against a 0.75 gate) and edges it does not (0.64, and 27% of them
-type-impossible against a 20% gate). So elements are planned and written;
-declared edges are COUNTED AND REPORTED but not stored, and the count is shown
-to the DM rather than swallowed -- a model that proposed six relationships and
-had none kept should say so on the card. `evals/baselines/manifest-*.json`
-holds the runs.
+EDGES ARE PLANNED NOW, AND THE MEASUREMENT THAT ONCE REFUSED THEM IS WHY THEY
+CAN BE. Forty generations across both books said a model declares elements it
+agrees with itself about (0.78 over fixed prose, against a 0.75 gate) and edges
+it does not (0.64, with 27% type-impossible against a 20% gate). Both numbers
+still stand. What changed is what is done about them.
+
+The 27% is now REMOVED rather than tolerated: `constraints.report_edges` is the
+same domain/range check canon extraction runs, so what survives is type-valid
+by construction and the count of what did not is named on the card. A rate that
+was a reason to store nothing becomes a filter once something deterministic can
+apply it.
+
+The 0.64 is not a filter and does not need to be. Instability is fatal where
+nothing reviews the output -- canon extraction writes what it infers, so two
+runs disagreeing means the graph is a coin toss. Here a person reads every edge
+and ticks it before it is written. A second draw proposing different
+relationships is a different suggestion to a DM who is already choosing, not a
+different fact about the book. That is the whole difference between this path
+and the extractor, and it is why the same number blocks one and not the other.
+
+BOTH ENDPOINTS MUST BE IN THE CLUSTER. An edge naming a canon entity is a
+cross-plane edge, and those are readable from neither plane as things stand --
+so they are dropped and counted rather than written somewhere nobody looks.
+`evals/baselines/manifest-*.json` holds the runs.
 """
 
 from __future__ import annotations
@@ -26,9 +42,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 #: A generated name that slugifies to nothing has no id to be given.
-from backend.campaign.homebrew import slugify
+from backend.campaign.homebrew import LABELS, slugify
 from backend.campaign.model import mint_id
 from backend.canon.aliases import normalize
+from backend.canon.constraints import report_edges
+from backend.canon.models import CandidateEdge, CandidateNode
 
 
 @dataclass(frozen=True)
@@ -93,9 +111,14 @@ class ClusterPlan:
     #: Reason -> count. Never a bare total: "3 dropped" tells a reader nothing
     #: about whether the generation or the rules were at fault.
     dropped: dict = field(default_factory=dict)
-    #: Declared relationships not stored in this slice, counted so the card can
-    #: say so plainly rather than appearing to have lost them.
-    edges_deferred: int = 0
+    #: Relationships that survived the type check, each between two things
+    #: this cluster mints. `(source, target, rel_type)` by NAME, since ids are
+    #: on `elements` and a card renders names.
+    edges: tuple[tuple[str, str, str], ...] = ()
+    #: Declared relationships thrown away, by reason. Never a bare total: "3
+    #: dropped" says nothing about whether the model or the rules were at
+    #: fault, and this is the count the card prints.
+    edges_dropped: dict = field(default_factory=dict)
 
     @property
     def storable(self) -> bool:
@@ -128,7 +151,10 @@ class ClusterPlan:
             ],
             "links": [{"name": n, "canon_id": c} for n, c in self.links],
             "dropped": dict(self.dropped),
-            "edges_deferred": self.edges_deferred,
+            "edges": [
+                {"source": s, "target": t, "rel_type": r} for s, t, r in self.edges
+            ],
+            "edges_dropped": dict(self.edges_dropped),
             "storable": self.storable,
         }
 
@@ -138,6 +164,8 @@ def plan_cluster(
     campaign: str,
     elements,
     edges=(),
+    root_name: str = "",
+    root_kind: str = "",
     canon_aliases: frozenset[tuple[str, str]] = frozenset(),
     approved: frozenset[str] | None = None,
     existing_ids: frozenset[str] = frozenset(),
@@ -148,6 +176,11 @@ def plan_cluster(
     `approved` is the subset of element NAMES the DM kept; None means all of
     them, which is the state a freshly generated card is in. `resolutions` maps
     a colliding name to the choice a DM made about it.
+
+    `root_name`/`root_kind` are the generation ITSELF -- the scene or the
+    quest -- which is a node like any other and the one most edges point at.
+    Omitting it dropped every "the ambush INVOLVES the bosun" a model declared,
+    which is most of what it declares.
 
     Order matters and is fixed: reject unapproved, drop unusable, mint ids,
     then scan collisions. Scanning before minting would report a collision for
@@ -223,11 +256,80 @@ def plan_cluster(
             )
         )
 
+    kept_edges, edges_dropped = _plan_edges(edges, planned, root_name, root_kind)
     return ClusterPlan(
         campaign=campaign,
         elements=tuple(planned),
         collisions=tuple(collisions),
         links=tuple(links),
         dropped=dropped,
-        edges_deferred=len(tuple(edges)),
+        edges=kept_edges,
+        edges_dropped=edges_dropped,
     )
+
+
+def _plan_edges(
+    edges, planned: list[PlannedElement], root_name: str, root_kind: str
+) -> tuple[tuple[tuple[str, str, str], ...], dict]:
+    """Which declared relationships are writable. `(kept, dropped_by_reason)`.
+
+    THE TYPE CHECK IS THE SAME ONE CANON RUNS. `report_edges` reads
+    `RELATIONSHIP_DOMAIN_RANGE`, so a homebrew edge has to satisfy exactly what
+    an extracted one does -- there is one table and one answer to "can an ITEM
+    contain an NPC", not a second, laxer one for material a DM wrote.
+
+    ENDPOINTS ARE MATCHED BY NAME, folded, against what this cluster mints plus
+    the generation itself. Anything else is a cross-plane edge into canon, and
+    those are readable from neither plane as things stand, so they are dropped
+    with that said rather than written where nobody would find them.
+
+    A REJECTED ELEMENT TAKES ITS EDGES WITH IT. `planned` is already the
+    approved set, so unticking the bosun silently removes the relationships
+    that named him -- which is what unticking him means.
+    """
+    dropped: dict[str, int] = {}
+
+    def drop(reason: str) -> None:
+        dropped[reason] = dropped.get(reason, 0) + 1
+
+    nodes = [
+        CandidateNode(name=e.name, entity_type=LABELS.get(e.kind, "LORE"))
+        for e in planned
+    ]
+    if root_name:
+        nodes.append(
+            CandidateNode(name=root_name, entity_type=LABELS.get(root_kind, "LORE"))
+        )
+    known = {node.name.casefold() for node in nodes}
+
+    candidates: list[CandidateEdge] = []
+    for edge in edges or ():
+        source = str(edge.get("source") or "").strip()
+        target = str(edge.get("target") or "").strip()
+        if source.casefold() not in known or target.casefold() not in known:
+            drop("an endpoint is not in this cluster")
+            continue
+        candidates.append(
+            CandidateEdge(
+                source_name=source,
+                target_name=target,
+                rel_type=str(edge.get("rel_type") or "").strip().upper(),
+            )
+        )
+
+    report = report_edges(nodes, candidates)
+    bad = {violation.edge_index for violation in report.violations}
+    for violation in report.violations:
+        # NAMED, not counted as one lump. "SEEKS wants an NPC, got an ITEM" is
+        # a different thing to know than "6 dropped", and reversal is one of
+        # the extractor's four measured failure modes -- so a reversed edge
+        # says so, since that is a fixable prompt problem rather than noise.
+        turn = ", would pass reversed" if violation.reversal_would_pass else ""
+        drop(f"{violation.rel_type}: {violation.reason}{turn}")
+
+    kept = tuple(
+        (edge.source_name, edge.target_name, edge.rel_type)
+        for index, edge in enumerate(candidates)
+        if index not in bad
+    )
+    return kept, dropped

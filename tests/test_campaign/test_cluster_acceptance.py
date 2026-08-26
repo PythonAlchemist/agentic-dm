@@ -248,14 +248,18 @@ class TestProvenanceSurvivesTheWholeTrip:
         assert len(json.loads(row["m"])) == 3
         assert len(json.loads(row["g"])["elements"]) == 4
 
-    def test_the_deferred_edge_is_counted_not_written(self, approved):
+    def test_the_declared_edge_is_written_and_carries_its_provenance(self, approved):
+        """It survived the type check, so it is real structure now -- and it is
+        stamped `authored` on the campaign plane, because an edge nobody can
+        tell from canon is the defect this whole two-axis scheme prevents."""
         session, result = approved
-        assert result["edges_deferred"] == 1
-        written = session.run(
-            "MATCH (:Entity {id:$a})-[r]->(:Entity {id:$b}) RETURN count(r) AS c",
+        assert result["edges"] == 1
+        row = session.run(
+            "MATCH (:Entity {id:$a})-[r]->(:Entity {id:$b}) "
+            "RETURN r.plane AS plane, r.status AS status, r.campaign AS campaign",
             {"a": f"hb:{SLUG}:captain-soldreth", "b": f"hb:{SLUG}:the-kraken-s-purse"},
-        ).single()["c"]
-        assert written == 0
+        ).single()
+        assert dict(row) == {"plane": "campaign", "status": "authored", "campaign": SLUG}
 
 
 class TestTheBookIsByteIdentical:

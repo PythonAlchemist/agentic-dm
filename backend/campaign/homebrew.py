@@ -42,7 +42,14 @@ from backend.campaign import store
 from backend.campaign.chain import insert_plan, remove_plan, walk
 from backend.campaign.model import AUTHORED, CAMPAIGN_PLANE, campaign_prefix, mint_id
 from backend.canon.aliases import normalize
-from backend.graph.schema import ALIAS_OF, DESCRIBES, IN_SECTION, REFERS_TO
+from backend.graph.schema import (
+    ALIAS_OF,
+    DESCRIBES,
+    IN_SECTION,
+    LAYER_MAP,
+    REFERS_TO,
+    RelationshipType,
+)
 
 #: What a `cite` looks like in a generation: `[1]`, pointing at a source slot.
 _CITE = re.compile(r"\[(\d+)\]")
@@ -558,12 +565,45 @@ def write_cluster(
         )
         linked += 1
 
+    # THE RELATIONSHIPS, between things this cluster minted and the generation
+    # itself. `plan_cluster` has already thrown out every edge whose endpoint
+    # types the book's own domain/range table forbids, so what arrives here is
+    # type-valid and the only thing left to do is name it.
+    #
+    # `layer` COMES FROM THE SCHEMA, never from the model. It is what partitions
+    # the graph into surfaces, and letting a generation choose its own would
+    # let one edge sit on a layer nothing else of its type sits on.
+    by_name = {e.name.casefold(): e.entity_id for e in plan.elements}
+    by_name[title.strip().casefold()] = root.entity_id
+    edges_written = 0
+    for source, target, rel_type in plan.edges:
+        relationship = RelationshipType(rel_type)  # raises on anything unknown
+        layer = LAYER_MAP.get(relationship)
+        tx.run(
+            f"""
+            MATCH (a:Entity {{id:$a}}), (b:Entity {{id:$b}})
+            MERGE (a)-[r:{relationship.value}]->(b)
+            SET r.plane = $plane, r.campaign = $slug, r.status = $status,
+                r.layer = $layer
+            """,
+            {
+                "a": by_name[source.casefold()],
+                "b": by_name[target.casefold()],
+                "plane": CAMPAIGN_PLANE,
+                "slug": plan.campaign,
+                "status": AUTHORED,
+                "layer": layer.value if layer else "",
+            },
+        )
+        edges_written += 1
+
     return {
         **root.as_dict(),
         "elements": written,
         "linked_to_canon": linked,
         "dropped": dict(plan.dropped),
-        "edges_deferred": plan.edges_deferred,
+        "edges": edges_written,
+        "edges_dropped": dict(plan.edges_dropped),
     }
 
 

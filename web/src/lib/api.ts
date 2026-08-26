@@ -208,7 +208,12 @@ export interface ClusterPlan {
   elements: PlannedElement[]
   collisions: ClusterCollision[]
   dropped: Record<string, number>
-  edges_deferred: number
+  /** Relationships that survived the type check, between things this cluster
+   *  mints. Written on approval. */
+  edges: { source: string; target: string; rel_type: string }[]
+  /** Reason -> count for the ones that did not, so a card can say WHY rather
+   *  than appearing to have lost them. */
+  edges_dropped: Record<string, number>
   storable: boolean
 }
 

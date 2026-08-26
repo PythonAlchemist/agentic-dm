@@ -178,12 +178,35 @@ export function ClusterReview({
           ))}
         </ul>
       )}
-      {plan && plan.edges_deferred > 0 && (
-        <p className="mt-2 text-[11px] leading-relaxed text-neutral-600">
-          {plan.edges_deferred} relationship
-          {plan.edges_deferred === 1 ? '' : 's'} were proposed and are not stored.
-          Measured at 27% type-impossible, so they are shown rather than written.
-        </p>
+      {/* THE RELATIONSHIPS, shown because the DM is the gate on them. Two
+          runs of this model propose different edges (0.64 agreement), which is
+          fatal where nothing reviews the output and merely a different
+          suggestion where somebody ticks each one. What is listed here has
+          already passed the book's own domain/range check. */}
+      {plan && plan.edges.length > 0 && (
+        <div className="mt-2 border-t border-neutral-800 pt-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+            How they relate ({plan.edges.length})
+          </div>
+          <ul className="mt-1 space-y-0.5 text-[11px] text-neutral-400">
+            {plan.edges.map((edge) => (
+              <li key={`${edge.source}-${edge.rel_type}-${edge.target}`}>
+                {edge.source}{' '}
+                <span className="text-amber-300/70">{edge.rel_type}</span>{' '}
+                {edge.target}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {plan && Object.keys(plan.edges_dropped).length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-[11px] text-neutral-500">
+          {Object.entries(plan.edges_dropped).map(([reason, n]) => (
+            <li key={reason}>
+              {n} × relationship dropped — {reason}
+            </li>
+          ))}
+        </ul>
       )}
       {Object.keys(card.manifest_dropped ?? {}).length > 0 && (
         <p className="mt-1 text-[11px] text-neutral-600">

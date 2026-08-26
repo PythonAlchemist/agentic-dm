@@ -212,6 +212,10 @@ def _plan_for(request: ClusterRequest):
         campaign=request.campaign,
         elements=request.elements,
         edges=request.edges,
+        # The generation itself is a node, and the one most declared edges
+        # point at.
+        root_name=request.title,
+        root_kind=request.kind,
         canon_aliases=aliases,
         approved=None if request.approved is None else frozenset(request.approved),
         existing_ids=existing,
