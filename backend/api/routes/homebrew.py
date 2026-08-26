@@ -634,6 +634,34 @@ def expand_element(request: ExpandRequest) -> dict:
     return stored.as_dict()
 
 
+class EditRequest(BaseModel):
+    campaign: str
+    section_id: str
+    body: str
+
+
+@router.post("/edit")
+def edit_section(request: EditRequest) -> dict:
+    """Rewrite the prose of something this campaign already stored.
+
+    Refuses anything that is not this campaign's, which includes the book.
+    404 rather than 403: whether an id exists elsewhere is not this caller's
+    business.
+    """
+    with neo4j_session() as session:
+        try:
+            return session.execute_write(
+                lambda tx: homebrew.edit(
+                    tx,
+                    slug=request.campaign,
+                    section_id=request.section_id,
+                    body=request.body,
+                )
+            )
+        except homebrew.NotEditable as refused:
+            raise HTTPException(status_code=404, detail=str(refused)) from refused
+
+
 @router.post("/skip")
 def skip(request: OrderRequest) -> dict:
     """Cut a section from the running order, RECORDING that it was cut."""

@@ -786,3 +786,97 @@ class TestAClaimIsNotAboutTheBookJustBecauseTheModelSaidSo:
     def test_an_empty_list_is_not_an_error(self):
         assert split_by_origin([], self.SOURCES) == ([], [])
         assert split_by_origin(None, None) == ([], [])
+
+
+class TestEditingSomethingAlreadyStored:
+    """Fixing a line used to mean deleting and regenerating, which threw away
+    the citations, the placement in the running order and every element a
+    cluster had minted -- to change a name."""
+
+    def test_the_prose_changes(self, table):
+        stored = _store(table, anchor=ANCHOR)
+        table.execute_write(
+            lambda tx: homebrew.edit(
+                tx, slug=SLUG, section_id=stored.section_id, body="A quieter night."
+            )
+        )
+        text = table.run(
+            "MATCH (s:Section {id:$id}) RETURN s.text AS t", {"id": stored.section_id}
+        ).single()["t"]
+        assert text == "A quieter night."
+
+    def test_what_the_model_wrote_is_not_touched(self, table):
+        """Holding both is the only thing that keeps "what did a person change"
+        answerable, and an edit overwriting it erases the answer exactly when
+        it starts being interesting."""
+        stored = _store(table, anchor=ANCHOR)
+        before = table.run(
+            "MATCH (s:Section {id:$id}) RETURN s.generated_body AS g",
+            {"id": stored.section_id},
+        ).single()["g"]
+        table.execute_write(
+            lambda tx: homebrew.edit(
+                tx, slug=SLUG, section_id=stored.section_id, body="Rewritten."
+            )
+        )
+        after = table.run(
+            "MATCH (s:Section {id:$id}) RETURN s.generated_body AS g, s.edited AS e",
+            {"id": stored.section_id},
+        ).single()
+        assert dict(after)["g"] == before
+        assert dict(after)["e"] is True
+
+    def test_editing_back_to_the_models_words_stops_claiming_an_edit(self, table):
+        """`edited` is re-derived rather than set, so it says whether the text
+        differs -- which after a revert it does not. A DM undoing a change
+        should stop being told their provenance is stale, because it is not."""
+        stored = _store(table, anchor=ANCHOR)
+        generated = table.run(
+            "MATCH (s:Section {id:$id}) RETURN s.generated_body AS g",
+            {"id": stored.section_id},
+        ).single()["g"]
+        for body in ("Something else entirely.", generated):
+            result = table.execute_write(
+                lambda tx, b=body: homebrew.edit(
+                    tx, slug=SLUG, section_id=stored.section_id, body=b
+                )
+            )
+        assert result["edited"] is False
+
+    def test_the_citations_survive_the_edit(self, table):
+        """Left alone and STALE, which the card and the reader both say. The
+        alternative loses a DM their pointers for fixing a typo."""
+        stored = _store(table, anchor=ANCHOR)
+        table.execute_write(
+            lambda tx: homebrew.edit(
+                tx, slug=SLUG, section_id=stored.section_id, body="Changed."
+            )
+        )
+        kept = table.run(
+            "MATCH (:Section {id:$id})-[r:DERIVED_FROM]->() RETURN count(r) AS n",
+            {"id": stored.section_id},
+        ).single()["n"]
+        assert kept > 0
+
+    def test_the_book_is_not_editable(self, table):
+        """The plane check is in the MATCH, so there is no path that reads a
+        canon section and then decides."""
+        with pytest.raises(homebrew.NotEditable):
+            table.execute_write(
+                lambda tx: homebrew.edit(
+                    tx, slug=SLUG, section_id=SECTIONS[0], body="Strahd is friendly."
+                )
+            )
+        text = table.run(
+            "MATCH (s:Section {id:$id}) RETURN s.text AS t", {"id": SECTIONS[0]}
+        ).single()["t"]
+        assert text == "The voyage north takes eight days."
+
+    def test_another_campaigns_section_is_refused(self, table):
+        stored = _store(table, anchor=ANCHOR)
+        with pytest.raises(homebrew.NotEditable):
+            table.execute_write(
+                lambda tx: homebrew.edit(
+                    tx, slug="someone-elses", section_id=stored.section_id, body="Mine."
+                )
+            )

@@ -607,6 +607,70 @@ def write_cluster(
     }
 
 
+class NotEditable(Exception):
+    """Asked to change prose this campaign does not own.
+
+    Covers a section that is not here and a section that is the BOOK's in one
+    message, deliberately: from the caller's side both are "you may not write
+    that", and distinguishing them would tell an unrelated campaign whether an
+    id exists.
+    """
+
+    def __init__(self, section_id: str) -> None:
+        super().__init__(
+            f"{section_id} is not this campaign's to edit; nothing was written"
+        )
+        self.section_id = section_id
+
+
+def edit(tx, *, slug: str, section_id: str, body: str) -> dict:
+    """Change the prose of something already stored.
+
+    THE ONLY WAY TO FIX A LINE WAS TO DELETE AND REGENERATE, which threw away
+    the citations, the placement in the running order, and every element a
+    cluster had minted -- to change a name. Reading your own material makes
+    wanting to correct it the immediate next thing, so this is that.
+
+    `generated_body` IS NOT TOUCHED. It is what the model wrote and this is
+    what the DM made of it; holding both is the only thing that keeps "what did
+    a person change" answerable, and an edit that overwrote it would erase the
+    answer at the moment it starts being interesting.
+
+    `edited` IS RE-DERIVED, not set. It is `body != generated_body`, the same
+    expression `write` uses, so a DM who edits back to the model's exact words
+    stops being told their provenance is stale -- because it no longer is.
+
+    THE CITATIONS ARE LEFT ALONE AND GO STALE. They were made about the text
+    the model wrote. Nothing re-checks a body after a person edits it, the card
+    has always said so, and the reader says so too. Silently dropping them
+    would be worse: a DM who fixed a typo would lose the pointers.
+
+    CANON IS NOT EDITABLE THROUGH HERE. The plane check is in the MATCH rather
+    than in a branch after it, so there is no path that reads a canon section
+    and then decides.
+    """
+    row = tx.run(
+        """
+        MATCH (s:Section {id:$id, plane:$plane, campaign:$slug})
+        RETURN s.generated_body AS generated, s.text AS text
+        """,
+        {"id": section_id, "plane": CAMPAIGN_PLANE, "slug": slug},
+    ).single()
+    if row is None:
+        raise NotEditable(section_id)
+
+    generated = dict(row)["generated"] or ""
+    tx.run(
+        "MATCH (s:Section {id:$id}) SET s.text = $body, s.edited = $edited",
+        {"id": section_id, "body": body, "edited": body.strip() != generated.strip()},
+    )
+    return {
+        "section_id": section_id,
+        "edited": body.strip() != generated.strip(),
+        "changed": body.strip() != (dict(row)["text"] or "").strip(),
+    }
+
+
 class NotStored(Exception):
     """Asked to flesh out something this campaign does not hold."""
 

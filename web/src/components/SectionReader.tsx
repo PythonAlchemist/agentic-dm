@@ -20,10 +20,12 @@ export function SectionReader({
   sectionId,
   campaign,
   onClose,
+  onEdited,
 }: {
   sectionId: string | null
   campaign: string | null
   onClose: () => void
+  onEdited?: () => void
 }) {
   const [section, setSection] = useState<SectionRead | null>(null)
   const [failed, setFailed] = useState('')
@@ -32,6 +34,11 @@ export function SectionReader({
   //  and which would flash the previous section's prose under the new
   //  heading for a frame, the one thing a provenance-first panel must not do.
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  //: The draft, while a DM is rewriting. `null` means they are reading --
+  //  which is the state to be in by default, because this drawer is opened
+  //  mid-session to look something up far more often than to change it.
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (!sectionId) return
@@ -42,6 +49,7 @@ export function SectionReader({
         if (cancelled) return
         setSection(found)
         setLoadedFor(sectionId)
+        setDraft(null)
         setFailed('')
       })
       .catch((error) => {
@@ -52,15 +60,38 @@ export function SectionReader({
     }
   }, [sectionId, campaign])
 
-  // Escape closes it, because a drawer that traps you is worse than no drawer.
+  // Escape closes it, because a drawer that traps you is worse than no
+  // drawer. It backs out of EDITING first rather than out of the drawer: a
+  // reflex keystroke should not throw away a paragraph somebody just typed.
   useEffect(() => {
     if (!sectionId) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key !== 'Escape') return
+      if (draft !== null) setDraft(null)
+      else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sectionId, onClose])
+  }, [sectionId, onClose, draft])
+
+  const save = async () => {
+    if (draft === null || !campaign || !sectionId || saving) return
+    setSaving(true)
+    setFailed('')
+    try {
+      await labAPI.editSection(campaign, sectionId, draft)
+      // Re-read rather than patching state locally: `edited` is DERIVED on the
+      // server from whether the text still matches what the model wrote, and
+      // guessing at it here is how the two come to disagree.
+      setSection(await labAPI.section(sectionId, campaign))
+      setDraft(null)
+      onEdited?.()
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   if (!sectionId) return null
   // Only shown once it is the CURRENT section's content.
@@ -70,7 +101,9 @@ export function SectionReader({
   return (
     <div
       className="fixed inset-0 z-40 flex justify-end bg-black/50"
-      onClick={onClose}
+      // A click on the backdrop does not discard a rewrite either, for the
+      // reason Escape does not.
+      onClick={() => draft === null && onClose()}
     >
       <div
         className="h-full w-full max-w-2xl overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-5"
@@ -84,12 +117,25 @@ export function SectionReader({
           >
             {shown?.heading ?? 'Loading…'}
           </h2>
-          <button
-            onClick={onClose}
-            className="shrink-0 text-xs text-neutral-500 hover:text-neutral-300"
-          >
-            close (esc)
-          </button>
+          <div className="flex shrink-0 items-baseline gap-3 text-xs">
+            {/* ONLY YOUR OWN. The book is not editable and the server refuses
+                it either way; offering the button would be a lie the backend
+                then has to tell you about. */}
+            {yours && draft === null && (
+              <button
+                onClick={() => setDraft(shown?.text ?? '')}
+                className="text-neutral-500 hover:text-amber-300"
+              >
+                edit
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-neutral-500 hover:text-neutral-300"
+            >
+              close (esc)
+            </button>
+          </div>
         </div>
 
         {/* WHOSE WORD IT IS, said before the prose rather than after it. The
@@ -114,11 +160,44 @@ export function SectionReader({
 
         {shown && (
           <>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200">
-              {forReading(shown.text, shown.heading) || (
-                <span className="text-neutral-600">No prose.</span>
-              )}
-            </div>
+            {draft === null ? (
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200">
+                {forReading(shown.text, shown.heading) || (
+                  <span className="text-neutral-600">No prose.</span>
+                )}
+              </div>
+            ) : (
+              <div>
+                {/* THE RAW STORED TEXT, not what `forReading` renders. Editing
+                    a tidied copy would save the tidying over the original and
+                    quietly lose whatever it dropped. */}
+                <textarea
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  rows={16}
+                  className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-amber-600/60"
+                />
+                <div className="mt-2 flex items-center gap-3 text-xs">
+                  <button
+                    onClick={save}
+                    disabled={saving}
+                    className="rounded-md bg-amber-600/90 px-3 py-1.5 font-medium text-neutral-950 hover:bg-amber-500 disabled:opacity-40"
+                  >
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => setDraft(null)}
+                    className="text-neutral-500 hover:text-neutral-300"
+                  >
+                    cancel (esc)
+                  </button>
+                  <span className="text-neutral-600">
+                    The citations below were made about the original and are
+                    not re-checked.
+                  </span>
+                </div>
+              </div>
+            )}
 
             {shown.edited && (
               <p className="mt-3 text-xs text-amber-500/80">

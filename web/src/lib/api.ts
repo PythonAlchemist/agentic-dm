@@ -365,6 +365,15 @@ export const labAPI = {
     return getJSON(`/homebrew/section?section_id=${encodeURIComponent(sectionId)}${scope}`)
   },
 
+  /** Rewrite stored prose. Refuses anything that is not this campaign's,
+   *  which includes the book. */
+  editSection(campaign: string, sectionId: string, body: string) {
+    return postTo<{ section_id: string; edited: boolean; changed: boolean }>(
+      '/homebrew/edit',
+      { campaign, section_id: sectionId, body },
+    )
+  },
+
   elements(campaign: string): Promise<{ elements: CampaignElement[]; unwritten: number }> {
     return getJSON(`/homebrew/elements?campaign=${encodeURIComponent(campaign)}`)
   },

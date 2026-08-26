@@ -210,6 +210,7 @@ export default function Lab() {
         sectionId={reading}
         campaign={campaign}
         onClose={() => setReading(null)}
+        onEdited={noteChainChanged}
       />
     </TooltipProvider>
   )
