@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from backend.canon.retrieval import PATH_GRAPH, DEFAULT_LIMIT, PATH_TEXT, Retrieval
+from backend.canon.retrieval import DEFAULT_LIMIT, PATH_GRAPH, PATH_TEXT, Retrieval
 
 
 @dataclass(frozen=True)
