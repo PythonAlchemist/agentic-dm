@@ -17,6 +17,59 @@ structural_headings: structural-headings-kftgv.yaml
 global_names:
   - The Golden Vault
 
+  # THE INTRODUCTION IS NOT A HEIST. It prints a table of the thirteen
+  # adventures and a second table of rival hooks, so it names each adventure,
+  # the prison one of them is set in, and three people from three others. The
+  # anthology rule read the introduction as a fourteenth adventure and gave
+  # each of these a second node holding one mention.
+  - Axe from the Grave
+  - Fire and Darkness
+  - Heart of Ashes
+  - Masterpiece Imbroglio
+  - Party at Paliset Hall
+  - Prisoner 13
+  - Reach for the Stars
+  - Shard of the Accursed
+  - The Murkmire Malevolence
+  - The Stygian Gambit
+  - Vidorant’s Vault
+  - Revel’s End
+  - Samphith Goldenbeard
+  - Zorhanna
+
+  # THE BOOK CROSS-REFERENCES ITSELF, and says so: "If you're weaving multiple
+  # adventures from this anthology together". `Affair on the Concordant
+  # Express` seats four other heists' cast on its train, and a cell there holds
+  # "a friendly erinyes who recently helped an efreeti named Vrakir get his
+  # hands on the Book of Vile Darkness. Speaking with this prisoner might kick
+  # off 'Fire and Darkness,' another adventure in this book." That is the same
+  # Vrakir and the same artifact, said by the book in as many words.
+  - Vrakir
+  - Guildmaster Dusk
+  - Nixylanna Vidorant
+  - Quentin Togglepocket
+  - Fated
+  - Book of Vile Darkness
+
+  # PLANES ARE ONE PLACE WHEREVER THEY ARE NAMED. Avernus is the first layer of
+  # the Nine Hells in both chapters that mention it unkeyed. It is ALSO the
+  # name of casino area A2 in `The Stygian Gambit` -- a themed room, not the
+  # plane -- and that one is keyed, so the book's own area numbering keeps it
+  # apart and this line cannot reach it.
+  - Avernus
+  - City of Brass
+  - Material Plane
+
+  # READ AND REJECTED, so the next reader does not re-derive them:
+  #
+  # `Marigold` is a dead woman buried beside her brother in `Axe from the
+  # Grave` and a five-foot killer doll in `The Murkmire Malevolence`. Two
+  # things, one name -- exactly the case the anthology rule exists for.
+  #
+  # `Amethyst`, `Potion of Healing (Greater)`, `Potions of Healing`, `Ring of
+  # Keys`, `Wooden Chest` and their kind are counts of loot on treasure tables.
+  # Two piles of amethysts are two piles.
+
 # As in `cos.yaml`: the ask is click-to-fill, so it names something the book
 # holds. A heist anthology's starting question is about the patron every
 # adventure shares rather than about any one job.

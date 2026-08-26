@@ -1,7 +1,21 @@
 """Fold one place's duplicate nodes together, book-wide.
 
-    uv run python -m backend.scripts.merge_duplicates            # plan only
+    uv run python -m backend.scripts.merge_duplicates                      # plan
     uv run python -m backend.scripts.merge_duplicates --apply
+    uv run python -m backend.scripts.merge_duplicates --globals kftgv      # plan
+    uv run python -m backend.scripts.merge_duplicates --globals kftgv --apply
+
+TWO QUESTIONS, ONE APPLY. The default asks "is this one place minted twice",
+which `duplicates.plan_merges` answers. `--globals` asks "did the anthology
+rule scope a name the book uses book-wide", which `duplicates.plan_globals`
+answers by reading that book's own exception list. They plan differently and
+move nodes identically, and the moving is the part that deletes things -- so it
+is written once here rather than twice in two scripts.
+
+WHAT `--globals` DOES NOT DO: re-scan. A rescoped name becomes scannable in
+every chapter (`spine.scannable_in`, keyed on the id having one colon), so a
+fresh ingest would find mentions in chapters neither half held. This moves what
+is already there. Re-run it after a full re-ingest, not instead of one.
 
 `backend/canon/duplicates.py` decides WHAT is a duplicate and why, and is the
 file to read first; this one only carries the plan into Neo4j.
@@ -30,12 +44,22 @@ from __future__ import annotations
 import argparse
 
 from backend.canon.aliases import normalize as normalize_alias
-from backend.canon.duplicates import Merge, plan_merges
+from backend.canon.books import SEEDS, load as load_book
+from backend.canon.duplicates import Merge, plan_globals, plan_merges
 from backend.canon.lookup import CANON_PLANE
 from backend.core.database import neo4j_session, read_only_session
 from backend.graph.schema import RelationshipType
 
 _ENTITIES = "MATCH (e:Entity {plane:$plane}) RETURN e.id AS id, e.name AS name"
+
+#: The same entities with how often the book actually names each, which is how
+#: `plan_globals` picks which half survives. Scoped to one book because the
+#: exception list is one book's.
+_BOOK_ENTITIES = """
+MATCH (e:Entity {plane:$plane}) WHERE e.id STARTS WITH $prefix + ':'
+OPTIONAL MATCH (e)<-[:REFERS_TO]-(m:Mention)
+RETURN e.id AS id, e.name AS name, count(m) AS mentions
+"""
 
 #: The mention triangle and the alias edges, which have fixed types and so can
 #: be written once. `CO_OCCURS_WITH` is skipped where the mention already
@@ -228,6 +252,57 @@ def _apply(tx, merge: Merge, plane: str) -> dict:
     return tally
 
 
+def _rescope(tx, old: str, new: str) -> int:
+    """Move the survivor onto the id a fresh ingest would mint. Returns mentions
+    renamed.
+
+    THE MENTION IDS GO WITH IT. A mention's id is `<entity>@<section>` by
+    construction, so leaving them behind would mean the next ingest minted a
+    second mention for every pair this one already holds -- the repair quietly
+    creating the duplicates it exists to remove.
+
+    Called AFTER the doubled-mention fold, never before: two mentions of the
+    two halves in one section become one id here, and `mention_id` is unique.
+    """
+    if tx.run("MATCH (e:Entity {id:$new}) RETURN e", {"new": new}).single():
+        raise ValueError(f"{new} already exists; {old} cannot be renamed onto it")
+    row = tx.run(
+        """
+        MATCH (e:Entity {id:$old}) SET e.id = $new
+        WITH e
+        OPTIONAL MATCH (e)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(sec:Section)
+        SET m.id = $new + '@' + sec.id
+        RETURN count(m) AS mentions
+        """,
+        {"old": old, "new": new},
+    ).single()
+    return row["mentions"] if row else 0
+
+
+def _fold_one(tx, entity: str, plane: str) -> int:
+    """Fold this entity's doubled mentions, section by section."""
+    rows = [
+        dict(r)
+        for r in tx.run(
+            """
+            MATCH (e:Entity {id:$entity})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(sec:Section)
+            WITH sec, collect(m) AS ms WHERE size(ms) > 1
+            RETURN sec.id AS section, [x IN ms | {id: x.id, offsets: x.offsets}] AS mentions
+            """,
+            {"entity": entity},
+        )
+    ]
+    return sum(_fold_mentions(tx, entity, r["section"], r["mentions"]) for r in rows)
+
+
+def _apply_global(tx, merge: Merge, plane: str) -> dict:
+    """One rescoped name, one transaction: fold, de-double, then rename."""
+    tally = _apply(tx, merge, plane)
+    tally["doubled"] = _fold_one(tx, merge.survivor, plane)
+    tally["renamed"] = _rescope(tx, merge.survivor, merge.rescope_to)
+    return tally
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -236,7 +311,17 @@ def main() -> None:
         help="Actually merge. Without it the plan is printed and nothing changes.",
     )
     parser.add_argument("--plane", default=CANON_PLANE)
+    parser.add_argument(
+        "--globals",
+        metavar="BOOK",
+        default="",
+        help="Rescope this book's `global_names` instead of merging duplicates.",
+    )
     args = parser.parse_args()
+
+    if args.globals:
+        _run_globals(args)
+        return
 
     with read_only_session() as session:
         entities = [dict(r) for r in session.run(_ENTITIES, {"plane": args.plane})]
@@ -283,6 +368,42 @@ def main() -> None:
         f"{totals['typed']} typed edges"
     )
     print(f"folded {folded} doubled mentions across {len(doubled)} sections")
+
+
+def _run_globals(args) -> None:
+    scheme = load_book(SEEDS / f"{args.globals}.yaml")
+    with read_only_session() as session:
+        entities = [
+            dict(r)
+            for r in session.run(
+                _BOOK_ENTITIES, {"plane": args.plane, "prefix": scheme.prefix}
+            )
+        ]
+    merges = plan_globals(entities, scheme)
+
+    print(f"{len(entities)} {scheme.prefix} entities, {len(scheme.global_names)} names")
+    print(f"the book calls book-wide; {len(merges)} to rescope\n")
+    for merge in merges:
+        print(f"  {merge.survivor_name}  ->  {merge.rescope_to}")
+        print(f"      keep     {merge.survivor}")
+        for loser in merge.losers:
+            print(f"      fold in  {loser}")
+
+    if not args.apply:
+        print("\nNothing changed. Re-run with --apply to rescope.")
+        return
+
+    totals = {"mentions": 0, "typed": 0, "doubled": 0, "renamed": 0}
+    with neo4j_session() as session:
+        for merge in merges:
+            tally = session.execute_write(_apply_global, merge, args.plane)
+            for key in totals:
+                totals[key] += tally.get(key, 0)
+    print(
+        f"\nrescoped {len(merges)} names: moved {totals['mentions']} mentions and "
+        f"{totals['typed']} typed edges, folded {totals['doubled']} doubled "
+        f"mentions, renamed {totals['renamed']} mention ids"
+    )
 
 
 if __name__ == "__main__":

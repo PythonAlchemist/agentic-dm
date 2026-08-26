@@ -71,6 +71,10 @@ class Merge:
     #: Every name in the group other than the survivor's, to be kept as aliases
     #: so a question spelling it the old way still resolves.
     aliases: tuple[str, ...]
+    #: The id the survivor should CARRY afterwards, when its current one is
+    #: wrong rather than merely one of two. Empty for an ordinary merge, where
+    #: the survivor's id is already the id to keep.
+    rescope_to: str = ""
 
 
 def _best_name(names: list[str]) -> str:
@@ -89,6 +93,88 @@ def _best_name(names: list[str]) -> str:
             n,
         ),
     )
+
+
+def plan_globals(entities: list[dict], scheme) -> list[Merge]:
+    """Which chapter-scoped nodes the book says are one thing after all.
+
+    `BookScheme.global_names` is the anthology's exception list, and adding a
+    name to it changes what a FUTURE ingest mints -- nothing about it reaches a
+    graph already loaded. This is the repair for that gap, and it is the reason
+    the exception list is worth editing at all.
+
+    THE SURVIVOR'S ID IS WRONG, not merely one of two. An ordinary merge picks
+    a winner from ids that already exist; here every candidate is scoped to a
+    chapter and the right id is `kftgv:vrakir`, which no node holds. So the
+    plan carries `rescope_to` -- the id `mint_id` would produce now -- and the
+    apply renames the survivor onto it. Without that the graph and a fresh
+    ingest would disagree about a name they both got right.
+
+    THE RICHEST NODE SURVIVES, by mention count then by id. The two halves are
+    the same entity, so this only decides which node's edges stay put; taking
+    the one the book actually talks about moves the fewest.
+
+    A NAME THE SCHEME DOES NOT CALL GLOBAL IS NOT TOUCHED, and neither is a
+    keyed node: the book's own area numbering said those apart, and `Avernus`
+    is both the first layer of the Nine Hells and casino area A2.
+    """
+    from backend.canon.writer import mint_id
+
+    groups: dict[str, list[dict]] = {}
+    for entity in entities:
+        if not scheme.is_global(entity["name"]) or is_area_keyed(
+            entity["id"], entity["name"]
+        ):
+            continue
+        groups.setdefault(normalize(entity["name"]), []).append(entity)
+
+    merges: list[Merge] = []
+    for members in groups.values():
+        keep_name = _best_name([e["name"] for e in members])
+        # No chapter, because a global name has none to be scoped to. If the
+        # scheme ever disagreed, `mint_id` would hand back `kftgv::vrakir` --
+        # so the shape is checked rather than trusted.
+        target = mint_id("", keep_name, scheme=scheme)
+        if target.count(":") != 1:
+            raise ValueError(f"{keep_name!r} minted {target!r}, which is not book-wide")
+        # One node already carrying the right id and nothing to fold into it is
+        # a name that was never split. Re-running has to be a no-op or this is
+        # not safe to leave in the repair sequence.
+        if len(members) == 1 and members[0]["id"] == target:
+            continue
+        survivor = max(members, key=lambda e: (e.get("mentions", 0), e["id"]))
+        merges.append(
+            Merge(
+                survivor=survivor["id"],
+                survivor_name=keep_name,
+                losers=tuple(sorted(e["id"] for e in members if e["id"] != survivor["id"])),
+                aliases=tuple(sorted({e["name"] for e in members if e["name"] != keep_name})),
+                rescope_to=target,
+            )
+        )
+    return sorted(merges, key=lambda m: m.rescope_to)
+
+
+def is_area_keyed(entity_id: str, name: str) -> bool:
+    """Does this id carry the book's OWN area key, or only this code's scoping?
+
+    `is_keyed` asks the coarser question -- does the id have two colons -- and
+    for a campaign book that is the same question. In an anthology it is not:
+    chapter scoping adds the same colon, so `kftgv:heart-of-ashes:armory` reads
+    as keyed while carrying no key at all. That reading is RIGHT for merging
+    (two heists' armories are two armories) and wrong here, where the chapter
+    scope IS the mistake being repaired.
+
+    Answered against the name rather than by guessing at the tail's shape:
+    `mint_id` builds the tail as the key and the name-slug joined, so a tail
+    that is exactly the name-slug had no key. `t7-armory` did, `armory` did
+    not -- and `Avernus`, casino area A2, is kept out of a rescope that would
+    otherwise fold a themed room into the first layer of the Nine Hells.
+    """
+    from backend.canon.assembler import slugify
+
+    parts = entity_id.split(":")
+    return len(parts) >= 3 and parts[-1] != slugify(name)
 
 
 def plan_merges(entities: list[dict]) -> list[Merge]:

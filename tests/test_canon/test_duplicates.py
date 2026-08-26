@@ -5,7 +5,15 @@ decides whether `Kitchen` is six rooms or one can be stated as a test rather
 than inferred from a graph afterwards.
 """
 
-from backend.canon.duplicates import Merge, is_keyed, normalize, plan_merges
+from backend.canon.books import BookScheme
+from backend.canon.duplicates import (
+    Merge,
+    is_area_keyed,
+    is_keyed,
+    normalize,
+    plan_globals,
+    plan_merges,
+)
 
 
 def entity(entity_id: str, name: str) -> dict:
@@ -123,3 +131,113 @@ class TestThePlanIsStable:
         ]):
             assert merge.survivor not in merge.losers
             assert isinstance(merge, Merge)
+
+
+class TestAnAnthologyNameTheBookUsesBookWide:
+    """`plan_globals` answers a different question from `plan_merges`: not "is
+    this one place minted twice" but "did the anthology rule scope a name the
+    book shares". The exception list is the book's own, so the rule is a
+    function of the scheme and can be stated exactly."""
+
+    KFTGV = BookScheme(
+        prefix="kftgv",
+        anthology=True,
+        global_names=frozenset({"Vrakir", "The Golden Vault", "Avernus"}),
+    )
+
+    def named(self, entity_id: str, name: str, mentions: int = 0) -> dict:
+        return {"id": entity_id, "name": name, "mentions": mentions}
+
+    def test_the_survivor_lands_on_the_id_a_fresh_ingest_would_mint(self):
+        """Neither half's id is the answer. Both are scoped to a chapter and
+        the book says the name belongs to no chapter, so the plan has to name
+        an id that does not exist yet -- or the graph and the next ingest
+        disagree about a name they both got right."""
+        [merge] = plan_globals(
+            [
+                self.named("kftgv:fire-and-darkness:vrakir", "Vrakir", 18),
+                self.named("kftgv:affair-on-the-concordant-express:vrakir", "Vrakir", 1),
+            ],
+            self.KFTGV,
+        )
+        assert merge.rescope_to == "kftgv:vrakir"
+        assert merge.survivor == "kftgv:fire-and-darkness:vrakir"
+        assert merge.losers == ("kftgv:affair-on-the-concordant-express:vrakir",)
+
+    def test_the_half_the_book_actually_talks_about_survives(self):
+        """Only decides whose edges stay put -- the two are one entity either
+        way -- but taking the node with the mentions moves the fewest."""
+        [merge] = plan_globals(
+            [
+                self.named("kftgv:a:vrakir", "Vrakir", 1),
+                self.named("kftgv:b:vrakir", "Vrakir", 18),
+            ],
+            self.KFTGV,
+        )
+        assert merge.survivor == "kftgv:b:vrakir"
+
+    def test_a_leading_article_does_not_make_a_third_node(self):
+        """`The Fated` and `Fated` are one faction in Sigil, and the graph held
+        both. Normalising groups them; it is not only an alias nicety."""
+        [merge] = plan_globals(
+            [
+                self.named("kftgv:a:the-avernus", "The Avernus", 2),
+                self.named("kftgv:b:avernus", "Avernus", 1),
+            ],
+            self.KFTGV,
+        )
+        assert merge.rescope_to == "kftgv:avernus"
+        assert merge.losers == ("kftgv:b:avernus",)
+
+    def test_a_name_the_book_does_not_call_global_is_left_alone(self):
+        """Two heists' armories are two armories. The anthology rule is right
+        about everything not on the list, which is nearly everything."""
+        assert (
+            plan_globals(
+                [
+                    self.named("kftgv:heart-of-ashes:armory", "Armory"),
+                    self.named("kftgv:vidorants-vault:t7-armory", "Armory"),
+                ],
+                self.KFTGV,
+            )
+            == []
+        )
+
+    def test_an_area_keyed_node_is_never_rescoped(self):
+        """`Avernus` is the first layer of the Nine Hells AND casino area A2 in
+        `The Stygian Gambit`. The book's own numbering said those apart, so the
+        exception list must not reach the room -- otherwise one line meant to
+        unify a plane folds a themed casino floor into it."""
+        [merge] = plan_globals(
+            [
+                self.named("kftgv:the-stygian-gambit:a2-avernus", "Avernus", 4),
+                self.named("kftgv:fire-and-darkness:avernus", "Avernus", 1),
+                self.named("kftgv:affair-on-the-concordant-express:avernus", "Avernus", 1),
+            ],
+            self.KFTGV,
+        )
+        assert "kftgv:the-stygian-gambit:a2-avernus" not in merge.losers
+        assert merge.survivor != "kftgv:the-stygian-gambit:a2-avernus"
+
+    def test_a_name_already_rescoped_plans_nothing(self):
+        """This runs after every re-ingest, beside the other repairs. A second
+        run that planned work would mean the first one did not finish."""
+        assert (
+            plan_globals([self.named("kftgv:vrakir", "Vrakir", 19)], self.KFTGV) == []
+        )
+
+    def test_a_lone_node_still_on_a_chapter_is_moved(self):
+        """Nothing to fold, but the id is still wrong -- and leaving it would
+        mean the next ingest minted a second node beside it."""
+        [merge] = plan_globals(
+            [self.named("kftgv:fire-and-darkness:vrakir", "Vrakir", 18)], self.KFTGV
+        )
+        assert merge.losers == ()
+        assert merge.rescope_to == "kftgv:vrakir"
+
+    def test_a_campaign_books_keyed_place_is_still_keyed(self):
+        """`is_area_keyed` replaces `is_keyed` only for this question, and has
+        to agree with it wherever the coarser test was already right."""
+        assert is_area_keyed("cos:the-lands-of-barovia:c-svalich-woods", "Svalich Woods")
+        assert not is_area_keyed("cos:svalich-woods", "Svalich Woods")
+        assert not is_area_keyed("kftgv:heart-of-ashes:armory", "Armory")
