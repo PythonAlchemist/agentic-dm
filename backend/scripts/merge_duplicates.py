@@ -4,6 +4,8 @@
     uv run python -m backend.scripts.merge_duplicates --apply
     uv run python -m backend.scripts.merge_duplicates --globals kftgv      # plan
     uv run python -m backend.scripts.merge_duplicates --globals kftgv --apply
+    uv run python -m backend.scripts.merge_duplicates --mention-ids          # plan
+    uv run python -m backend.scripts.merge_duplicates --mention-ids --apply
 
 TWO QUESTIONS, ONE APPLY. The default asks "is this one place minted twice",
 which `duplicates.plan_merges` answers. `--globals` asks "did the anthology
@@ -11,6 +13,17 @@ rule scope a name the book uses book-wide", which `duplicates.plan_globals`
 answers by reading that book's own exception list. They plan differently and
 move nodes identically, and the moving is the part that deletes things -- so it
 is written once here rather than twice in two scripts.
+
+`--mention-ids` IS THE THIRD QUESTION, and the smallest. A mention's id is
+`<entity>@<section>` by construction -- `spine.mention_id` is exactly that pair,
+and composing it out of both endpoints is what makes a re-scan MERGE onto the
+same node instead of doubling it. Coreference breaks that: it repoints
+`REFERS_TO` from the entity a spelling minted to the entity the spelling MEANS,
+and nothing renames the node. `kftgv:reach-for-the-stars:markos@...` ends up
+pointing at `markos-delphi`. Harmless to read -- every query traverses the edge,
+none parses the id -- and not harmless to re-ingest, where the correct id is
+free and gets minted as a SECOND mention beside the stale one. 628 of them
+across both books.
 
 WHAT `--globals` DOES NOT DO: re-scan. A rescoped name becomes scannable in
 every chapter (`spine.scannable_in`, keyed on the id having one colon), so a
@@ -42,6 +55,7 @@ be one.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 
 from backend.canon.aliases import normalize as normalize_alias
 from backend.canon.books import SEEDS, load as load_book
@@ -212,7 +226,7 @@ def _apply(tx, merge: Merge, plane: str) -> dict:
     mentions would be gone and its node still there, which reads as a place the
     book never names.
     """
-    tally = {"mentions": 0, "pairs": 0, "aliases": 0, "typed": 0}
+    tally = {"mentions": 0, "pairs": 0, "aliases": 0, "typed": 0, "renamed": 0}
     for loser in merge.losers:
         row = tx.run(_MOVE_FIXED, {"loser": loser, "survivor": merge.survivor}).single()
         if row:
@@ -249,6 +263,23 @@ def _apply(tx, merge: Merge, plane: str) -> dict:
         )
     for loser in merge.losers:
         tx.run("MATCH (e:Entity {id:$loser}) DETACH DELETE e", {"loser": loser})
+
+    # THE MOVED MENTIONS TAKE THE SURVIVOR'S NAME. A mention's id is
+    # `<entity>@<section>` by construction, and `_MOVE_FIXED` has just
+    # repointed a loser's mentions without touching their ids -- so they still
+    # spell a node that no longer exists. Left alone they read fine (every
+    # query traverses the edge; none parses the id) and re-ingest badly, since
+    # the correct id is free and gets minted as a second mention beside the
+    # stale one. This is where the 628 `--mention-ids` found came from.
+    tally["renamed"] = tx.run(
+        """
+        MATCH (e:Entity {id:$survivor})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(sec:Section)
+        WHERE m.id <> $survivor + '@' + sec.id
+        SET m.id = $survivor + '@' + sec.id
+        RETURN count(m) AS n
+        """,
+        {"survivor": merge.survivor},
+    ).single()["n"]
     return tally
 
 
@@ -312,6 +343,11 @@ def main() -> None:
     )
     parser.add_argument("--plane", default=CANON_PLANE)
     parser.add_argument(
+        "--mention-ids",
+        action="store_true",
+        help="Rename mentions whose id does not spell the pair they connect.",
+    )
+    parser.add_argument(
         "--globals",
         metavar="BOOK",
         default="",
@@ -319,13 +355,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.mention_ids:
+        _run_mention_ids(args)
+        return
     if args.globals:
         _run_globals(args)
         return
 
     with read_only_session() as session:
         entities = [dict(r) for r in session.run(_ENTITIES, {"plane": args.plane})]
-    merges = plan_merges(entities)
+    # EVERY COMMITTED SCHEME, not one named on the command line. This reads the
+    # whole plane, so a flag somebody forgets is a flag that folds a book-wide
+    # name into a keyed room -- the safe thing has to be the default thing.
+    schemes = {s.prefix: s for s in (load_book(f) for f in sorted(SEEDS.glob("*.yaml")))}
+    merges = plan_merges(entities, schemes)
 
     print(f"{len(entities)} entities on the {args.plane} plane")
     print(
@@ -343,7 +386,7 @@ def main() -> None:
         print("\nNothing changed. Re-run with --apply to merge.")
         return
 
-    totals = {"mentions": 0, "pairs": 0, "aliases": 0, "typed": 0}
+    totals = {"mentions": 0, "pairs": 0, "aliases": 0, "typed": 0, "renamed": 0}
     with neo4j_session() as session:
         for merge in merges:
             tally = session.execute_write(_apply, merge, args.plane)
@@ -368,6 +411,58 @@ def main() -> None:
         f"{totals['typed']} typed edges"
     )
     print(f"folded {folded} doubled mentions across {len(doubled)} sections")
+
+
+#: A mention whose id does not spell the pair it actually connects. Read as a
+#: plan first, because a rename is only safe while the correct id is free --
+#: and this reports both the ones that are and the ones that are not.
+_STALE_MENTIONS = """
+MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(sec:Section)
+WHERE m.id <> e.id + '@' + sec.id
+WITH m.id AS current, e.id + '@' + sec.id AS wanted
+OPTIONAL MATCH (taken:Mention {id: wanted})
+RETURN current, wanted, taken IS NOT NULL AS occupied
+ORDER BY current
+"""
+
+
+def _run_mention_ids(args) -> None:
+    with read_only_session() as session:
+        rows = [dict(r) for r in session.run(_STALE_MENTIONS)]
+
+    blocked = [r for r in rows if r["occupied"]]
+    # Two stale mentions wanting ONE id is the same obstruction wearing another
+    # shape, and renaming the first would make the second impossible. Counted
+    # rather than discovered halfway through a write.
+    wanted = Counter(r["wanted"] for r in rows if not r["occupied"])
+    contested = {name for name, n in wanted.items() if n > 1}
+    movable = [
+        r for r in rows if not r["occupied"] and r["wanted"] not in contested
+    ]
+
+    print(f"{len(rows)} mentions whose id does not spell the pair they connect")
+    print(f"  {len(movable)} can be renamed")
+    print(f"  {len(blocked)} blocked: the correct id already exists")
+    print(f"  {sum(wanted[c] for c in contested)} blocked: two of them want one id\n")
+    for row in movable[:5]:
+        print(f"  {row['current']}\n    -> {row['wanted']}")
+    if len(movable) > 5:
+        print(f"  ... and {len(movable) - 5} more")
+    for row in blocked[:5]:
+        print(f"  BLOCKED {row['current']} (wants {row['wanted']}, taken)")
+
+    if not args.apply:
+        print("\nNothing changed. Re-run with --apply to rename.")
+        return
+
+    renamed = 0
+    with neo4j_session() as session:
+        for row in movable:
+            renamed += session.run(
+                "MATCH (m:Mention {id:$old}) SET m.id = $new RETURN count(m) AS n",
+                {"old": row["current"], "new": row["wanted"]},
+            ).single()["n"]
+    print(f"\nrenamed {renamed}; left {len(rows) - renamed} for a human to look at")
 
 
 def _run_globals(args) -> None:

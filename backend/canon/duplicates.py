@@ -177,11 +177,29 @@ def is_area_keyed(entity_id: str, name: str) -> bool:
     return len(parts) >= 3 and parts[-1] != slugify(name)
 
 
-def plan_merges(entities: list[dict]) -> list[Merge]:
+def plan_merges(entities: list[dict], schemes: dict | None = None) -> list[Merge]:
     """Which nodes to fold together. Pure, so the rule can be tested exactly.
 
     `entities` are dicts with `id` and `name`. Returns one `Merge` per group
     that needs one, ordered by survivor id so two runs plan identically.
+
+    `schemes` maps a book prefix to its `BookScheme`, and IS WHAT KEEPS THIS OFF
+    A NAME THE BOOK DECLARES BOOK-WIDE. Keyed by prefix rather than passed as a
+    single scheme because this reads the whole plane at once, and the caller
+    should not have to run it per book to be safe. It
+    became necessary the moment `plan_globals` started rescoping them. The rule
+    below reads "one unkeyed member, some keyed" as a place and its own area
+    entry, which held while an unkeyed id could only mean book-global in a
+    campaign book. After a rescope it can also mean a name an anthology shares:
+    `kftgv:avernus` is the first layer of the Nine Hells and
+    `kftgv:the-stygian-gambit:a2-avernus` is a themed casino floor, and this
+    planned to fold the second into the first.
+
+    Two statements make that a refusal rather than a judgement call. The
+    allowlist says the name identifies ONE thing across chapters; the key says
+    the book numbered THIS one as its own area. Both are authored, and together
+    they say these are different things -- so the group is skipped, and skipped
+    silently, since there is nothing here for a human to decide.
     """
     groups: dict[str, list[dict]] = {}
     for entity in entities:
@@ -195,6 +213,9 @@ def plan_merges(entities: list[dict]) -> list[Merge]:
         # Every member keyed: distinct rooms that share a name. The whole
         # reason `mint_id` keys places at all.
         if not unkeyed:
+            continue
+        scheme = (schemes or {}).get(members[0]["id"].split(":")[0])
+        if scheme is not None and scheme.is_global(members[0]["name"]):
             continue
 
         names = [e["name"] for e in members]

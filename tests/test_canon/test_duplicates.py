@@ -241,3 +241,46 @@ class TestAnAnthologyNameTheBookUsesBookWide:
         assert is_area_keyed("cos:the-lands-of-barovia:c-svalich-woods", "Svalich Woods")
         assert not is_area_keyed("cos:svalich-woods", "Svalich Woods")
         assert not is_area_keyed("kftgv:heart-of-ashes:armory", "Armory")
+
+
+class TestABookWideNameIsNotAKeyedRoomsDuplicate:
+    """`plan_globals` rescoping a name creates a group `plan_merges` reads
+    wrongly. The rule "one unkeyed member, some keyed" means a place and its
+    own area entry -- true while an unkeyed id could only be book-global in a
+    campaign book, and false once an anthology has book-wide names too."""
+
+    KFTGV = BookScheme(
+        prefix="kftgv", anthology=True, global_names=frozenset({"Avernus"})
+    )
+
+    def test_the_plane_is_not_folded_into_the_casino_floor_named_after_it(self):
+        """`kftgv:avernus` is the first layer of the Nine Hells;
+        `kftgv:the-stygian-gambit:a2-avernus` is a themed room. The allowlist
+        says the name is one thing across chapters and the key says the book
+        numbered this one as its own area -- both authored, and together they
+        say these are two things."""
+        group = [
+            entity("kftgv:avernus", "Avernus"),
+            entity("kftgv:the-stygian-gambit:a2-avernus", "Avernus"),
+        ]
+        assert plan_merges(group, {"kftgv": self.KFTGV}) == []
+
+    def test_without_the_scheme_it_still_merges_them(self):
+        """Pinning the hazard, not endorsing it: the caller that omits the
+        schemes gets the old behaviour, which is why the script loads every
+        committed one rather than taking a flag somebody can forget."""
+        group = [
+            entity("kftgv:avernus", "Avernus"),
+            entity("kftgv:the-stygian-gambit:a2-avernus", "Avernus"),
+        ]
+        assert len(plan_merges(group)) == 1
+
+    def test_an_ordinary_duplicate_still_folds(self):
+        """The rule this guards must not have swallowed the case it exists
+        for. Svalich Woods is one wood described in one chapter."""
+        group = [
+            entity("cos:svalich-woods", "Svalich Woods"),
+            entity("cos:the-lands-of-barovia:c-svalich-woods", "Svalich Woods"),
+        ]
+        [merge] = plan_merges(group, {"kftgv": self.KFTGV})
+        assert merge.survivor == "cos:svalich-woods"
