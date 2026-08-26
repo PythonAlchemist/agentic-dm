@@ -1,0 +1,77 @@
+{
+  "mode": "annotation-stability",
+  "element_agreement": 0.7770238095238096,
+  "edge_agreement": 0.6408333333333334,
+  "subjects": [
+    {
+      "subject": "a sea battle on the voyage to Revel's End",
+      "elements": 0.8333333333333334,
+      "edges": 0.3333333333333333,
+      "n_elements": 6,
+      "n_edges": 4
+    },
+    {
+      "subject": "a storm that scatters the crew during the trek to the prison",
+      "elements": 1.0,
+      "edges": 1.0,
+      "n_elements": 4,
+      "n_edges": 0
+    },
+    {
+      "subject": "a fence in Toadhop who wants the mandolin for himself",
+      "elements": 0.8,
+      "edges": 0.375,
+      "n_elements": 9,
+      "n_edges": 6
+    },
+    {
+      "subject": "a rival crew racing the party for the Murkmire Stone",
+      "elements": 1.0,
+      "edges": 0.0,
+      "n_elements": 4,
+      "n_edges": 3
+    },
+    {
+      "subject": "a bribe attempt at the casino's cashier window",
+      "elements": 1.0,
+      "edges": 1.0,
+      "n_elements": 5,
+      "n_edges": 3
+    },
+    {
+      "subject": "an ambush on the old road into Barovia",
+      "elements": 0.375,
+      "edges": 0.2,
+      "n_elements": 6,
+      "n_edges": 2
+    },
+    {
+      "subject": "a missing child in the village of Barovia",
+      "elements": 1.0,
+      "edges": 1.0,
+      "n_elements": 5,
+      "n_edges": 3
+    },
+    {
+      "subject": "a funeral at the church that the party interrupts",
+      "elements": 1.0,
+      "edges": 1.0,
+      "n_elements": 4,
+      "n_edges": 1
+    },
+    {
+      "subject": "a Vistani who offers to read the party's fortune for a price",
+      "elements": 0.3333333333333333,
+      "edges": 1.0,
+      "n_elements": 4,
+      "n_edges": 0
+    },
+    {
+      "subject": "wolves circling the camp at dusk",
+      "elements": 0.42857142857142855,
+      "edges": 0.5,
+      "n_elements": 5,
+      "n_edges": 2
+    }
+  ]
+}

@@ -105,6 +105,39 @@ _CONTEXT_FIELD = """,
   "from_context": ["each detail taken from the conversation"]"""
 
 
+def vocabulary_gloss() -> str:
+    """The writable relationships, each with what it MAY connect and what it means.
+
+    BUILT FROM THE TABLE THAT JUDGES IT. `RELATIONSHIP_DOMAIN_RANGE` is what
+    `check_edges` uses to decide whether an edge is type-possible, so a model
+    instructed from anything else is being graded on a rubric it was not shown.
+    The first version of this prompt listed bare type names and 42% of declared
+    edges came back type-impossible -- a LOCATION that THREATENS, a casino
+    LOCATED_IN a cashier -- which measured the instruction, not the model.
+
+    Derived, never written down: adding a relationship type or widening its
+    domain reaches the prompt and the checker together and cannot leave them
+    disagreeing.
+    """
+    from backend.canon.constraints import RELATIONSHIP_DOMAIN_RANGE
+    from backend.graph.schema import RELATIONSHIP_GLOSS, RelationshipType
+
+    lines = []
+    for name in homebrew_vocabulary():
+        pair = RELATIONSHIP_DOMAIN_RANGE.get(name)
+        gloss = RELATIONSHIP_GLOSS.get(RelationshipType(name), "")
+        # A type with no declared domain/range is unconstrained rather than
+        # forbidden; say "any" instead of implying a restriction that is not
+        # there.
+        if pair:
+            domain = "|".join(sorted(t.value for t in pair[0]))
+            rng = "|".join(sorted(t.value for t in pair[1]))
+        else:
+            domain = rng = "any"
+        lines.append(f"     {name}: {domain} -> {rng}   ({gloss})")
+    return "\n".join(lines)
+
+
 def homebrew_vocabulary() -> tuple[str, ...]:
     """The relationship types a generation may declare between its elements.
 
@@ -135,9 +168,13 @@ _CLUSTER_RULE = """
    lore -- goes in `elements`, each with its OWN three provenance lists, split
    by the same rule as above. Relationships between them go in `edges`.
    Name an element by its `name`; name something from the CANON passages by
-   the id shown beside it, and never by an id you were not shown. Use only
-   these relationship types: {vocabulary}.
-   An element you would only mention in passing is scenery -- leave it out."""
+   the id shown beside it, and never by an id you were not shown.
+   An element you would only mention in passing is scenery -- leave it out.
+
+   USE ONLY THESE RELATIONSHIPS, AND ONLY BETWEEN THE TYPES SHOWN. The arrow
+   is `source -> target` and the direction matters: an edge whose endpoints
+   are the wrong types is DISCARDED, so check the line before you write one.
+{vocabulary}"""
 
 _CLUSTER_FIELD = """,
   "elements": [{{"kind": "npc|monster|location|item|lore", "name": "...",
@@ -294,7 +331,7 @@ def build_messages(
                 cluster_rule=(
                     _CLUSTER_RULE.format(
                         n=5 if not carried.empty else 4,
-                        vocabulary=", ".join(homebrew_vocabulary()),
+                        vocabulary=vocabulary_gloss(),
                     )
                     if cluster
                     else ""
@@ -411,6 +448,104 @@ def sift_manifest(data: dict) -> tuple[tuple[dict, ...], tuple[dict, ...], dict]
             edges.append({**entry, "source": source, "target": target, "rel_type": rel})
 
     return tuple(elements), tuple(edges), dropped
+
+
+_ANNOTATE = """Here is material a DM has just had written for their game.
+
+{body}
+
+List what it contains, so each thing can be stored separately.
+
+RULES:
+
+1. Include only what a DM would want as its OWN entry -- a place, a person, a
+   creature, an object, a piece of lore. Something mentioned once in passing is
+   scenery; leave it out.
+2. Use the names exactly as the text writes them.
+3. For each thing, say what in it came from the CANON passages below (citing
+   one, like [1]) and what was invented. If the text says it and the passages
+   do not, it was invented.
+4. Relationships go in `edges`. USE ONLY THESE, AND ONLY BETWEEN THE TYPES
+   SHOWN. The arrow is `source -> target` and the direction matters; an edge
+   whose endpoints are the wrong types is discarded, so check the line first.
+{vocabulary}
+
+{sources}
+
+Return ONLY JSON:
+
+{{"elements": [{{"kind": "npc|monster|location|item|lore", "name": "...",
+                "role": "what it is here, in one line",
+                "from_canon": [{{"claim": "...", "cite": "[1]"}}],
+                "invented": ["..."]}}],
+  "edges": [{{"source": "...", "target": "...", "rel_type": "LOCATED_IN",
+             "provenance": "canon|invented", "cite": "[1]"}}]}}"""
+
+
+async def annotate(
+    client: Any,
+    *,
+    body: str,
+    retrieval: Retrieval,
+    depth: canon_context.Depth,
+    model: str,
+    temperature: float = 0.0,
+    seed: int | None = None,
+) -> tuple[tuple[dict, ...], tuple[dict, ...], dict, str]:
+    """Ask the model what its own finished prose contains. `(elements, edges, dropped, error)`.
+
+    THE SECOND CALL OF THE TWO-CALL VARIANT, and the reason it is worth a
+    second call at all: declaring a manifest WHILE writing asks one response to
+    invent and to classify at the same time, and measurement said it does both
+    badly -- 37-51% of declared edges type-impossible even when shown the table
+    that judges them, and an edge agreement of 0.18-0.35 between seeded runs
+    against the extractor's 0.49.
+
+    Annotation is a BOUNDED READING TASK over a fixed input, which is the kind
+    of work this project already trusts a small model to do.
+
+    THIS IS NOT THE EXTRACTOR. No layer passes, no consensus sampling, no
+    `proposed` status -- and above all the text being read is the model's own,
+    so a claim it makes here is the author restating an intent rather than a
+    stranger inferring one.
+    """
+    shown = canon_context.apply(retrieval, depth)
+    sources = canon_context.render(shown, max_edges=depth.max_edges)
+    prompt = _ANNOTATE.format(
+        body=body, vocabulary=vocabulary_gloss(), sources=sources
+    )
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=1600,
+        **({"seed": seed} if seed is not None else {}),
+    )
+    text = response.choices[0].message.content or ""
+    data, error = parse_manifest(text)
+    if error:
+        return (), (), {}, error
+    elements, edges, dropped = sift_manifest(data)
+    return elements, edges, dropped, ""
+
+
+def parse_manifest(text: str) -> tuple[dict, str]:
+    """A manifest-only response. Same tolerance and same strictness as `parse`."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3]
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        return {}, f"annotation was not JSON: {exc}"
+    if not isinstance(data, dict):
+        return {}, "annotation was JSON but not an object"
+    for name in ("elements", "edges"):
+        if name not in data:
+            return {}, f"annotation omitted {name!r}, so what it contains is undeclared"
+    return data, ""
 
 
 async def generate(

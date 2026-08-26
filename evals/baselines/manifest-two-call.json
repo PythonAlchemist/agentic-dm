@@ -1,0 +1,1327 @@
+{
+  "summary": {
+    "runs": 40,
+    "parse_rate": 1.0,
+    "declared_edges": 119,
+    "edges_checked": 104,
+    "edge_violation_rate": 0.2692307692307692,
+    "unshown_endpoint_rate": 0.12605042016806722,
+    "jaccard_temp0": 0.16833333333333333,
+    "jaccard_pairs": 10,
+    "jaccard_elements_temp0": 0.36026695526695524,
+    "elements_per_run": 5.15,
+    "element_named_in_body_rate": 0.7718446601941747,
+    "dropped": {
+      "element kind 'quest' not offered": 6,
+      "element kind 'creature' not offered": 2,
+      "element kind 'object' not offered": 1,
+      "relationship 'SEEK' not in the writable vocabulary": 3
+    },
+    "usd": 0.0371
+  },
+  "gates_passed": false,
+  "runs": [
+    {
+      "kind": "scene",
+      "subject": "a sea battle on the voyage to Revel's End",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "jolly pelican|revel's end|CONNECTED_TO",
+        "lords' alliance|revel's end|OWNS",
+        "prisoner 13|revel's end|LOCATED_IN"
+      ],
+      "element_keys": [
+        "black serpent|location",
+        "captain rax|npc",
+        "jolly pelican|npc",
+        "lords' alliance|lore",
+        "prisoner 13|npc",
+        "revel's end|location"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 3,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "both": 1,
+          "range": 2
+        }
+      },
+      "usd": 0.00092505,
+      "names_in_body": 5,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a storm that scatters the crew during the trek to the prison",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "jolly pelican|revel's end|CONNECTED_TO",
+        "korda glintstone|revel's end|LOCATED_IN",
+        "revel's end|yula dargeria|GUARDS"
+      ],
+      "element_keys": [
+        "bethra|npc",
+        "jolly pelican|location",
+        "korda glintstone|npc",
+        "revel's end|location",
+        "yula dargeria|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 1
+        }
+      },
+      "usd": 0.0008912999999999999,
+      "names_in_body": 2,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a fence in Toadhop who wants the mandolin for himself",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 9,
+      "edges": 5,
+      "dropped": {},
+      "edge_keys": [
+        "misty\u2019s bunks|toadhop|LOCATED_IN",
+        "my left boot|toadhop|LOCATED_IN",
+        "skalderang conservatory|toadhop|CONNECTED_TO",
+        "the old dartwild cabin|toadhop|CONNECTED_TO",
+        "the old dartwild cabin|toadhop|LOCATED_IN"
+      ],
+      "element_keys": [
+        "froderic dartwild|npc",
+        "golden axe|item",
+        "jenna bean|npc",
+        "mackerel mudbottom|npc",
+        "rollo|npc",
+        "skalderang conservatory|location",
+        "sythian skalderang|npc",
+        "toadhop|location",
+        "trout bonanza|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 2,
+        "reasons": {}
+      },
+      "usd": 0.0008011499999999999,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a rival crew racing the party for the Murkmire Stone",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 4,
+      "dropped": {},
+      "edge_keys": [
+        "alda arkin|rival crew|OWNS",
+        "dr. cassee dannell|murkmire stone|SEEKS",
+        "murkmire stone|rival crew|SEEKS",
+        "murkmire stone|varkenbluff museum of natural history|LOCATED_IN"
+      ],
+      "element_keys": [
+        "alda arkin|npc",
+        "dr. cassee dannell|npc",
+        "murkmire stone|item",
+        "rival crew|npc",
+        "varkenbluff museum of natural history|location"
+      ],
+      "constraints": {
+        "checked": 4,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 1
+        }
+      },
+      "usd": 0.00108315,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a bribe attempt at the casino's cashier window",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "afterlife casino|security guards|CONTAINS",
+        "afterlife casino|tiefling cashier|CONTAINS"
+      ],
+      "element_keys": [
+        "afterlife casino|location",
+        "casino chips|item",
+        "gold coins|item",
+        "jarek|npc",
+        "security guards|npc",
+        "tiefling cashier|npc"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.00085725,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "an ambush on the old road into Barovia",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "kiril stoyanovich|strahd von zarovich|SERVES",
+        "old svalich road|wolves|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "kiril stoyanovich|npc",
+        "old svalich road|location",
+        "strahd von zarovich|npc",
+        "torn piece of parchment|item",
+        "wolves|monster"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "range": 1
+        }
+      },
+      "usd": 0.00117465,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a missing child in the village of Barovia",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 3,
+      "dropped": {
+        "element kind 'quest' not offered": 1
+      },
+      "edge_keys": [
+        "freek's parents|rescue freek|GAVE_QUEST",
+        "night hags|svalich woods|CONTAINS",
+        "strahd von zarovich|svalich woods|THREATENS"
+      ],
+      "element_keys": [
+        "freek's parents|npc",
+        "freek|npc",
+        "night hags|npc",
+        "strahd von zarovich|npc",
+        "svalich woods|location"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 1,
+        "unknown_endpoint": 1,
+        "reasons": {
+          "domain": 1
+        }
+      },
+      "usd": 0.0009361499999999999,
+      "names_in_body": 3,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a funeral at the church that the party interrupts",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "church|donavich|CONTAINS",
+        "church|doru|CONTAINS"
+      ],
+      "element_keys": [
+        "church|location",
+        "donavich|npc",
+        "doru|npc",
+        "kolyan indirovich|npc",
+        "morninglord|lore"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0008978999999999999,
+      "names_in_body": 5,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a Vistani who offers to read the party's fortune for a price",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 1,
+      "edges": 0,
+      "dropped": {},
+      "edge_keys": [],
+      "element_keys": [
+        "alenka|npc"
+      ],
+      "constraints": {
+        "checked": 0,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0010515,
+      "names_in_body": 1,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "wolves circling the camp at dusk",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 3,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "vistani camp|wolves|THREATENS",
+        "vistani|vistani camp|CONTAINS"
+      ],
+      "element_keys": [
+        "vistani camp|location",
+        "vistani|npc",
+        "wolves|monster"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 1
+        }
+      },
+      "usd": 0.00085875,
+      "names_in_body": 2,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a sea battle on the voyage to Revel's End",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "frostbite|jolly pelican|HOSTILE_TO",
+        "jolly pelican|revel's end|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "captain mara|npc",
+        "captain thorne|npc",
+        "frostbite|location",
+        "jolly pelican|location",
+        "revel's end|location",
+        "treasure rumor|lore"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "both": 1
+        }
+      },
+      "usd": 0.0008926499999999999,
+      "names_in_body": 5,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a storm that scatters the crew during the trek to the prison",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "desolate stretch of coastline|revel's end|CONNECTED_TO",
+        "jolly pelican|revel's end|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "desolate stretch of coastline|location",
+        "extreme cold|lore",
+        "jolly pelican|location",
+        "revel's end|location"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0008841000000000001,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a fence in Toadhop who wants the mandolin for himself",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 9,
+      "edges": 7,
+      "dropped": {},
+      "edge_keys": [
+        "froderic dartwild|golden axe|OWNS",
+        "golden axe|grimbold|SEEKS",
+        "golden axe|sythian skalderang|OWNS",
+        "mackerel mudbottom|trout bonanza|RELATED_TO",
+        "misty\u2019s bunks|toadhop|LOCATED_IN",
+        "my left boot|toadhop|LOCATED_IN",
+        "skalderang conservatory|toadhop|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "froderic dartwild|npc",
+        "golden axe|item",
+        "grimbold|npc",
+        "mackerel mudbottom|npc",
+        "skalderang conservatory|location",
+        "sythian skalderang|npc",
+        "toadhop|location",
+        "trout bonanza|npc",
+        "wylie van timmel|npc"
+      ],
+      "constraints": {
+        "checked": 5,
+        "violations": 0,
+        "unknown_endpoint": 2,
+        "reasons": {}
+      },
+      "usd": 0.00078555,
+      "names_in_body": 5,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a rival crew racing the party for the Murkmire Stone",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 4,
+      "dropped": {},
+      "edge_keys": [
+        "alda arkin|rival crew|OWNS",
+        "dr. cassee dannell|murkmire stone|SEEKS",
+        "murkmire stone|rival crew|SEEKS",
+        "murkmire stone|varkenbluff museum of natural history|CONTAINS"
+      ],
+      "element_keys": [
+        "alda arkin|npc",
+        "dr. cassee dannell|npc",
+        "murkmire stone|item",
+        "rival crew|npc",
+        "varkenbluff museum of natural history|location"
+      ],
+      "constraints": {
+        "checked": 4,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 1
+        }
+      },
+      "usd": 0.00108735,
+      "names_in_body": 5,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a bribe attempt at the casino's cashier window",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 3,
+      "dropped": {
+        "element kind 'quest' not offered": 1
+      },
+      "edge_keys": [
+        "access to employee-only areas|nervous patron|GAVE_QUEST",
+        "nervous patron|security guards|GUARDS",
+        "nervous patron|tiefling cashier|HOSTILE_TO"
+      ],
+      "element_keys": [
+        "nervous patron|npc",
+        "security guards|npc",
+        "small pouch of gold coins|item",
+        "tiefling cashier|npc"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 0,
+        "unknown_endpoint": 1,
+        "reasons": {}
+      },
+      "usd": 0.00082305,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "an ambush on the old road into Barovia",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 2,
+      "edges": 1,
+      "dropped": {},
+      "edge_keys": [
+        "barovia|old svalich road|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "kiril stoyanovich|npc",
+        "old svalich road|location"
+      ],
+      "constraints": {
+        "checked": 0,
+        "violations": 0,
+        "unknown_endpoint": 1,
+        "reasons": {}
+      },
+      "usd": 0.0011134499999999998,
+      "names_in_body": 2,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a missing child in the village of Barovia",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 4,
+      "dropped": {},
+      "edge_keys": [
+        "dream pastries|old bonegrinder|CONTAINS",
+        "freek|mary|RELATED_TO",
+        "mary|old bonegrinder|SEEKS",
+        "night hags|old bonegrinder|LOCATED_IN"
+      ],
+      "element_keys": [
+        "dream pastries|lore",
+        "freek|npc",
+        "mary|npc",
+        "night hags|monster",
+        "old bonegrinder|location"
+      ],
+      "constraints": {
+        "checked": 4,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "range": 1
+        }
+      },
+      "usd": 0.00085575,
+      "names_in_body": 5,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a funeral at the church that the party interrupts",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "church|undercroft|CONTAINS",
+        "donavich|doru|RELATED_TO"
+      ],
+      "element_keys": [
+        "church|location",
+        "donavich|npc",
+        "doru|npc",
+        "kolyan indirovich|lore",
+        "undercroft|location"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0008847,
+      "names_in_body": 5,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a Vistani who offers to read the party's fortune for a price",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "mirabel|moonlit blossom|SEEKS",
+        "mirabel|strahd's weaknesses|GAVE_QUEST",
+        "moonlit blossom|svalich woods|CONTAINS"
+      ],
+      "element_keys": [
+        "mirabel|npc",
+        "moonlit blossom|item",
+        "strahd's weaknesses|lore",
+        "svalich woods|location"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "range": 1
+        }
+      },
+      "usd": 0.0010443,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "wolves circling the camp at dusk",
+      "temperature": 0.0,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "arabelle|vistani camp|THREATENS",
+        "dire wolves|vistani camp|THREATENS",
+        "vistani|vistani camp|CONTAINS"
+      ],
+      "element_keys": [
+        "arabelle|npc",
+        "dire wolves|monster",
+        "vistani camp|location",
+        "vistani|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 2,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 2
+        }
+      },
+      "usd": 0.0007735499999999999,
+      "names_in_body": 3,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a sea battle on the voyage to Revel's End",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 1,
+      "dropped": {},
+      "edge_keys": [
+        "jolly pelican|revel's end|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "bethra|npc",
+        "black serpent|npc",
+        "captain rurik|npc",
+        "jolly pelican|location",
+        "prisoner 13|npc",
+        "revel's end|location"
+      ],
+      "constraints": {
+        "checked": 1,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.00088125,
+      "names_in_body": 5,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a storm that scatters the crew during the trek to the prison",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 7,
+      "edges": 4,
+      "dropped": {
+        "element kind 'creature' not offered": 1,
+        "element kind 'object' not offered": 1,
+        "element kind 'quest' not offered": 1
+      },
+      "edge_keys": [
+        "bethra|jolly pelican|GAVE_QUEST",
+        "jolly pelican|revel's end|CONNECTED_TO",
+        "korda glintstone|revel's end|GUARDS",
+        "korda glintstone|vault key|SEEKS"
+      ],
+      "element_keys": [
+        "bethra|npc",
+        "chef tiny toulaine|npc",
+        "jolly pelican|location",
+        "korda glintstone|npc",
+        "revel's end|location",
+        "varrin|npc",
+        "yula dargeria|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 2,
+        "unknown_endpoint": 1,
+        "reasons": {
+          "domain": 1,
+          "range": 1
+        }
+      },
+      "usd": 0.0008912999999999999,
+      "names_in_body": 2,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a fence in Toadhop who wants the mandolin for himself",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 10,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "misty's bunks|toadhop|LOCATED_IN",
+        "skalderang conservatory|toadhop|CONNECTED_TO",
+        "the old dartwild cabin|toadhop|LOCATED_IN"
+      ],
+      "element_keys": [
+        "froderic dartwild|npc",
+        "golden axe|item",
+        "mackerel|npc",
+        "misty's bunks|location",
+        "rolo|npc",
+        "skalderang conservatory|location",
+        "sythian skalderang|npc",
+        "the old dartwild cabin|location",
+        "toadhop|location",
+        "trout|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0008095499999999999,
+      "names_in_body": 7,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a rival crew racing the party for the Murkmire Stone",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 3,
+      "dropped": {
+        "relationship 'SEEK' not in the writable vocabulary": 2
+      },
+      "edge_keys": [
+        "alda arkin|murkmire stone|SEEKS",
+        "dr. cassee dannell|varkenbluff museum|CONNECTED_TO",
+        "murkmire stone|varkenbluff museum|CONTAINS"
+      ],
+      "element_keys": [
+        "alda arkin|npc",
+        "dr. cassee dannell|npc",
+        "enna \u2018the silence\u2019 galakiir|npc",
+        "murkmire stone|item",
+        "varkenbluff museum|location"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 1
+        }
+      },
+      "usd": 0.00107475,
+      "names_in_body": 5,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a bribe attempt at the casino's cashier window",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "cashier stations|security guards|GUARDS",
+        "cashier stations|tiefling cashier|CONTAINS",
+        "cashier stations|zareth|CONTAINS"
+      ],
+      "element_keys": [
+        "cashier stations|location",
+        "security guards|npc",
+        "tiefling cashier|npc",
+        "zareth|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.00084225,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "an ambush on the old road into Barovia",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "castle ravenloft|dire wolves|HOSTILE_TO",
+        "castle ravenloft|old svalich road|CONNECTED_TO",
+        "castle ravenloft|zorina|KNOWS"
+      ],
+      "element_keys": [
+        "castle ravenloft|lore",
+        "dire wolves|monster",
+        "old svalich road|location",
+        "zorina|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 3,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "range": 3
+        }
+      },
+      "usd": 0.00119985,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a missing child in the village of Barovia",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 4,
+      "dropped": {
+        "relationship 'SEEK' not in the writable vocabulary": 1
+      },
+      "edge_keys": [
+        "bella sunbane|freek|THREATENS",
+        "freek|mary|RELATED_TO",
+        "freek|offalia wormwiggle|THREATENS",
+        "locket|mary|OWNS"
+      ],
+      "element_keys": [
+        "bella sunbane|monster",
+        "freek|npc",
+        "locket|item",
+        "mary|npc",
+        "offalia wormwiggle|monster",
+        "old cemetery|location"
+      ],
+      "constraints": {
+        "checked": 4,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.00085755,
+      "names_in_body": 6,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a funeral at the church that the party interrupts",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "church of barovia|donavich|LOCATED_IN",
+        "church of barovia|village of barovia|CONTAINS"
+      ],
+      "element_keys": [
+        "church of barovia|location",
+        "donavich|npc",
+        "funeral rites|lore",
+        "kolyan indirovich|npc",
+        "vampire spawn|monster"
+      ],
+      "constraints": {
+        "checked": 1,
+        "violations": 0,
+        "unknown_endpoint": 1,
+        "reasons": {}
+      },
+      "usd": 0.0008990999999999999,
+      "names_in_body": 5,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a Vistani who offers to read the party's fortune for a price",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "family pendant|mira|SEEKS",
+        "family pendant|svalich woods|LOCATED_IN",
+        "restless spirits|svalich woods|GUARDS"
+      ],
+      "element_keys": [
+        "family pendant|item",
+        "mira|npc",
+        "restless spirits|npc",
+        "svalich woods|location"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0010118999999999998,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "wolves circling the camp at dusk",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 4,
+      "dropped": {},
+      "edge_keys": [
+        "arrigal|luvash|RELATED_TO",
+        "arrigal|vistani camp|MEMBER_OF",
+        "dire wolves|strahd|SERVES",
+        "luvash|vistani camp|MEMBER_OF"
+      ],
+      "element_keys": [
+        "arrigal|npc",
+        "bottle of fine wine|item",
+        "dire wolves|monster",
+        "luvash|npc",
+        "strahd|lore",
+        "vistani camp|location"
+      ],
+      "constraints": {
+        "checked": 4,
+        "violations": 3,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "both": 3
+        }
+      },
+      "usd": 0.00081255,
+      "names_in_body": 5,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a sea battle on the voyage to Revel's End",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 3,
+      "dropped": {
+        "element kind 'quest' not offered": 1
+      },
+      "edge_keys": [
+        "jolly pelican|sea of moving ice|CONNECTED_TO",
+        "prisoner 13|revel\u2019s end|LOCATED_IN",
+        "revel\u2019s end|sea of moving ice|CONNECTED_TO"
+      ],
+      "element_keys": [
+        "crew of the jolly pelican|npc",
+        "jolly pelican|location",
+        "pirate captain|npc",
+        "prisoner 13|npc",
+        "revel\u2019s end|location",
+        "sea of moving ice|location"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.00086145,
+      "names_in_body": 3,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a storm that scatters the crew during the trek to the prison",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 3,
+      "edges": 0,
+      "dropped": {},
+      "edge_keys": [],
+      "element_keys": [
+        "jolly pelican|location",
+        "revel's end|location",
+        "sea of moving ice|location"
+      ],
+      "constraints": {
+        "checked": 0,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0008799000000000001,
+      "names_in_body": 3,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a fence in Toadhop who wants the mandolin for himself",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 10,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "honorary mayor jenna bean|toadhop|LOCATED_IN",
+        "misty's bunks|toadhop|LOCATED_IN",
+        "my left boot|toadhop|LOCATED_IN"
+      ],
+      "element_keys": [
+        "frody dartwild|npc",
+        "garret|npc",
+        "golden axe|item",
+        "honorary mayor jenna bean|npc",
+        "mackerel mudbottom|npc",
+        "misty's bunks|item",
+        "my left boot|item",
+        "sythian skalderang|npc",
+        "toadhop|location",
+        "trout bonanza|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.0007735499999999999,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "quest",
+      "subject": "a rival crew racing the party for the Murkmire Stone",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 6,
+      "edges": 5,
+      "dropped": {},
+      "edge_keys": [
+        "alda arkin|alda arkin's crew|MEMBER_OF",
+        "alda arkin|murkmire stone|SEEKS",
+        "dr. cassee dannell|murkmire stone|SEEKS",
+        "gemstone wing|murkmire stone|LOCATED_IN",
+        "gemstone wing|varkenbluff museum of natural history|LOCATED_IN"
+      ],
+      "element_keys": [
+        "alda arkin's crew|npc",
+        "alda arkin|npc",
+        "dr. cassee dannell|npc",
+        "gemstone wing|location",
+        "murkmire stone|item",
+        "varkenbluff museum of natural history|location"
+      ],
+      "constraints": {
+        "checked": 5,
+        "violations": 1,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "range": 1
+        }
+      },
+      "usd": 0.00112275,
+      "names_in_body": 3,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "a bribe attempt at the casino's cashier window",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 3,
+      "dropped": {},
+      "edge_keys": [
+        "afterlife casino|magical sigil|CONTAINS",
+        "afterlife casino|tiefling cashier|CONTAINS",
+        "afterlife casino|tiefling security guards|CONTAINS"
+      ],
+      "element_keys": [
+        "afterlife casino|location",
+        "magical sigil|item",
+        "marcus|npc",
+        "tiefling cashier|npc",
+        "tiefling security guards|npc"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 0,
+        "unknown_endpoint": 0,
+        "reasons": {}
+      },
+      "usd": 0.00082725,
+      "names_in_body": 4,
+      "book": "kftgv"
+    },
+    {
+      "kind": "scene",
+      "subject": "an ambush on the old road into Barovia",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 4,
+      "dropped": {},
+      "edge_keys": [
+        "garon|strahd von zarovich|KNOWS",
+        "garon|werewolves|THREATENS",
+        "kiril stoyanovich|werewolves|MEMBER_OF",
+        "old svalich road|werewolves|CONTAINS"
+      ],
+      "element_keys": [
+        "garon|npc",
+        "kiril stoyanovich|monster",
+        "old svalich road|location",
+        "werewolves|monster"
+      ],
+      "constraints": {
+        "checked": 3,
+        "violations": 1,
+        "unknown_endpoint": 1,
+        "reasons": {
+          "range": 1
+        }
+      },
+      "usd": 0.00121185,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a missing child in the village of Barovia",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 6,
+      "dropped": {
+        "element kind 'quest' not offered": 1
+      },
+      "edge_keys": [
+        "bella sunbane|freek|THREATENS",
+        "bella sunbane|svalich woods|CONTAINS",
+        "freek|offalia wormwiggle|THREATENS",
+        "freek|svalich woods|CONTAINS",
+        "mary|rescue freek|GAVE_QUEST",
+        "offalia wormwiggle|svalich woods|CONTAINS"
+      ],
+      "element_keys": [
+        "bella sunbane|monster",
+        "freek|npc",
+        "mary|npc",
+        "offalia wormwiggle|monster",
+        "svalich woods|location"
+      ],
+      "constraints": {
+        "checked": 5,
+        "violations": 0,
+        "unknown_endpoint": 1,
+        "reasons": {}
+      },
+      "usd": 0.0009019499999999999,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "a funeral at the church that the party interrupts",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 5,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "cemetery|church|CONTAINS",
+        "church|village of barovia|CONTAINS"
+      ],
+      "element_keys": [
+        "cemetery|location",
+        "church|location",
+        "donavich|npc",
+        "kolyan indirovich|npc",
+        "wolves|monster"
+      ],
+      "constraints": {
+        "checked": 1,
+        "violations": 0,
+        "unknown_endpoint": 1,
+        "reasons": {}
+      },
+      "usd": 0.0008853,
+      "names_in_body": 4,
+      "book": "cos"
+    },
+    {
+      "kind": "quest",
+      "subject": "a Vistani who offers to read the party's fortune for a price",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 3,
+      "edges": 4,
+      "dropped": {
+        "element kind 'creature' not offered": 1,
+        "element kind 'quest' not offered": 1
+      },
+      "edge_keys": [
+        "alenka|vistani|MEMBER_OF",
+        "fortune-telling|vistani|GAVE_QUEST",
+        "fortune-telling|wolves|OBJECTIVE_AT",
+        "vistani|wolves|THREATENS"
+      ],
+      "element_keys": [
+        "alenka|npc",
+        "minor magical trinket|item",
+        "vistani|npc"
+      ],
+      "constraints": {
+        "checked": 1,
+        "violations": 1,
+        "unknown_endpoint": 3,
+        "reasons": {
+          "range": 1
+        }
+      },
+      "usd": 0.0011006999999999998,
+      "names_in_body": 3,
+      "book": "cos"
+    },
+    {
+      "kind": "scene",
+      "subject": "wolves circling the camp at dusk",
+      "temperature": 0.8,
+      "parsed": true,
+      "error": "",
+      "elements": 4,
+      "edges": 2,
+      "dropped": {},
+      "edge_keys": [
+        "arabelle|vistani camp|SEEKS",
+        "vistani camp|wolves|THREATENS"
+      ],
+      "element_keys": [
+        "arabelle|npc",
+        "vistani camp|location",
+        "vistani|npc",
+        "wolves|monster"
+      ],
+      "constraints": {
+        "checked": 2,
+        "violations": 2,
+        "unknown_endpoint": 0,
+        "reasons": {
+          "domain": 2
+        }
+      },
+      "usd": 0.0006541499999999999,
+      "names_in_body": 4,
+      "book": "cos"
+    }
+  ]
+}

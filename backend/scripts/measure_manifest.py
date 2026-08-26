@@ -38,6 +38,7 @@ import asyncio
 import json
 import sys
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from openai import AsyncOpenAI
@@ -149,8 +150,17 @@ def violations_of(result: generator.Generated, shown_types: dict[str, str]) -> d
     }
 
 
-async def one(client, retriever, kind: str, subject: str, temperature: float, seed: int):
-    """One generation, with everything the report needs about it."""
+async def one(
+    client, retriever, kind: str, subject: str, temperature: float, seed: int,
+    two_call: bool = False,
+):
+    """One generation, with everything the report needs about it.
+
+    `two_call` measures rung 2 of the fallback ladder: prose first, then the
+    SAME model annotating its own finished text. Reported through the identical
+    metrics so the two shapes are compared like for like rather than each being
+    graded on its own terms.
+    """
     retrieval = retriever.retrieve(subject)
     shown = {
         (s.get("section") or "").casefold(): "LOCATION"
@@ -164,10 +174,24 @@ async def one(client, retriever, kind: str, subject: str, temperature: float, se
         depth=canon_context.Depth(),
         model=settings.openai_model,
         temperature=temperature,
-        cluster=True,
+        cluster=not two_call,
         max_tokens=2500,
         seed=seed,
     )
+    if two_call and not result.error:
+        elements, edges, dropped, error = await generator.annotate(
+            client,
+            body=result.body,
+            retrieval=retrieval,
+            depth=canon_context.Depth(),
+            model=settings.openai_model,
+            temperature=temperature,
+            seed=seed,
+        )
+        result = replace(
+            result, elements=elements, edges=edges,
+            manifest_dropped=dropped, error=error,
+        )
     return {
         "kind": kind,
         "subject": subject,
@@ -251,7 +275,87 @@ def verdict(found: dict) -> tuple[bool, list[str]]:
     return passed, lines
 
 
-async def run(cap: float, report_path: Path) -> int:
+async def annotation_stability(cap: float, report_path: Path) -> int:
+    """Generate each subject's prose ONCE, then annotate it twice.
+
+    THE MEASUREMENT THE OTHER MODES CANNOT MAKE. Comparing two full runs
+    conflates two different instabilities: the model writing different prose
+    (which is what generation IS -- nobody regenerates a scene expecting the
+    same scene) and the model disagreeing with itself about what one fixed
+    piece of prose contains (which would be fatal). Holding the prose still
+    separates them, and only the second is a reason not to ship.
+    """
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    retrievers = {b: CanonRetriever(book=b) for b in {b for b, _, _ in SUBJECTS}}
+
+    rows, spent = [], 0.0
+    for book, kind, subject in SUBJECTS:
+        if spent >= cap:
+            print(f"\nSTOPPED at the ${cap:.2f} cap.")
+            break
+        retrieval = retrievers[book].retrieve(subject)
+        drafted = await generator.generate(
+            client, kind=kind, subject=subject, retrieval=retrieval,
+            depth=canon_context.Depth(), model=settings.openai_model,
+            temperature=0.8, cluster=False, max_tokens=2500, seed=20260826,
+        )
+        spent += (drafted.cost or {}).get("usd") or 0
+        if drafted.error:
+            print(f"  SKIP {subject[:44]} -- prose failed: {drafted.error}")
+            continue
+
+        pair = []
+        for attempt in range(2):
+            elements, edges, _dropped, error = await generator.annotate(
+                client, body=drafted.body, retrieval=retrieval,
+                depth=canon_context.Depth(), model=settings.openai_model,
+                temperature=0.0, seed=20260826,
+            )
+            pair.append(
+                {
+                    "error": error,
+                    "elements": sorted(
+                        f"{e['name'].casefold()}|{e['kind']}" for e in elements
+                    ),
+                    "edges": sorted("|".join(_edge_key(e)) for e in edges),
+                }
+            )
+        if any(a["error"] for a in pair):
+            print(f"  SKIP {subject[:44]} -- annotation failed")
+            continue
+        row = {
+            "subject": subject,
+            "elements": jaccard(set(pair[0]["elements"]), set(pair[1]["elements"])),
+            "edges": jaccard(set(pair[0]["edges"]), set(pair[1]["edges"])),
+            "n_elements": len(pair[0]["elements"]),
+            "n_edges": len(pair[0]["edges"]),
+        }
+        rows.append(row)
+        print(
+            f"  elements {row['elements']:.2f}  edges {row['edges']:.2f}  "
+            f"({row['n_elements']}e/{row['n_edges']}r)  {subject[:40]}"
+        )
+
+    if not rows:
+        print("nothing measured")
+        return 1
+    element_mean = sum(r["elements"] for r in rows) / len(rows)
+    edge_mean = sum(r["edges"] for r in rows) / len(rows)
+    print(f"\n  ONE PROSE, TWO ANNOTATIONS -- {len(rows)} subjects, ${spent:.4f}")
+    print(f"  element agreement   {element_mean:.2f}   (gate 0.75)")
+    print(f"  edge agreement      {edge_mean:.2f}   (gate 0.75, extractor 0.49)")
+    print("\n  This isolates the model disagreeing with ITSELF about fixed text")
+    print("  from the model simply writing something different, which is what")
+    print("  generation is for.")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(
+        {"mode": "annotation-stability", "element_agreement": element_mean,
+         "edge_agreement": edge_mean, "subjects": rows}, indent=2))
+    print(f"\n  wrote {report_path}")
+    return 0 if element_mean >= 0.75 else 1
+
+
+async def run(cap: float, report_path: Path, two_call: bool = False) -> int:
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     retrievers = {b: CanonRetriever(book=b) for b in {b for b, _, _ in SUBJECTS}}
 
@@ -264,7 +368,9 @@ async def run(cap: float, report_path: Path) -> int:
             if spent >= cap:
                 print(f"\nSTOPPED at the ${cap:.2f} cap after {len(rows)} runs.")
                 break
-            row = await one(client, retrievers[book], kind, subject, temperature, seed)
+            row = await one(
+                client, retrievers[book], kind, subject, temperature, seed, two_call
+            )
             row["book"] = book
             rows.append(row)
             spent += row["usd"] or 0
@@ -310,10 +416,23 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="Actually spend money.")
     parser.add_argument("--cap", type=float, default=DEFAULT_CAP_USD)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+    parser.add_argument(
+        "--annotation-stability",
+        action="store_true",
+        help="Generate each prose once, annotate it twice, compare. Isolates "
+             "the annotation step from the generation step.",
+    )
+    parser.add_argument(
+        "--two-call",
+        action="store_true",
+        help="Rung 2: generate prose, then have the SAME model annotate it.",
+    )
     args = parser.parse_args()
 
     planned = len(SUBJECTS) * 4
-    print(f"{len(SUBJECTS)} subjects x 2 temperatures x 2 runs = {planned} calls")
+    shape = "two-call (prose, then annotate)" if args.two_call else "one-call declared"
+    print(f"{len(SUBJECTS)} subjects x 2 temperatures x 2 runs = {planned} generations")
+    print(f"shape: {shape}")
     print(f"cap ${args.cap:.2f}, model {settings.openai_model}")
     print("gates, fixed before any number arrives:")
     for key, (threshold, why) in GATES.items():
@@ -321,7 +440,9 @@ def main() -> int:
     if not args.apply:
         print("\n--dry-run: nothing called, nothing spent. Re-run with --apply.")
         return 0
-    return asyncio.run(run(args.cap, args.report))
+    if args.annotation_stability:
+        return asyncio.run(annotation_stability(args.cap, args.report))
+    return asyncio.run(run(args.cap, args.report, args.two_call))
 
 
 if __name__ == "__main__":
