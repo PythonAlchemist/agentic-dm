@@ -21,10 +21,12 @@ export function YourMaterial({
   campaign,
   refreshKey,
   onDraft,
+  onRead,
 }: {
   campaign: string | null
   refreshKey: number
   onDraft: (card: GeneratedReply) => void
+  onRead: (sectionId: string) => void
 }) {
   const [elements, setElements] = useState<CampaignElement[]>([])
   const [busy, setBusy] = useState('')
@@ -98,6 +100,7 @@ export function YourMaterial({
             element={element}
             busy={busy === element.entity_id}
             onDraft={() => draft(element)}
+            onRead={onRead}
           />
         ))}
         {written.length > 0 && (
@@ -106,7 +109,7 @@ export function YourMaterial({
           </p>
         )}
         {written.map((element) => (
-          <Row key={element.entity_id} element={element} busy={false} />
+          <Row key={element.entity_id} element={element} busy={false} onRead={onRead} />
         ))}
       </div>
     </Card>
@@ -117,16 +120,26 @@ function Row({
   element,
   busy,
   onDraft,
+  onRead,
 }: {
   element: CampaignElement
   busy: boolean
   onDraft?: () => void
+  onRead: (sectionId: string) => void
 }) {
+  // Only something WITH prose opens. A stub has nothing to show, and a door
+  // onto an empty room is worse than no door -- the "flesh out" beside it is
+  // the action that stub actually offers.
+  const readable = element.own_section
   return (
     <div className="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40">
-      <span
-        className={`min-w-0 flex-1 truncate text-xs ${
-          element.own_section ? 'text-neutral-400' : 'text-amber-300'
+      <button
+        disabled={!readable}
+        onClick={() => readable && onRead(readable)}
+        className={`min-w-0 flex-1 truncate text-left text-xs ${
+          readable
+            ? 'text-neutral-400 hover:underline'
+            : 'cursor-default text-amber-300'
         }`}
         title={element.role || element.entity_id}
       >
@@ -134,7 +147,7 @@ function Row({
         {element.role && (
           <span className="text-neutral-600"> · {element.role}</span>
         )}
-      </span>
+      </button>
       <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-600">
         {element.kind}
       </span>

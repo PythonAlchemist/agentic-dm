@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChatPane } from '@/components/ChatPane'
 import { Controls } from '@/components/Controls'
 import { RunningOrder } from '@/components/RunningOrder'
+import { SectionReader } from '@/components/SectionReader'
 import { YourMaterial } from '@/components/YourMaterial'
 import { GeneratePane } from '@/components/GeneratePane'
 import { SessionMeter, type Running } from '@/components/Meters'
@@ -59,6 +60,9 @@ export default function Lab() {
   //  It lands in the chat pane as a card, so there is ONE review surface
   //  however a draft was raised.
   const [raised, setRaised] = useState<GeneratedReply | null>(null)
+  //: Which section a DM is reading. A drawer rather than a route: reading is a
+  //  glance mid-conversation, and the chat it interrupts stays behind it.
+  const [reading, setReading] = useState<string | null>(null)
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
   const [tab, setTab] = useState<'chat' | 'generate'>('chat')
   const [running, setRunning] = useState<Running>(ZERO)
@@ -147,8 +151,13 @@ export default function Lab() {
               campaign={campaign}
               refreshKey={orderVersion}
               onDraft={setRaised}
+              onRead={setReading}
             />
-            <RunningOrder campaign={campaign} refreshKey={orderVersion} />
+            <RunningOrder
+              campaign={campaign}
+              refreshKey={orderVersion}
+              onRead={setReading}
+            />
           </aside>
 
           <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -196,6 +205,12 @@ export default function Lab() {
           </main>
         </div>
       </div>
+
+      <SectionReader
+        sectionId={reading}
+        campaign={campaign}
+        onClose={() => setReading(null)}
+      />
     </TooltipProvider>
   )
 }

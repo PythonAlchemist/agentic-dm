@@ -20,6 +20,7 @@ the client's word for it.
 
 from __future__ import annotations
 
+import json
 import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -448,6 +449,49 @@ class DraftRequest(BaseModel):
     #: Anything the DM wants respected that is in no book -- what happened at
     #: the table since this thing was minted.
     note: str = ""
+
+
+@router.get("/section")
+def read_section(section_id: str, campaign: str | None = None) -> dict:
+    """The prose of one section, canon or campaign, for a person to read.
+
+    THE THING A DM DOES AT A TABLE. The running order listed 547 headings and
+    clicking one did nothing; the material panel listed a cast and clicking one
+    did nothing. So "show me the scene I wrote" meant asking the chat and
+    hoping retrieval surfaced it -- for prose sitting one query away.
+
+    A CAMPAIGN SECTION IS ONLY READABLE FROM ITS OWN CAMPAIGN. Canon is
+    readable by anyone: it is the book. The `campaign` argument is the caller
+    saying which table it is at, and a campaign section belonging to another
+    one is not found rather than refused -- from this endpoint's side there is
+    nothing there.
+    """
+    with read_only_session() as session:
+        row = session.run(
+            """
+            MATCH (s:Section {id:$id})
+            WHERE s.plane = 'canon' OR s.campaign = $campaign
+            OPTIONAL MATCH (c:Chapter)-[:HAS_SECTION]->(s)
+            OPTIONAL MATCH (s)-[:DERIVED_FROM]->(cited:Section)
+            RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
+                   s.plane AS plane, s.kind AS kind, s.invented AS invented,
+                   s.from_canon AS from_canon, s.from_context AS from_context,
+                   s.edited AS edited, c.slug AS chapter,
+                   collect(DISTINCT cited.heading) AS cites
+            """,
+            {"id": section_id, "campaign": campaign},
+        ).single()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no section {section_id!r} here")
+
+    found = dict(row)
+    for field in ("invented", "from_canon", "from_context"):
+        raw = found.get(field)
+        # Stored as JSON on the node; a reader wants the list, and a canon
+        # section has none of these at all.
+        found[field] = json.loads(raw) if raw else []
+    found["cites"] = [c for c in found["cites"] if c]
+    return found
 
 
 @router.post("/draft-expansion")

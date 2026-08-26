@@ -19,9 +19,11 @@ import { Card } from './ui'
 export function RunningOrder({
   campaign,
   refreshKey,
+  onRead,
 }: {
   campaign: string | null
   refreshKey: number
+  onRead: (sectionId: string) => void
 }) {
   const [rows, setRows] = useState<OrderRow[]>([])
   const [failed, setFailed] = useState('')
@@ -95,8 +97,12 @@ export function RunningOrder({
             key={row.section_id}
             className="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40"
           >
-            <span
-              className={`min-w-0 flex-1 truncate text-xs ${
+            {/* THE HEADING IS THE DOOR. It listed 547 of these and clicking
+                one did nothing, so reading your own scene meant asking the
+                chat about text sitting one query away. */}
+            <button
+              onClick={() => onRead(row.section_id)}
+              className={`min-w-0 flex-1 truncate text-left text-xs hover:underline ${
                 row.skipped
                   ? 'text-neutral-600 line-through'
                   : row.origin === 'campaign'
@@ -106,7 +112,7 @@ export function RunningOrder({
               title={row.section_id}
             >
               {row.heading}
-            </span>
+            </button>
             {row.origin === 'campaign' && (
               <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-600/80">
                 yours

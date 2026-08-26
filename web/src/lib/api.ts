@@ -156,6 +156,20 @@ export interface GeneratedReply {
   expands?: string
 }
 
+export interface SectionRead {
+  section_id: string
+  heading: string
+  text: string
+  plane: 'canon' | 'campaign'
+  kind: string | null
+  chapter: string | null
+  from_canon: { claim: string; cite: string }[]
+  from_context: string[]
+  invented: string[]
+  edited: boolean | null
+  cites: string[]
+}
+
 export interface CampaignElement {
   entity_id: string
   name: string
@@ -335,6 +349,11 @@ export const labAPI = {
 
   storeCluster(body: Record<string, unknown>): Promise<StoredResult> {
     return postTo<StoredResult>('/homebrew/store-cluster', body)
+  },
+
+  section(sectionId: string, campaign: string | null): Promise<SectionRead> {
+    const scope = campaign ? `&campaign=${encodeURIComponent(campaign)}` : ''
+    return getJSON(`/homebrew/section?section_id=${encodeURIComponent(sectionId)}${scope}`)
   },
 
   elements(campaign: string): Promise<{ elements: CampaignElement[]; unwritten: number }> {
