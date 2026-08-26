@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.agents import canon_context
+from backend.campaign import homebrew
 from backend.canon.retrieval import Retrieval
 from backend.core.pricing import Usage, estimate
 
@@ -260,6 +261,16 @@ class Generated:
     #: Sits here rather than beside its two siblings only because it carries a
     #: default and they do not; read it as the third of three.
     from_context: tuple[str, ...] = ()
+    #: Claims the model filed under `from_canon` that cite the DM's OWN
+    #: material. A FOURTH bucket, derived and never asked for: the model sees
+    #: one numbered list of passages and, once a campaign has prose of its own,
+    #: that list spans both planes. It cited two of the DM's scenes as the book
+    #: -- "Corsairs swarm the deck at dawn", a word that appears nowhere in
+    #: either published book -- and the card printed it in green under "From
+    #: the book". `homebrew.split_by_origin` re-files it by resolving each cite
+    #: to the plane of the passage it points at, which is a check rather than a
+    #: request the model can decline.
+    from_yours: tuple[dict, ...] = ()
     #: What this generation says it contains, each with its own provenance
     #: split, and the relationships it declares between them. Empty for a
     #: single-artifact generation, which is every one that existed before
@@ -288,6 +299,7 @@ class Generated:
             "from_canon": list(self.from_canon),
             "invented": list(self.invented),
             "from_context": list(self.from_context),
+            "from_yours": list(self.from_yours),
             "elements": list(self.elements),
             "edges": list(self.edges),
             "manifest_dropped": dict(self.manifest_dropped),
@@ -610,18 +622,25 @@ async def generate(
     elements, edges, manifest_dropped = sift_manifest(data) if cluster else ((), (), {})
 
     shown = canon_context.apply(retrieval, depth)
+    cites = canon_context.sources(shown)
+    # Re-filed BEFORE the card is built, not only before it is written, so the
+    # DM approves what is true rather than approving a green list and having it
+    # quietly corrected underneath them. The same split runs again at the
+    # persistence boundary, because this payload goes through a browser.
+    book, yours = homebrew.split_by_origin(data.get("from_canon", ()) or (), cites)
     return Generated(
         kind=kind,
         subject=subject,
         title=str(data.get("title", "")),
         body=str(data.get("body", "")),
-        from_canon=tuple(data.get("from_canon", ()) or ()),
+        from_canon=tuple(book),
+        from_yours=tuple(yours),
         invented=tuple(data.get("invented", ()) or ()),
         from_context=tuple(data.get("from_context", ()) or ()),
         elements=elements,
         edges=edges,
         manifest_dropped=manifest_dropped,
-        sources=tuple(canon_context.sources(shown)),
+        sources=tuple(cites),
         usage={"input": usage.input_tokens, "output": usage.output_tokens, "total": usage.total},
         cost=cost.as_dict(),
         retrieval={

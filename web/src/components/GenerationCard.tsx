@@ -65,6 +65,7 @@ export function GenerationCard({
         body,
         generated_body: card.body,
         from_canon: card.from_canon,
+        from_yours: card.from_yours ?? [],
         invented: card.invented,
         from_context: card.from_context ?? [],
         sources: card.sources,
@@ -82,6 +83,7 @@ export function GenerationCard({
             body,
             generated_body: card.body,
             from_canon: card.from_canon,
+        from_yours: card.from_yours ?? [],
             invented: card.invented,
             from_context: card.from_context ?? [],
             sources: card.sources,
@@ -138,6 +140,14 @@ export function GenerationCard({
           items={card.from_canon.map((c) => `${c.claim} ${c.cite}`)}
           tone="text-emerald-300/80"
         />
+        {(card.from_yours?.length ?? 0) > 0 && (
+          <Provenance
+            label="From your own material"
+            hint="Cited, but to a section you wrote — not to the book."
+            items={(card.from_yours ?? []).map((c) => `${c.claim} ${c.cite}`)}
+            tone="text-amber-200/80"
+          />
+        )}
         {(card.from_context?.length ?? 0) > 0 && (
           <Provenance
             label="From this conversation"

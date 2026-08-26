@@ -47,6 +47,7 @@ export function ClusterReview({
       body: card.body,
       generated_body: card.body,
       from_canon: card.from_canon,
+      from_yours: card.from_yours ?? [],
       invented: card.invented,
       from_context: card.from_context ?? [],
       sources: card.sources,

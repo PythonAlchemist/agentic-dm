@@ -49,6 +49,11 @@ class StoreRequest(BaseModel):
     #: "what did a person change" stays answerable.
     generated_body: str = ""
     from_canon: list[dict] = Field(default_factory=list)
+    #: Claims the card already re-filed as citing the DM's own material. Sent
+    #: back so the write can UNION it with `from_canon` and split the pair
+    #: again -- the card's honesty must not cost these claims their place, and
+    #: the boundary still gets to disbelieve either list.
+    from_yours: list[dict] = Field(default_factory=list)
     invented: list[str] = Field(default_factory=list)
     from_context: list[str] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
@@ -241,7 +246,9 @@ def store_cluster(request: ClusterRequest) -> dict:
             },
         )
 
-    _resolved, bad = homebrew.cited_sections(request.from_canon, request.sources)
+    _resolved, bad = homebrew.cited_sections(
+        [*request.from_canon, *request.from_yours], request.sources
+    )
     if bad:
         raise HTTPException(
             status_code=400,
@@ -269,6 +276,7 @@ def store_cluster(request: ClusterRequest) -> dict:
                     body=request.body,
                     generated_body=request.generated_body or request.body,
                     from_canon=request.from_canon,
+                    from_yours=request.from_yours,
                     invented=request.invented,
                     from_context=request.from_context,
                     sources=request.sources,
@@ -330,7 +338,9 @@ def store_generation(request: StoreRequest) -> dict:
                     detail=f"anchor {request.anchor!r} is not a canon section",
                 )
 
-    _resolved, bad = homebrew.cited_sections(request.from_canon, request.sources)
+    _resolved, bad = homebrew.cited_sections(
+        [*request.from_canon, *request.from_yours], request.sources
+    )
     if bad:
         raise HTTPException(
             status_code=400,
@@ -351,6 +361,7 @@ def store_generation(request: StoreRequest) -> dict:
                     body=request.body,
                     generated_body=request.generated_body or request.body,
                     from_canon=request.from_canon,
+                    from_yours=request.from_yours,
                     invented=request.invented,
                     from_context=request.from_context,
                     sources=request.sources,
@@ -475,7 +486,8 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             OPTIONAL MATCH (s)-[:DERIVED_FROM]->(cited:Section)
             RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
                    s.plane AS plane, s.kind AS kind, s.invented AS invented,
-                   s.from_canon AS from_canon, s.from_context AS from_context,
+                   s.from_canon AS from_canon, s.from_yours AS from_yours,
+                   s.from_context AS from_context,
                    s.edited AS edited, c.slug AS chapter,
                    collect(DISTINCT cited.heading) AS cites
             """,
@@ -485,7 +497,7 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
         raise HTTPException(status_code=404, detail=f"no section {section_id!r} here")
 
     found = dict(row)
-    for field in ("invented", "from_canon", "from_context"):
+    for field in ("invented", "from_canon", "from_yours", "from_context"):
         raw = found.get(field)
         # Stored as JSON on the node; a reader wants the list, and a canon
         # section has none of these at all.
@@ -585,7 +597,9 @@ def _client():
 @router.post("/expand")
 def expand_element(request: ExpandRequest) -> dict:
     """Write prose for an existing element. Creates no entity."""
-    _resolved, bad = homebrew.cited_sections(request.from_canon, request.sources)
+    _resolved, bad = homebrew.cited_sections(
+        [*request.from_canon, *request.from_yours], request.sources
+    )
     if bad:
         raise HTTPException(
             status_code=400,
@@ -601,6 +615,7 @@ def expand_element(request: ExpandRequest) -> dict:
                     body=request.body,
                     generated_body=request.generated_body or request.body,
                     from_canon=request.from_canon,
+                    from_yours=request.from_yours,
                     invented=request.invented,
                     from_context=request.from_context,
                     sources=request.sources,

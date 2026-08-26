@@ -126,6 +126,7 @@ export interface GeneratedReply {
   title: string
   body: string
   from_canon: { claim: string; cite: string }[]
+  from_yours?: { claim: string; cite: string }[]
   invented: string[]
   /** The third source: what came from the conversation rather than the book or
    *  the model. Present only when chat handed context over. */
@@ -164,6 +165,8 @@ export interface SectionRead {
   kind: string | null
   chapter: string | null
   from_canon: { claim: string; cite: string }[]
+  /** Claims that cite the DM's OWN sections, re-filed off `from_canon`. */
+  from_yours: { claim: string; cite: string }[]
   from_context: string[]
   invented: string[]
   edited: boolean | null
@@ -333,6 +336,7 @@ export const labAPI = {
     body: string
     generated_body: string
     from_canon: { claim: string; cite: string }[]
+    from_yours: { claim: string; cite: string }[]
     invented: string[]
     from_context: string[]
     sources: Source[]

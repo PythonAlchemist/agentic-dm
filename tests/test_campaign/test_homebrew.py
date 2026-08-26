@@ -11,6 +11,7 @@ import json
 import pytest
 
 from backend.campaign import homebrew, store
+from backend.campaign.homebrew import split_by_origin
 from backend.campaign.model import AUTHORED, CAMPAIGN_PLANE, Campaign
 from backend.canon.retrieval import CanonRetriever
 from backend.core.database import neo4j_session
@@ -723,3 +724,64 @@ class TestWriteClusterRecordsTheLinks:
         before = props()
         self._write(with_canon)
         assert props() == before
+
+
+class TestAClaimIsNotAboutTheBookJustBecauseTheModelSaidSo:
+    """The generator is shown ONE numbered list of passages, and once a
+    campaign has prose of its own that list spans both planes. `from_canon`
+    came back citing two of the DM's own scenes, and the card printed them in
+    green under "From the book" -- the single thing this project exists to get
+    right. So which plane a claim is about is derived from the cite, never
+    taken from the bucket the model chose."""
+
+    #: The real shape: nine canon passages, then two of the DM's own.
+    SOURCES = [
+        {"citation": f"[{n}]", "type": "canon" if n <= 9 else "campaign"}
+        for n in range(1, 12)
+    ]
+
+    def test_a_claim_citing_the_dms_own_scene_is_not_from_the_book(self):
+        """Verbatim from the generation that exposed this. The word `corsair`
+        appears in neither published book; both claims cite scenes the DM
+        wrote the week before."""
+        book, yours = split_by_origin(
+            [
+                {"claim": "The journey to Revel's End by sea is 350 miles.", "cite": "[6]"},
+                {"claim": "A corsair closes on the barge.", "cite": "[10]"},
+                {"claim": "Corsairs swarm the deck at dawn.", "cite": "[11]"},
+            ],
+            self.SOURCES,
+        )
+        assert [c["claim"] for c in book] == [
+            "The journey to Revel's End by sea is 350 miles."
+        ]
+        assert [c["cite"] for c in yours] == ["[10]", "[11]"]
+
+    def test_nothing_is_lost(self):
+        """A re-file moves a claim, never drops one. The DM cited something and
+        it is still cited; only the heading over it changes."""
+        claims = [{"claim": f"c{n}", "cite": f"[{n}]"} for n in (1, 5, 10, 11)]
+        book, yours = split_by_origin(claims, self.SOURCES)
+        assert len(book) + len(yours) == len(claims)
+
+    def test_a_cite_pointing_nowhere_stays_put(self):
+        """`cited_sections` is what reports an unresolvable citation. Moving a
+        claim on the strength of a number that resolves to nothing would be
+        guessing in the other direction."""
+        book, yours = split_by_origin(
+            [{"claim": "unsourced", "cite": "[99]"}], self.SOURCES
+        )
+        assert [c["claim"] for c in book] == ["unsourced"]
+        assert yours == []
+
+    def test_a_campaign_with_no_material_of_its_own_is_unaffected(self):
+        """The case before any of this existed: every passage is canon, so
+        every claim stays where the model filed it."""
+        claims = [{"claim": "a", "cite": "[1]"}, {"claim": "b", "cite": "[2]"}]
+        book, yours = split_by_origin(claims, self.SOURCES[:9])
+        assert book == claims
+        assert yours == []
+
+    def test_an_empty_list_is_not_an_error(self):
+        assert split_by_origin([], self.SOURCES) == ([], [])
+        assert split_by_origin(None, None) == ([], [])

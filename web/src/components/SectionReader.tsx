@@ -128,6 +128,7 @@ export function SectionReader({
             )}
 
             {(shown.from_canon.length > 0 ||
+              shown.from_yours.length > 0 ||
               shown.from_context.length > 0 ||
               shown.invented.length > 0) && (
               <div className="mt-5 space-y-3 border-t border-neutral-800 pt-4 text-xs">
@@ -135,6 +136,16 @@ export function SectionReader({
                   label="From the book"
                   items={shown.from_canon.map((c) => `${c.claim} ${c.cite}`)}
                   tone="text-emerald-300/80"
+                />
+                {/* BETWEEN the book and the conversation, because that is
+                    where it sits: sourced, checkable, and not canon. A model
+                    shown one numbered list of passages files a campaign
+                    passage under the book, so this is derived from the cite's
+                    plane rather than taken from what the model called it. */}
+                <Split
+                  label="From your own material"
+                  items={shown.from_yours.map((c) => `${c.claim} ${c.cite}`)}
+                  tone="text-amber-200/80"
                 />
                 <Split
                   label="From the table"

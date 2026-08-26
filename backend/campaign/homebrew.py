@@ -109,6 +109,46 @@ class Stored:
         }
 
 
+def split_by_origin(from_canon, sources) -> tuple[list[dict], list[dict]]:
+    """Which of these claims the BOOK supports, and which the DM's own material
+    does. `(from_canon, from_yours)`.
+
+    THE MODEL IS ASKED TO SEPARATE THESE AND CANNOT BE TRUSTED TO. It is shown
+    one numbered list of passages, and once a campaign has its own prose that
+    list holds both planes -- so `from_canon` came back citing [10] and [11],
+    "A corsair closes on the barge" and "Corsairs swarm the deck at dawn",
+    against two scenes the DM had written the week before. The word `corsair`
+    does not appear anywhere in either published book. The card said "From the
+    book" over it, in green, which is the one thing this project exists to get
+    right.
+
+    So it is DERIVED, not asked for. Every citation already resolves to a
+    passage whose plane is known, and a claim citing a campaign passage is not
+    a claim about the book whatever the model called it. That makes this a
+    check rather than a hope, which is the only kind of guarantee worth
+    printing next to a colour.
+
+    AN UNRESOLVABLE CITE STAYS PUT. `cited_sections` is what reports those, and
+    moving a claim on the strength of a citation that points nowhere would be
+    guessing in the opposite direction.
+    """
+    origins = {}
+    for index, source in enumerate(sources or (), start=1):
+        origin = str(source.get("type") or source.get("origin") or "")
+        origins[str(index)] = origin
+        found = _CITE.search(str(source.get("citation") or ""))
+        if found:
+            origins[found.group(1)] = origin
+
+    book: list[dict] = []
+    yours: list[dict] = []
+    for claim in from_canon or ():
+        found = _CITE.search(str(claim.get("cite", "")))
+        origin = origins.get(found.group(1)) if found else None
+        (yours if origin and origin != "canon" else book).append(dict(claim))
+    return book, yours
+
+
 def cited_sections(from_canon, sources) -> tuple[list[str], list[str]]:
     """Resolve `[n]` citations against the sources shown. `(resolved, bad)`.
 
@@ -146,11 +186,17 @@ def write(
     invented,
     from_context,
     sources,
+    from_yours=(),
     anchor: str | None,
     model: str = "",
     log_path: Path | None = None,
 ) -> Stored:
     """One transaction: the entity, its prose, its citations, its position."""
+    # DERIVED HERE AND NOT TAKEN FROM THE PAYLOAD, for the reason
+    # `cited_sections` gives just below: this has been round-tripped through a
+    # browser. A claim citing a campaign passage is not a claim about the book,
+    # whatever reached this function calling it one.
+    book, yours = split_by_origin([*from_canon, *from_yours], sources)
     name = title.strip() or "Untitled"
     entity_id = mint_id(slug, slugify(name))
     section_id = f"{campaign_prefix(slug)}{slugify(name)}#0"
@@ -221,7 +267,8 @@ def write(
         CREATE (s:Section {
             id:$id, heading:$heading, text:$body, generated_body:$generated,
             plane:$plane, campaign:$slug, kind:$kind, model:$model,
-            from_canon:$from_canon, invented:$invented, from_context:$from_context,
+            from_canon:$from_canon, from_yours:$from_yours,
+            invented:$invented, from_context:$from_context,
             edited:$edited
         })
         MERGE (c)-[:HAS_SECTION]->(s)
@@ -235,7 +282,8 @@ def write(
             "plane": CAMPAIGN_PLANE,
             "kind": kind,
             "model": model,
-            "from_canon": json.dumps(list(from_canon or ())),
+            "from_canon": json.dumps(book),
+            "from_yours": json.dumps(yours),
             "invented": json.dumps(list(invented or ())),
             "from_context": json.dumps(list(from_context or ())),
             "edited": body.strip() != generated_body.strip(),
@@ -342,6 +390,7 @@ def write_cluster(
     invented,
     from_context,
     sources,
+    from_yours=(),
     manifest,
     anchor: str | None,
     model: str = "",
@@ -375,6 +424,7 @@ def write_cluster(
         body=body,
         generated_body=generated_body,
         from_canon=from_canon,
+        from_yours=from_yours,
         invented=invented,
         from_context=from_context,
         sources=sources,
@@ -405,13 +455,17 @@ def write_cluster(
     written = []
     for element in plan.elements:
         label = LABELS.get(element.kind, "LORE")
+        # An element's citations run through the same check as a section's: the
+        # model is shown one numbered list, and a stub can misfile a campaign
+        # passage exactly as a body can.
+        element_book, element_yours = split_by_origin(element.from_canon, sources)
         tx.run(
             f"""
             CREATE (e:Entity:{label} {{
                 id:$id, name:$name, plane:$plane, status:$status,
                 campaign:$slug, kind:$kind, role:$role,
-                from_canon:$from_canon, invented:$invented,
-                cluster:$section
+                from_canon:$from_canon, from_yours:$from_yours,
+                invented:$invented, cluster:$section
             }})
             """,
             {
@@ -422,7 +476,8 @@ def write_cluster(
                 "slug": plan.campaign,
                 "kind": element.kind,
                 "role": element.role,
-                "from_canon": json.dumps(list(element.from_canon)),
+                "from_canon": json.dumps(element_book),
+                "from_yours": json.dumps(element_yours),
                 "invented": json.dumps(list(element.invented)),
                 # Which cluster minted it, so delete can find its siblings and
                 # a reader can ask what a scene brought into the world.
@@ -542,6 +597,7 @@ def expand(
     invented,
     from_context,
     sources,
+    from_yours=(),
     anchor: str | None = None,
     model: str = "",
     log_path: Path | None = None,
@@ -561,6 +617,7 @@ def expand(
     ANCHORING IS OPTIONAL AND OFF BY DEFAULT. A character's write-up is not an
     episode: putting it in the running order would tell the table to play it.
     """
+    book, yours = split_by_origin([*from_canon, *from_yours], sources)  # as in `write`
     row = tx.run(
         "MATCH (e:Entity {id:$id, plane:$plane, campaign:$slug}) "
         "RETURN e.name AS name, e.kind AS kind",
@@ -584,7 +641,8 @@ def expand(
         CREATE (s:Section {
             id:$id, heading:$heading, text:$body, generated_body:$generated,
             plane:$plane, campaign:$slug, kind:$kind, model:$model,
-            from_canon:$from_canon, invented:$invented, from_context:$from_context,
+            from_canon:$from_canon, from_yours:$from_yours,
+            invented:$invented, from_context:$from_context,
             edited:$edited, expands:$entity
         })
         MERGE (c)-[:HAS_SECTION]->(s)
@@ -593,7 +651,8 @@ def expand(
             "slug": slug, "id": section_id, "heading": name, "body": body,
             "generated": generated_body, "plane": CAMPAIGN_PLANE, "kind": kind,
             "model": model,
-            "from_canon": json.dumps(list(from_canon or ())),
+            "from_canon": json.dumps(book),
+            "from_yours": json.dumps(yours),
             "invented": json.dumps(list(invented or ())),
             "from_context": json.dumps(list(from_context or ())),
             "edited": body.strip() != generated_body.strip(),
