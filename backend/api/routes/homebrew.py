@@ -21,10 +21,10 @@ the client's word for it.
 from __future__ import annotations
 
 import logging
-from typing import Literal
-
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from backend.agents.generator import KINDS, SHAPES
 
 from backend.campaign import homebrew, store
 from backend.campaign.chain import move_plan, position_for, remove_plan, walk
@@ -36,7 +36,12 @@ router = APIRouter()
 
 class StoreRequest(BaseModel):
     campaign: str
-    kind: Literal["quest", "npc", "monster", "scene"]
+    #: VALIDATED AGAINST THE GENERATOR'S OWN SET, never a literal repeated
+    #: here. This was `Literal["quest", "npc", "monster", "scene"]` in three
+    #: separate files while `KINDS` was the source of truth in a fourth -- and
+    #: it bit exactly where predicted: fleshing out a `location` was rejected
+    #: by a schema that had never heard of element kinds.
+    kind: str
     title: str
     body: str
     #: What the model wrote before the DM touched it. Kept beside `body` so
@@ -51,6 +56,13 @@ class StoreRequest(BaseModel):
     #: book at all.
     anchor: str | None = None
     model: str = ""
+
+    @field_validator("kind")
+    @classmethod
+    def _askable(cls, value: str) -> str:
+        if value not in KINDS:
+            raise ValueError(f"unknown kind {value!r}; expected one of {sorted(KINDS)}")
+        return value
 
 
 class ClusterRequest(StoreRequest):
@@ -375,6 +387,24 @@ class ExpandRequest(StoreRequest):
 
     entity_id: str
 
+    @field_validator("kind")
+    @classmethod
+    def _askable(cls, value: str) -> str:
+        # OVERRIDES the parent's validator by carrying the SAME NAME. Pydantic
+        # collects validators across the MRO, so a differently named one here
+        # would run BESIDE the parent's rather than instead of it -- and the
+        # narrower rule would still reject a location.
+        #
+        # Wider than `StoreRequest`, deliberately. `KINDS` is what a DM may ask
+        # for cold; a cluster also mints locations, items and lore, and every
+        # one of those is a thing to flesh out. `SHAPES` is exactly the set the
+        # generator has a prompt for.
+        if value not in SHAPES:
+            raise ValueError(
+                f"unknown kind {value!r}; expected one of {sorted(SHAPES)}"
+            )
+        return value
+
 
 @router.get("/elements")
 def elements(campaign: str, unwritten: bool = False) -> dict:
@@ -409,6 +439,103 @@ def elements(campaign: str, unwritten: bool = False) -> dict:
         "elements": rows,
         "unwritten": sum(1 for r in rows if not r["own_section"]),
     }
+
+
+class DraftRequest(BaseModel):
+    campaign: str
+    entity_id: str
+    model: str = ""
+    #: Anything the DM wants respected that is in no book -- what happened at
+    #: the table since this thing was minted.
+    note: str = ""
+
+
+@router.post("/draft-expansion")
+async def draft_expansion(request: DraftRequest) -> dict:
+    """Write a draft for something the campaign already holds. Stores nothing.
+
+    THE ELEMENT'S OWN RECORD IS THE CONTEXT. A stub knows its kind, its role
+    and the scene that introduced it, and handing that to the generator is the
+    difference between "write me an NPC" and "write me THIS NPC" -- which is
+    the whole reason the record is stored rather than left in the prose.
+
+    A separate endpoint from `/lab/generate` because the two differ in what
+    they may produce: that one mints, this one describes something that
+    already exists, and a card that confused them would offer Store on a path
+    that raises `AlreadyStored`.
+    """
+    from backend.agents import canon_context, generator
+    from backend.canon.retrieval import CanonRetriever
+    from backend.core.config import settings
+
+    with read_only_session() as session:
+        row = session.run(
+            """
+            MATCH (e:Entity {plane:'campaign', id:$id, campaign:$c})
+            OPTIONAL MATCH (root:Section {id:e.cluster})
+            OPTIONAL MATCH (own:Section {expands:e.id})
+            RETURN e.name AS name, e.kind AS kind, e.role AS role,
+                   root.heading AS introduced_in, root.text AS scene,
+                   own.id AS own_section
+            """,
+            {"id": request.entity_id, "c": request.campaign},
+        ).single()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no {request.entity_id!r} here")
+        element = dict(row)
+        found = {c.slug: c for c in store.read_campaigns(session)}
+        campaign = found.get(request.campaign)
+
+    if element["own_section"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{element['name']} already has a write-up. Delete it first if "
+                "you want a new one."
+            ),
+        )
+
+    book = (campaign.books[0] if campaign and campaign.books else "cos")
+    retriever = CanonRetriever(book=book, campaign=request.campaign)
+    retrieval = retriever.retrieve(element["name"])
+
+    told = [f"{element['name']} is {element['role'] or 'something this table made'}"]
+    if element["introduced_in"]:
+        told.append(f"introduced in {element['introduced_in']}")
+    if element["scene"]:
+        told.append(f"which reads: {element['scene'][:400]}")
+    if request.note.strip():
+        told.append(request.note.strip())
+
+    model = request.model or settings.openai_model
+    drafted = await generator.generate(
+        _client(),
+        kind=element["kind"] or "lore",
+        subject=element["name"],
+        retrieval=retrieval,
+        depth=canon_context.Depth(),
+        model=model,
+        context=generator.GenerationContext(
+            entities=(element["name"],), note=". ".join(told) + "."
+        ),
+    )
+    anchor, chapters = canon_context.suggest_anchor(retrieval)
+    return drafted.as_dict() | {
+        "model": model,
+        # The card routes Store to `/expand` on seeing this, so a draft about
+        # an existing thing can never take the minting path.
+        "expands": request.entity_id,
+        "anchor": anchor,
+        "relevant_chapters": list(chapters),
+    }
+
+
+def _client():
+    from openai import AsyncOpenAI
+
+    from backend.core.config import settings
+
+    return AsyncOpenAI(api_key=settings.openai_api_key)
 
 
 @router.post("/expand")

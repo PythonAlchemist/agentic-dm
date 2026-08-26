@@ -290,3 +290,49 @@ class TestDraftCardsReachTheReader:
         from backend.agents.dm_agent import DMResponse
 
         assert DMResponse(message="hello").generations == []
+
+
+class TestTheKindSetIsNeverRepeated:
+    """`KINDS` is the source of truth and was copied into three schemas.
+
+    THE DEFECT THIS CLOSES, predicted and then hit. Three files carried
+    `Literal["quest", "npc", "monster", "scene"]` while `generator.KINDS` was
+    the authority in a fourth. Adding element kinds broke exactly where the
+    copies were: fleshing out a `location` came back 422 from a schema that
+    had never heard of one.
+    """
+
+    def test_a_cold_ask_is_limited_to_what_a_dm_may_request(self, client):
+        """`location`, `item` and `lore` are minted by a cluster and then
+        fleshed out. Nobody asks the chat for a bare piece of lore."""
+        assert client.post(
+            "/api/lab/generate", json={"kind": "lore", "subject": "x"}
+        ).status_code == 422
+
+    def test_every_askable_kind_is_accepted(self, client):
+        from backend.agents.generator import KINDS
+
+        for kind in KINDS:
+            body = {"kind": kind, "subject": "a thing"}
+            assert client.post("/api/lab/generate", json=body).status_code != 422, kind
+
+    def test_no_schema_annotates_kind_with_a_literal(self):
+        """Would fail if anyone re-hardcoded the set into an annotation.
+
+        Checked as ANNOTATIONS via the AST, not as text: the comment recording
+        this defect quotes the literal it warns about, and a substring search
+        failed on its own explanation -- the second time in this suite that a
+        purity check has been fooled by the prose describing it.
+        """
+        import ast
+        from pathlib import Path
+
+        for name in ("backend/api/routes/lab.py", "backend/api/routes/homebrew.py"):
+            tree = ast.parse(Path(name).read_text())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.AnnAssign):
+                    continue
+                target = node.target
+                if isinstance(target, ast.Name) and target.id == "kind":
+                    rendered = ast.unparse(node.annotation)
+                    assert "Literal" not in rendered, f"{name}: kind is {rendered}"

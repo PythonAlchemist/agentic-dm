@@ -16,7 +16,7 @@ import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.agents import canon_context, generator
 from backend.agents.dm_agent import DMAgent, DMResponse
@@ -73,12 +73,26 @@ class ChatRequest(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    kind: Literal["quest", "npc", "monster", "scene"]
+    """A cold ask. `kind` is checked against the generator's own `KINDS`,
+    which is what a DM may request outright -- narrower than what `expand`
+    accepts, because a location or a piece of lore is minted by a cluster and
+    then fleshed out, never asked for bare."""
+
+    kind: str  # validated against `generator.KINDS`, never repeated here
     subject: str
     book: str = "cos"
     campaign: str | None = None
     model: Optional[str] = None
     depth: Depth = Field(default_factory=Depth)
+
+    @field_validator("kind")
+    @classmethod
+    def _askable(cls, value: str) -> str:
+        if value not in generator.KINDS:
+            raise ValueError(
+                f"unknown kind {value!r}; expected one of {sorted(generator.KINDS)}"
+            )
+        return value
 
 
 @router.get("/config")

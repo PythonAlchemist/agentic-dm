@@ -610,3 +610,33 @@ class TestFleshingOutAStub:
                     from_context=[], sources=[], anchor=None,
                 )
             )
+
+
+class TestExpandAcceptsWhatOnlyAClusterCanMint:
+    """`expand` is wider than `store`, and the two must not share one rule."""
+
+    def test_an_element_only_kind_expands(self):
+        from backend.api.routes.homebrew import ExpandRequest
+
+        request = ExpandRequest(
+            campaign="c", entity_id="hb:c:x", kind="location",
+            title="t", body="b", invented=["y"],
+        )
+        assert request.kind == "location"
+
+    def test_the_same_kind_cannot_be_stored_cold(self):
+        from backend.api.routes.homebrew import StoreRequest
+
+        with pytest.raises(ValueError):
+            StoreRequest(campaign="c", kind="location", title="t", body="b")
+
+    def test_the_override_replaces_rather_than_adds(self):
+        """Pydantic collects validators across the MRO, so a differently NAMED
+        validator on the subclass runs beside the parent's instead of instead
+        of it -- and the narrower rule still rejects a location."""
+        from backend.api.routes.homebrew import ExpandRequest, StoreRequest
+
+        assert "location" not in str(StoreRequest.model_fields)
+        ExpandRequest(
+            campaign="c", entity_id="hb:c:x", kind="lore", title="t", body="b"
+        )

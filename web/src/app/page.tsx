@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChatPane } from '@/components/ChatPane'
 import { Controls } from '@/components/Controls'
 import { RunningOrder } from '@/components/RunningOrder'
+import { YourMaterial } from '@/components/YourMaterial'
 import { GeneratePane } from '@/components/GeneratePane'
 import { SessionMeter, type Running } from '@/components/Meters'
 import { TabBar, TooltipProvider } from '@/components/ui'
@@ -12,6 +13,7 @@ import {
   type CampaignInfo,
   type Cost,
   type Depth,
+  type GeneratedReply,
   type LabConfig,
   type Usage,
 } from '@/lib/api'
@@ -53,6 +55,10 @@ export default function Lab() {
   //  The order is derived from the graph, never mirrored in React state: two
   //  copies of a running order are two running orders.
   const [orderVersion, setOrderVersion] = useState(0)
+  //: A draft raised from the material panel rather than from a conversation.
+  //  It lands in the chat pane as a card, so there is ONE review surface
+  //  however a draft was raised.
+  const [raised, setRaised] = useState<GeneratedReply | null>(null)
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
   const [tab, setTab] = useState<'chat' | 'generate'>('chat')
   const [running, setRunning] = useState<Running>(ZERO)
@@ -137,6 +143,11 @@ export default function Lab() {
               onDepth={setDepth}
             />
             <SessionMeter running={running} onReset={resetSession} />
+            <YourMaterial
+              campaign={campaign}
+              refreshKey={orderVersion}
+              onDraft={setRaised}
+            />
             <RunningOrder campaign={campaign} refreshKey={orderVersion} />
           </aside>
 
@@ -161,6 +172,8 @@ export default function Lab() {
                 book={book}
                 campaign={campaign}
                 onChainChanged={noteChainChanged}
+                raised={raised}
+                onRaisedHandled={() => setRaised(null)}
                 suggestion={here?.examples.ask ?? ''}
                 model={model}
                 depth={depth}

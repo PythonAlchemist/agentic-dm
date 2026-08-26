@@ -28,7 +28,11 @@ export function GenerationCard({
   onStored?: () => void
 }) {
   const [body, setBody] = useState(card.body)
-  const [anchor, setAnchor] = useState(card.anchor ?? '')
+  // AN EXPANSION STARTS UNPLACED, matching what `expand` does on the server:
+  // a character's write-up is not an episode, and defaulting it into the
+  // running order would tell the table to play "The Red Barge" as a scene. A
+  // DM can still place one deliberately.
+  const [anchor, setAnchor] = useState(card.expands ? '' : (card.anchor ?? ''))
   const [busy, setBusy] = useState(false)
   const [stored, setStored] = useState('')
   const [failed, setFailed] = useState('')
@@ -36,6 +40,10 @@ export function GenerationCard({
   const [clusterBody, setClusterBody] = useState<Record<string, unknown> | null>(null)
 
   const isCluster = (card.elements?.length ?? 0) > 0
+  // A draft ABOUT something that already exists takes the expand path. The
+  // minting path would raise `AlreadyStored` -- correctly, since a second
+  // Captain Saltmarrow is not what "tell me more about him" means.
+  const isExpansion = Boolean(card.expands)
   // A collision is a question only a person can answer, so it BLOCKS the
   // write rather than resolving itself in either direction.
   const blocked = isCluster && plan !== null && !plan.storable
@@ -50,7 +58,22 @@ export function GenerationCard({
       // A cluster posts the payload the REVIEW built, with the edited body
       // laid over it -- so what is written is what was planned and shown, not
       // a second guess assembled here.
-      const result = isCluster
+      const common = {
+        campaign,
+        kind: card.kind,
+        title: card.title,
+        body,
+        generated_body: card.body,
+        from_canon: card.from_canon,
+        invented: card.invented,
+        from_context: card.from_context ?? [],
+        sources: card.sources,
+        anchor: anchor || null,
+        model: card.model,
+      }
+      const result = isExpansion
+        ? await labAPI.expand({ ...common, entity_id: card.expands })
+        : isCluster
         ? await labAPI.storeCluster({ ...(clusterBody ?? {}), body })
         : await labAPI.store({
             campaign,
@@ -146,7 +169,9 @@ export function GenerationCard({
       {campaign ? (
         <div className="mt-3 border-t border-neutral-800 pt-3">
           <label className="block text-xs text-neutral-400">
-            Where it goes in your running order
+            {card.expands
+              ? 'Where it goes in your running order (a write-up usually goes nowhere)'
+              : 'Where it goes in your running order'}
             <select
               value={anchor}
               onChange={(e) => setAnchor(e.target.value)}

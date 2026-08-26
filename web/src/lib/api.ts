@@ -151,6 +151,19 @@ export interface GeneratedReply {
   edges?: unknown[]
   /** Manifest entries thrown away, by reason. */
   manifest_dropped?: Record<string, number>
+  /** Set on a draft ABOUT something that already exists. Store routes to
+   *  `/expand`, which mints nothing -- the minting path would raise. */
+  expands?: string
+}
+
+export interface CampaignElement {
+  entity_id: string
+  name: string
+  kind: string
+  role: string | null
+  introduced_in: string | null
+  /** The section written ABOUT it. Null means it is still only a name. */
+  own_section: string | null
 }
 
 export interface ClusterElement {
@@ -220,10 +233,27 @@ async function postTo<T>(path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   })
   if (!response.ok) {
-    const detail = await response.json().catch(() => null)
-    throw new Error(detail?.detail || `${path} failed: ${response.status}`)
+    const body = await response.json().catch(() => null)
+    // A DETAIL IS NOT ALWAYS A STRING. FastAPI returns a list for a validation
+    // error and this route returns an object for a collision, and both used to
+    // reach the card as the literal text "[object Object]" -- which told a DM
+    // that something failed and nothing about what.
+    throw new Error(readableDetail(body) || `${path} failed: ${response.status}`)
   }
   return response.json()
+}
+
+function readableDetail(body: unknown): string {
+  const detail = (body as { detail?: unknown } | null)?.detail
+  if (!detail) return ''
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((entry) => (entry as { msg?: string })?.msg ?? JSON.stringify(entry))
+      .join('; ')
+  }
+  const named = detail as { message?: string }
+  return named.message ?? JSON.stringify(detail)
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
@@ -305,6 +335,21 @@ export const labAPI = {
 
   storeCluster(body: Record<string, unknown>): Promise<StoredResult> {
     return postTo<StoredResult>('/homebrew/store-cluster', body)
+  },
+
+  elements(campaign: string): Promise<{ elements: CampaignElement[]; unwritten: number }> {
+    return getJSON(`/homebrew/elements?campaign=${encodeURIComponent(campaign)}`)
+  },
+
+  draftExpansion(campaign: string, entityId: string): Promise<GeneratedReply> {
+    return postTo<GeneratedReply>('/homebrew/draft-expansion', {
+      campaign,
+      entity_id: entityId,
+    })
+  },
+
+  expand(body: Record<string, unknown>): Promise<StoredResult> {
+    return postTo<StoredResult>('/homebrew/expand', body)
   },
 
   skip(campaign: string, sectionId: string) {

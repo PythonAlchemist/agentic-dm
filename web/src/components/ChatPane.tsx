@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
-import { labAPI, type ChatReply, type Depth, type OrderRow } from '@/lib/api'
+import {
+  labAPI,
+  type ChatReply,
+  type Depth,
+  type GeneratedReply,
+  type OrderRow,
+} from '@/lib/api'
 import { GenerationCard } from './GenerationCard'
 import { CallMeter, RetrievalPanel } from './Meters'
 import { SubgraphPanel } from './SubgraphPanel'
@@ -11,6 +17,8 @@ import { SubgraphPanel } from './SubgraphPanel'
 type Turn = { question: string; reply?: ChatReply; error?: string }
 
 export function ChatPane({
+  raised,
+  onRaisedHandled,
   suggestion,
   book,
   campaign,
@@ -26,12 +34,33 @@ export function ChatPane({
   book: string
   campaign: string | null
   onChainChanged: () => void
+  /** A draft raised outside the conversation -- from the material panel --
+   *  shown in the same card as anything the chat produced. One review
+   *  surface, however a draft was asked for. */
+  raised: GeneratedReply | null
+  onRaisedHandled: () => void
   model: string
   depth: Depth
   sessionId: string
   onSpend: (reply: ChatReply) => void
 }) {
   const [turns, setTurns] = useState<Turn[]>([])
+  const [raisedCards, setRaisedCards] = useState<GeneratedReply[]>([])
+
+  // A draft raised from the material panel joins the transcript as its own
+  // entry, so the DM reviews it exactly where they review everything else.
+  //
+  // DEFERRED OUT OF THE SYNCHRONOUS EFFECT BODY: setting state straight from
+  // an effect cascades renders, and this one also clears the prop that
+  // triggered it, which is exactly the loop the rule exists to stop.
+  useEffect(() => {
+    if (!raised) return
+    const timer = setTimeout(() => {
+      setRaisedCards((prior) => [...prior, raised])
+      onRaisedHandled()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [raised, onRaisedHandled])
   // The anchor picker on a card needs the book's sections to choose from.
   // Fetched once per table rather than per card: it is the same list.
   const [order, setOrder] = useState<OrderRow[]>([])
@@ -85,7 +114,20 @@ export function ChatPane({
       <Panel defaultSize="62%" minSize="30%">
         <div className="flex h-full flex-col pr-3">
           <div className="min-h-0 flex-1 space-y-8 overflow-y-auto pr-1">
-            {turns.length === 0 && (
+            {raisedCards.map((card, index) => (
+              <div key={`raised-${index}`} className="mb-4">
+                <p className="mb-1 text-xs text-neutral-500">
+                  Drafted from your material panel — nothing is stored yet.
+                </p>
+                <GenerationCard
+                  card={card}
+                  campaign={campaign}
+                  order={campaign ? order : []}
+                  onStored={onChainChanged}
+                />
+              </div>
+            ))}
+            {turns.length === 0 && raisedCards.length === 0 && (
               <p className="text-sm leading-relaxed text-neutral-600">
                 Ask about the setting. Answers are grounded in the chapters
                 loaded into the graph, and every one is cited.

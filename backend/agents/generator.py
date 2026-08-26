@@ -49,7 +49,7 @@ KINDS = ("quest", "npc", "monster", "scene")
 #: a bare LORE node.
 ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore")
 
-_SHAPES = {
+SHAPES = {
     "quest": "a quest hook: who gives it, what it asks, what stands in the way, "
              "and what completing it changes",
     "npc": "a non-player character: name, what they do, how they behave, what "
@@ -67,7 +67,7 @@ _SHAPES = {
     # THE THREE BELOW EXIST TO FLESH OUT AN ELEMENT, not to be asked for cold.
     # A cluster mints a location, an item or a piece of lore as a name and a
     # role; these are the shapes for turning one of those stubs into something
-    # a DM can run from. They are in `_SHAPES` and NOT in `KINDS`, so the chat
+    # a DM can run from. They are in `SHAPES` and NOT in `KINDS`, so the chat
     # tool never offers "generate me a lore" while `expand` can still ask for
     # exactly that.
     "location": "a place: what a party sees on arriving, who or what is "
@@ -316,13 +316,13 @@ def build_messages(
     the same rule the accepted/proposed headings follow, applied to a source
     the generator did not have until chat could call it.
     """
-    # CHECKED AGAINST `_SHAPES`, NOT `KINDS`. The guard exists so an unknown
-    # kind cannot become an unconstrained prompt, and `_SHAPES` is exactly the
+    # CHECKED AGAINST `SHAPES`, NOT `KINDS`. The guard exists so an unknown
+    # kind cannot become an unconstrained prompt, and `SHAPES` is exactly the
     # set of shapes that exist. `KINDS` is the narrower question of what a DM
     # may ask for COLD -- `expand` fleshes out a location or a piece of lore
     # that a cluster already minted, and neither is offered as a bare request.
-    if kind not in _SHAPES:
-        raise ValueError(f"unknown kind {kind!r}; expected one of {sorted(_SHAPES)}")
+    if kind not in SHAPES:
+        raise ValueError(f"unknown kind {kind!r}; expected one of {sorted(SHAPES)}")
     shown = canon_context.apply(retrieval, depth)
     carried = context or GenerationContext()
     system = canon_context.render(shown, max_edges=depth.max_edges)
@@ -333,7 +333,7 @@ def build_messages(
         {
             "role": "user",
             "content": _INSTRUCTIONS.format(
-                shape=_SHAPES[kind],
+                shape=SHAPES[kind],
                 subject=subject,
                 # The retrieval knows which book it read; this used to name one.
                 book=retrieval.book_title or "this adventure",
