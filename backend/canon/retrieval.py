@@ -441,6 +441,71 @@ class Retrieval:
         return tuple(p.section_id for p in self.passages)
 
 
+def home_chapters_of(rows: list[dict], ids: list[str]) -> set[str]:
+    """The chapters the anchors themselves belong to.
+
+    THIS WAS ONE LINE READING THE ID, and the id was a proxy for two different
+    questions that happen to agree in a campaign book. A chapter-scoped id
+    spells its chapter as its middle segment; a book-wide one does not, and so
+    contributed nothing. Growing the anthology's exception list broke that,
+    because `Fire and Darkness` names one adventure -- correctly one thing,
+    correctly `kftgv:fire-and-darkness` -- and the rescope took away the
+    segment this read. Six questions of the form "what is the job in <named
+    adventure>", the set written to stress this very rule, lost their bonus at
+    once.
+
+    So the signals are asked apart, strongest first, and the FIRST that answers
+    for an anchor is the answer for it:
+
+    1. A chapter-scoped id names its chapter outright. Unchanged, and still
+       right for every name the anthology rule scopes.
+
+    2. A book-wide id whose slug IS a chapter's slug names that chapter -- the
+       question said the adventure's title. This is identity, not a heuristic,
+       and it is stronger than anything counting can offer: `Fire and Darkness`
+       is named THREE times in the whole book, twice in the introduction's two
+       tables and once in its own H1, so counting mentions anchors the
+       adventure to the introduction. Precisely backwards.
+
+    3. Otherwise, a strict majority of the entity's mentions. `The Golden
+       Vault` is named in all fourteen chapters and belongs to none, so
+       majority is what stops the patron every heist shares from anchoring
+       thirteen adventures at once -- the behaviour the id shape gave for free.
+       Vrakir, 18 mentions in his own adventure and 1 in a cell aboard someone
+       else's train, keeps his.
+
+    Per ENTITY rather than over the pooled rows: two anchors are two pieces of
+    evidence, and pooling lets the louder one's chapter outvote the other's
+    instead of each speaking for itself.
+    """
+    chapters = {row["chapter"] for row in rows}
+    counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        by_chapter = counts.setdefault(row["entity_id"], {})
+        chapter = row["chapter"]
+        by_chapter[chapter] = by_chapter.get(chapter, 0) + (row["occurrences"] or 0)
+
+    homes = set()
+    for entity_id in ids:
+        parts = entity_id.split(":")
+        if len(parts) >= 3:
+            homes.add(parts[1])
+            continue
+        if len(parts) == 2 and parts[1] in chapters:
+            homes.add(parts[1])
+            continue
+        by_chapter = counts.get(entity_id) or {}
+        if not by_chapter:
+            continue
+        total = sum(by_chapter.values())
+        # Ties broken by name so a re-run is stable, though a tie cannot win:
+        # the majority is strict.
+        chapter, loudest = max(by_chapter.items(), key=lambda kv: (kv[1], kv[0]))
+        if total and loudest * 2 > total:
+            homes.add(chapter)
+    return homes
+
+
 def dedupe_edges(rows: list[dict]) -> list[dict]:
     """One row per edge, whichever endpoints were asked about.
 
@@ -1147,17 +1212,11 @@ class CanonRetriever:
         variants moved this set by at most one question in either direction --
         ranking was measured, repeatedly, and is not where these misses live.
         """
-        # The chapters the anchors THEMSELVES live in, read off their ids: a
-        # chapter-scoped id spells its chapter as its middle segment, and a
-        # book-global one (`kftgv:golden-vault`) has none and contributes
-        # nothing -- which is right, since a global name is evidence about no
-        # particular chapter.
-        home_chapters = {
-            entity_id.split(":")[1] for entity_id in ids if entity_id.count(":") >= 2
-        }
+        rows = list(self._rows(session, MENTIONS, {"ids": ids}))
+        home_chapters = home_chapters_of(rows, ids)
 
         merged: dict[str, dict] = {}
-        for row in self._rows(session, MENTIONS, {"ids": ids}):
+        for row in rows:
             section_id = f"{row['chapter']}#{row['section_index']}"
             slot = merged.setdefault(
                 section_id,

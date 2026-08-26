@@ -23,6 +23,7 @@ from backend.canon.retrieval import (
     combine_passages,
     dedupe_edges,
     find_names,
+    home_chapters_of,
     is_common_noun,
 )
 from backend.canon.spine import ChapterSpine, WriteSection
@@ -947,3 +948,78 @@ class TestCampaignEdgesCannotReachCanonReads:
                 )
             ]
             assert not any(r["relationship"] == "OWNS" for r in rows), plane
+
+
+class TestWhichChapterAnAnchorBelongsTo:
+    """`home_chapters_of` decides which passages get `CHAPTER_WEIGHT`. It used
+    to be one line reading the id, which answered two different questions that
+    happen to agree in a campaign book and disagree in an anthology."""
+
+    def mention(self, entity_id: str, chapter: str, occurrences: int) -> dict:
+        return {"entity_id": entity_id, "chapter": chapter, "occurrences": occurrences}
+
+    def test_a_chapter_scoped_id_names_its_chapter(self):
+        """The original rule, unchanged: the anthology scoped this name, so the
+        middle segment is the graph already saying which chapter it belongs
+        to."""
+        rows = [self.mention("kftgv:heart-of-ashes:armory", "heart-of-ashes", 3)]
+        assert home_chapters_of(rows, ["kftgv:heart-of-ashes:armory"]) == {
+            "heart-of-ashes"
+        }
+
+    def test_naming_the_adventure_beats_counting_its_mentions(self):
+        """`Fire and Darkness` is named three times in the whole book: twice in
+        the introduction's tables and once in its own H1. Counting anchors the
+        adventure to the introduction, which is backwards -- and the six "what
+        is the job in <named adventure>" questions are the ones that ask."""
+        rows = [
+            self.mention("kftgv:fire-and-darkness", "introduction", 2),
+            self.mention("kftgv:fire-and-darkness", "fire-and-darkness", 1),
+        ]
+        assert home_chapters_of(rows, ["kftgv:fire-and-darkness"]) == {
+            "fire-and-darkness"
+        }
+
+    def test_a_name_that_is_not_a_chapter_falls_back_to_where_it_is_said(self):
+        """Vrakir: 18 mentions in his own adventure, 1 in a cell aboard someone
+        else's train. Book-wide id, no chapter named after him."""
+        rows = [
+            self.mention("kftgv:vrakir", "fire-and-darkness", 18),
+            self.mention("kftgv:vrakir", "affair-on-the-concordant-express", 1),
+        ]
+        assert home_chapters_of(rows, ["kftgv:vrakir"]) == {"fire-and-darkness"}
+
+    def test_the_patron_every_heist_shares_anchors_nothing(self):
+        """`The Golden Vault` is named in all fourteen chapters and belongs to
+        none. Without a strict majority it would anchor thirteen adventures at
+        once, which is worse than anchoring none."""
+        rows = [
+            self.mention("kftgv:golden-vault", f"heist-{n}", 6) for n in range(13)
+        ]
+        assert home_chapters_of(rows, ["kftgv:golden-vault"]) == set()
+
+    def test_half_is_not_a_majority(self):
+        """An even split is the book declining to answer, so the rule declines
+        too rather than breaking the tie on something arbitrary."""
+        rows = [
+            self.mention("cos:x", "one", 5),
+            self.mention("cos:x", "two", 5),
+        ]
+        assert home_chapters_of(rows, ["cos:x"]) == set()
+
+    def test_each_anchor_speaks_for_itself(self):
+        """Pooled rows would let a loud anchor's chapter outvote a quiet one's.
+        Two anchors are two pieces of evidence and both are heard."""
+        rows = [
+            self.mention("cos:loud", "castle", 40),
+            self.mention("cos:quiet", "village", 3),
+        ]
+        assert home_chapters_of(rows, ["cos:loud", "cos:quiet"]) == {
+            "castle",
+            "village",
+        }
+
+    def test_an_anchor_the_book_never_names_contributes_nothing(self):
+        """A resolved name with no mentions among the candidate rows. Silent,
+        not an exception: it simply has no chapter to offer."""
+        assert home_chapters_of([], ["cos:never-said"]) == set()
