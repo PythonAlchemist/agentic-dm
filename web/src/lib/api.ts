@@ -214,6 +214,9 @@ export interface ClusterPlan {
   /** Reason -> count for the ones that did not, so a card can say WHY rather
    *  than appearing to have lost them. */
   edges_dropped: Record<string, number>
+  /** Relationships the model wrote backwards, held in the direction that
+   *  would be legal. Offered, never applied. */
+  edges_reversible: { source: string; target: string; rel_type: string }[]
   storable: boolean
 }
 

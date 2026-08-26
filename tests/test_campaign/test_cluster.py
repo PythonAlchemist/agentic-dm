@@ -7,7 +7,7 @@ the thing that has to be right.
 
 import pytest
 
-from backend.campaign.cluster import plan_cluster
+from backend.campaign.cluster import edge_key, plan_cluster
 
 CAMPAIGN = "p13-home"
 
@@ -79,18 +79,19 @@ class TestDropsAreCountedAndNamed:
         assert plan.edges == ()
         assert plan.edges_dropped == {"an endpoint is not in this cluster": 1}
 
-    def test_a_type_impossible_edge_is_dropped_and_says_which_way_round(self):
+    def test_a_type_impossible_edge_is_dropped_and_says_why(self):
         """The same domain/range check canon extraction runs -- there is one
-        table, not a laxer one for material a DM wrote. Reversal is named
-        because it is one of the extractor's four measured failure modes and a
-        fixable prompt problem rather than noise."""
+        table, not a laxer one for material a DM wrote. An edge that is wrong
+        BOTH ways round is a drop; one that is merely backwards is offered
+        instead, which `TestAnEdgeWrittenBackwards` covers."""
         plan = plan_cluster(
             campaign=CAMPAIGN,
-            elements=[element("A Cutlass", kind="item"), element("A Guard")],
-            edges=[{"source": "A Cutlass", "target": "A Guard", "rel_type": "SEEKS"}],
+            elements=[element("A Cutlass", kind="item"), element("A Vault", kind="location")],
+            edges=[{"source": "A Cutlass", "target": "A Vault", "rel_type": "GAVE_QUEST"}],
         )
         assert plan.edges == ()
-        assert plan.edges_dropped == {"SEEKS: domain, would pass reversed": 1}
+        assert plan.edges_reversible == ()
+        assert plan.edges_dropped == {"GAVE_QUEST: both": 1}
 
     def test_a_type_valid_edge_between_two_of_its_own_survives(self):
         plan = plan_cluster(
@@ -309,3 +310,51 @@ class TestHomebrewSlugsMatchCanonSlugs:
         from backend.canon.writer import mint_id
 
         assert mint_id("a-chapter", name).split(":", 1)[1] == slugify(name)
+
+
+class TestAnEdgeWrittenBackwards:
+    """Four of twenty-two declared edges in a ten-subject run were legal in one
+    direction and impossible in the other. Every one was a real relationship
+    pointing the wrong way, and dropping them lost the relationship with the
+    mistake."""
+
+    ELEMENTS = [element("Wolves", kind="monster"), element("Vistani Camp", kind="location")]
+    BACKWARDS = [{"source": "Vistani Camp", "target": "Wolves", "rel_type": "THREATENS"}]
+
+    def test_it_is_offered_in_the_direction_that_would_work(self):
+        plan = plan_cluster(
+            campaign=CAMPAIGN, elements=self.ELEMENTS, edges=self.BACKWARDS,
+            root_name="Dusk", root_kind="scene",
+        )
+        assert plan.edges_reversible == (("Wolves", "Vistani Camp", "THREATENS"),)
+
+    def test_it_is_not_written_until_somebody_says_so(self):
+        """`Strahd SEEKS Ireena` and its reverse are different claims about one
+        pair. Turning an edge round is a decision, not a repair."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN, elements=self.ELEMENTS, edges=self.BACKWARDS,
+            root_name="Dusk", root_kind="scene",
+        )
+        assert plan.edges == ()
+
+    def test_accepting_it_writes_the_turned_edge(self):
+        plan = plan_cluster(
+            campaign=CAMPAIGN, elements=self.ELEMENTS, edges=self.BACKWARDS,
+            root_name="Dusk", root_kind="scene",
+            accept_reversed=frozenset({edge_key("Wolves", "Vistani Camp", "THREATENS")}),
+        )
+        assert plan.edges == (("Wolves", "Vistani Camp", "THREATENS"),)
+        assert plan.edges_reversible == ()
+
+    def test_an_edge_wrong_in_both_directions_is_still_dropped(self):
+        """Only a genuine reversal is offered. `Wolves CONNECTED_TO Dire Wolf`
+        is not a route between two places whichever way it is read."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("Wolves", kind="monster"), element("Dire Wolf", kind="monster")],
+            edges=[{"source": "Wolves", "target": "Dire Wolf", "rel_type": "CONNECTED_TO"}],
+            root_name="Dusk", root_kind="scene",
+        )
+        assert plan.edges_reversible == ()
+        assert plan.edges == ()
+        assert plan.edges_dropped == {"CONNECTED_TO: both": 1}

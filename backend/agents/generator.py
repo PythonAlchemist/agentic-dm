@@ -118,7 +118,7 @@ _CONTEXT_FIELD = """,
   "from_context": ["each detail taken from the conversation"]"""
 
 
-def vocabulary_gloss() -> str:
+def vocabulary_gloss(root_kind: str = "") -> str:
     """The writable relationships, each with what it MAY connect and what it means.
 
     BUILT FROM THE TABLE THAT JUDGES IT. `RELATIONSHIP_DOMAIN_RANGE` is what
@@ -136,7 +136,7 @@ def vocabulary_gloss() -> str:
     from backend.graph.schema import RELATIONSHIP_GLOSS, RelationshipType
 
     lines = []
-    for name in homebrew_vocabulary():
+    for name in homebrew_vocabulary(root_kind):
         pair = RELATIONSHIP_DOMAIN_RANGE.get(name)
         gloss = RELATIONSHIP_GLOSS.get(RelationshipType(name), "")
         # A type with no declared domain/range is unconstrained rather than
@@ -151,7 +151,22 @@ def vocabulary_gloss() -> str:
     return "\n".join(lines)
 
 
-def homebrew_vocabulary() -> tuple[str, ...]:
+def available_types(root_kind: str = "") -> frozenset[str]:
+    """The entity types an edge in this generation could possibly connect.
+
+    Everything a cluster may MINT, plus the generation itself -- and nothing
+    else, because `cluster._plan_edges` drops any edge reaching outside the
+    cluster, so a type that cannot appear here cannot appear in a written edge.
+    """
+    from backend.campaign.homebrew import LABELS
+
+    kinds = {LABELS[k] for k in ELEMENT_KINDS if k in LABELS}
+    if root_kind in LABELS:
+        kinds.add(LABELS[root_kind])
+    return frozenset(kinds)
+
+
+def homebrew_vocabulary(root_kind: str = "") -> tuple[str, ...]:
     """The relationship types a generation may declare between its elements.
 
     DERIVED FROM `LAYER_MAP`, exactly as `extract.layer_vocabulary` derives the
@@ -160,10 +175,40 @@ def homebrew_vocabulary() -> tuple[str, ...]:
     ones excluded, and they are excluded correctly without a hand-written
     denylist: `ATTENDED`, `PLAYS_AS`, `HAS_CLASS` and their kind are session
     bookkeeping and runtime state, not the authored world a DM invents.
+
+    THEN NARROWED TO WHAT THIS GENERATION COULD SATISFY, which is the larger
+    filter and was missing. `ELEMENT_KINDS` cannot mint a QUEST, so a scene's
+    cluster holds no node a `GAVE_QUEST` could ever point at -- and the model,
+    offered the relationship and asked to use it, aimed at the nearest NPC or
+    ITEM every time. Three of nine type failures in a ten-subject run were that
+    one shape: `Alda Arkin GAVE_QUEST Rival Crew`, `Alenka GAVE_QUEST Fortune
+    Reading`. Not a model getting it wrong so much as a prompt asking for
+    something the reply could not contain.
+
+    A `quest` generation still gets `GAVE_QUEST`, because its root IS a QUEST.
+    The vocabulary is a function of what is on the table.
     """
+    from backend.canon.constraints import RELATIONSHIP_DOMAIN_RANGE
     from backend.graph.schema import LAYER_MAP
 
-    return tuple(sorted(r.value for r, layer in LAYER_MAP.items() if layer is not None))
+    layered = sorted(r.value for r, layer in LAYER_MAP.items() if layer is not None)
+    if not root_kind:
+        return tuple(layered)
+
+    here = available_types(root_kind)
+    usable = []
+    for name in layered:
+        pair = RELATIONSHIP_DOMAIN_RANGE.get(name)
+        # No declared domain/range is unconstrained, not forbidden -- it can
+        # connect anything, so it stays.
+        if pair is None:
+            usable.append(name)
+            continue
+        domain = {t.value for t in pair[0]}
+        rng = {t.value for t in pair[1]}
+        if domain & here and rng & here:
+            usable.append(name)
+    return tuple(usable)
 
 
 #: Asked for only when a cluster was requested, and required exactly then --
@@ -183,6 +228,11 @@ _CLUSTER_RULE = """
    Name an element by its `name`; name something from the CANON passages by
    the id shown beside it, and never by an id you were not shown.
    An element you would only mention in passing is scenery -- leave it out.
+
+   AN EDGE MAY ONLY JOIN TWO THINGS ON THIS CARD -- an element you just listed,
+   or the material itself by its title. An edge naming anything else, including
+   a canon id, is DISCARDED. Elements are for naming what the book already has;
+   edges are for what this material puts together.
 
    USE ONLY THESE RELATIONSHIPS, AND ONLY BETWEEN THE TYPES SHOWN. The arrow
    is `source -> target` and the direction matters: an edge whose endpoints
@@ -360,7 +410,7 @@ def build_messages(
                 cluster_rule=(
                     _CLUSTER_RULE.format(
                         n=5 if not carried.empty else 4,
-                        vocabulary=vocabulary_gloss(),
+                        vocabulary=vocabulary_gloss(kind),
                     )
                     if cluster
                     else ""

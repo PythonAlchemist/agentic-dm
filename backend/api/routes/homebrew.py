@@ -84,6 +84,11 @@ class ClusterRequest(StoreRequest):
     #: Element names the DM kept. None means all of them, which is what a
     #: freshly generated card sends before anyone has touched it.
     approved: list[str] | None = None
+    #: Keys of backwards edges the DM said to turn round, from
+    #: `cluster.edge_key`. Empty by default: a reversed edge is a real
+    #: relationship pointing the wrong way, and which way it should point is
+    #: not something to decide on the DM's behalf.
+    accept_reversed: list[str] = Field(default_factory=list)
     #: Colliding name -> `link` or `rename`.
     resolutions: dict[str, str] = Field(default_factory=dict)
 
@@ -216,6 +221,7 @@ def _plan_for(request: ClusterRequest):
         # point at.
         root_name=request.title,
         root_kind=request.kind,
+        accept_reversed=frozenset(request.accept_reversed or ()),
         canon_aliases=aliases,
         approved=None if request.approved is None else frozenset(request.approved),
         existing_ids=existing,

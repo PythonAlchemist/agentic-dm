@@ -36,6 +36,9 @@ export function ClusterReview({
   const [rejected, setRejected] = useState<Set<string>>(new Set())
   const [renames, setRenames] = useState<Record<string, string>>({})
   const [resolutions, setResolutions] = useState<Record<string, string>>({})
+  //: Backwards edges the DM has turned round. Keyed exactly as
+  //  `cluster.edge_key` folds them, so the server agrees about which one.
+  const [turned, setTurned] = useState<Set<string>>(new Set())
   const [plan, setPlan] = useState<ClusterPlan | null>(null)
   const [failed, setFailed] = useState('')
 
@@ -59,8 +62,9 @@ export function ClusterReview({
         .filter((e) => !rejected.has(e.name))
         .map((e) => renames[e.name] ?? e.name),
       resolutions,
+      accept_reversed: [...turned],
     }),
-    [campaign, card, anchor, elements, rejected, renames, resolutions],
+    [campaign, card, anchor, elements, rejected, renames, resolutions, turned],
   )
 
   useEffect(() => {
@@ -196,6 +200,48 @@ export function ClusterReview({
                 {edge.target}
               </li>
             ))}
+          </ul>
+        </div>
+      )}
+      {/* A REAL RELATIONSHIP POINTING THE WRONG WAY. Dropping it lost the
+          relationship along with the mistake; flipping it silently would be
+          inventing a fact, since `Strahd SEEKS Ireena` and its reverse are
+          different claims. So it is offered, and a person decides -- the same
+          shape as the name collisions above. */}
+      {plan && plan.edges_reversible.length > 0 && (
+        <div className="mt-2 border-t border-neutral-800 pt-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-amber-400/80">
+            Written backwards ({plan.edges_reversible.length})
+          </div>
+          <ul className="mt-1 space-y-1 text-[11px] text-neutral-400">
+            {plan.edges_reversible.map((edge) => {
+              const key = `${edge.source.toLowerCase()}|${edge.target.toLowerCase()}|${edge.rel_type}`
+              return (
+                <li key={key} className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="text-neutral-600 line-through">
+                      {edge.target} {edge.rel_type} {edge.source}
+                    </span>
+                    {' → '}
+                    {edge.source}{' '}
+                    <span className="text-amber-300/70">{edge.rel_type}</span>{' '}
+                    {edge.target}
+                  </span>
+                  <button
+                    onClick={() =>
+                      setTurned((prior) => {
+                        const next = new Set(prior)
+                        next.add(key)
+                        return next
+                      })
+                    }
+                    className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 hover:bg-neutral-800"
+                  >
+                    turn it round
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}

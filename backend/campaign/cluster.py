@@ -119,6 +119,11 @@ class ClusterPlan:
     #: dropped" says nothing about whether the model or the rules were at
     #: fault, and this is the count the card prints.
     edges_dropped: dict = field(default_factory=dict)
+    #: Relationships the model wrote BACKWARDS, held in the direction that
+    #: would be legal. Offered rather than applied: `Strahd SEEKS Ireena` and
+    #: `Ireena SEEKS Strahd` are different claims about the same two nodes, so
+    #: flipping one silently would be inventing a fact. A person is asked.
+    edges_reversible: tuple[tuple[str, str, str], ...] = ()
 
     @property
     def storable(self) -> bool:
@@ -155,6 +160,10 @@ class ClusterPlan:
                 {"source": s, "target": t, "rel_type": r} for s, t, r in self.edges
             ],
             "edges_dropped": dict(self.edges_dropped),
+            "edges_reversible": [
+                {"source": s, "target": t, "rel_type": r}
+                for s, t, r in self.edges_reversible
+            ],
             "storable": self.storable,
         }
 
@@ -166,6 +175,7 @@ def plan_cluster(
     edges=(),
     root_name: str = "",
     root_kind: str = "",
+    accept_reversed: frozenset[str] = frozenset(),
     canon_aliases: frozenset[tuple[str, str]] = frozenset(),
     approved: frozenset[str] | None = None,
     existing_ids: frozenset[str] = frozenset(),
@@ -256,7 +266,9 @@ def plan_cluster(
             )
         )
 
-    kept_edges, edges_dropped = _plan_edges(edges, planned, root_name, root_kind)
+    kept_edges, edges_dropped, reversible = _plan_edges(
+        edges, planned, root_name, root_kind, accept_reversed
+    )
     return ClusterPlan(
         campaign=campaign,
         elements=tuple(planned),
@@ -265,12 +277,23 @@ def plan_cluster(
         dropped=dropped,
         edges=kept_edges,
         edges_dropped=edges_dropped,
+        edges_reversible=reversible,
     )
 
 
+def edge_key(source: str, target: str, rel_type: str) -> str:
+    """How a reversed edge is named when a DM accepts one. Folded, so the key
+    the card sends back cannot miss on capitalisation the model chose."""
+    return f"{source.casefold()}|{target.casefold()}|{rel_type.upper()}"
+
+
 def _plan_edges(
-    edges, planned: list[PlannedElement], root_name: str, root_kind: str
-) -> tuple[tuple[tuple[str, str, str], ...], dict]:
+    edges,
+    planned: list[PlannedElement],
+    root_name: str,
+    root_kind: str,
+    accept_reversed: frozenset[str] = frozenset(),
+) -> tuple[tuple[tuple[str, str, str], ...], dict, tuple[tuple[str, str, str], ...]]:
     """Which declared relationships are writable. `(kept, dropped_by_reason)`.
 
     THE TYPE CHECK IS THE SAME ONE CANON RUNS. `report_edges` reads
@@ -286,6 +309,16 @@ def _plan_edges(
     A REJECTED ELEMENT TAKES ITS EDGES WITH IT. `planned` is already the
     approved set, so unticking the bosun silently removes the relationships
     that named him -- which is what unticking him means.
+
+    A BACKWARDS EDGE IS OFFERED, NOT FLIPPED. Measured across twenty-two
+    declared edges, four were type-impossible one way round and legal the
+    other -- `Vistani Camp THREATENS Wolves`, `Church of Barovia LOCATED_IN
+    Kolyan Indirovich`. Every one of them was a real relationship pointing the
+    wrong way. Turning them round automatically would still be guessing:
+    `Strahd SEEKS Ireena` and its reverse are different claims about one pair,
+    and the extractor lists reversal among its four measured failure modes for
+    that reason. So the legal direction is offered and a person accepts it,
+    which is the shape the name-collision resolution already uses.
     """
     dropped: dict[str, int] = {}
 
@@ -319,17 +352,28 @@ def _plan_edges(
 
     report = report_edges(nodes, candidates)
     bad = {violation.edge_index for violation in report.violations}
+    reversible: list[tuple[str, str, str]] = []
+    accepted: list[tuple[str, str, str]] = []
     for violation in report.violations:
+        if violation.reversal_would_pass:
+            edge = candidates[violation.edge_index]
+            turned = (edge.target_name, edge.source_name, edge.rel_type)
+            (accepted if edge_key(*turned) in accept_reversed else reversible).append(
+                turned
+            )
+            continue
         # NAMED, not counted as one lump. "SEEKS wants an NPC, got an ITEM" is
         # a different thing to know than "6 dropped", and reversal is one of
         # the extractor's four measured failure modes -- so a reversed edge
         # says so, since that is a fixable prompt problem rather than noise.
-        turn = ", would pass reversed" if violation.reversal_would_pass else ""
-        drop(f"{violation.rel_type}: {violation.reason}{turn}")
+        drop(f"{violation.rel_type}: {violation.reason}")
 
     kept = tuple(
-        (edge.source_name, edge.target_name, edge.rel_type)
-        for index, edge in enumerate(candidates)
-        if index not in bad
+        [
+            (edge.source_name, edge.target_name, edge.rel_type)
+            for index, edge in enumerate(candidates)
+            if index not in bad
+        ]
+        + accepted
     )
-    return kept, dropped
+    return kept, dropped, tuple(reversible)
