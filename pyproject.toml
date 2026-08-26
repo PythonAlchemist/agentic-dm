@@ -23,8 +23,12 @@ dependencies = [
     "spacy>=3.8.0",
     "rapidfuzz>=3.0.0",
     "pyahocorasick>=2.0.0",
-    # Agent Protocol
-    "mcp>=1.19.0",
+    # Agent Protocol. HELD BELOW 2.0: mcp 2.x renamed `FastMCP` to `MCPServer`
+    # and `backend/mcp-server/server.py` is written against the v1 API. 1.28.1
+    # is the patched release for every advisory open against it, so the ceiling
+    # costs nothing but the migration -- which is a refactor, not a bump, and
+    # is not what a dependency pass should smuggle in.
+    "mcp>=1.28.1,<2",
     # Utilities
     "pyyaml>=6.0.3",
     "httpx>=0.28.0",
