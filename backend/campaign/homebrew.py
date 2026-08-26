@@ -269,7 +269,7 @@ def write(
             plane:$plane, campaign:$slug, kind:$kind, model:$model,
             from_canon:$from_canon, from_yours:$from_yours,
             invented:$invented, from_context:$from_context,
-            edited:$edited
+            edited:$edited, expands:$entity
         })
         MERGE (c)-[:HAS_SECTION]->(s)
         """,
@@ -287,6 +287,12 @@ def write(
             "invented": json.dumps(list(invented or ())),
             "from_context": json.dumps(list(from_context or ())),
             "edited": body.strip() != generated_body.strip(),
+            # SET BY BOTH WRITERS, so `expands` means "the section that is this
+            # entity's own prose" rather than "the section `expand` made".
+            # Reading it as the second told a DM that seven scenes they had
+            # written up were "still just a name", offered to flesh out prose
+            # that already existed, and left those rows unopenable.
+            "entity": entity_id,
         },
     )
     tx.run(
