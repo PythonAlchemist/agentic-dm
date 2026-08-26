@@ -344,3 +344,140 @@ class TestTheSceneKind:
             generator.build_messages(
                 "sea-shanty", "x", Retrieval(question="x"), canon_context.Depth()
             )
+
+
+class TestTheManifestContract:
+    """A generation may declare what it contains, and is held to it.
+
+    THE AUTHOR DECLARES RATHER THAN A READER REDISCOVERING. The call that
+    writes "Captain Saltmarrow commands the Red Barge" already holds that edge.
+    Asking a second model to find it again in the prose is a lossy round-trip:
+    book extraction exists because the author is unavailable, and here the
+    author is the same call.
+    """
+
+    def _retrieval(self):
+        return Retrieval(
+            question="a sea battle",
+            book_title="Keys from the Golden Vault",
+            path=PATH_GRAPH,
+            passages=(
+                Passage(
+                    section_id="kftgv:prisoner-13#7", chapter="prisoner-13",
+                    chapter_index=3, section="Trek to the Prison", section_index=7,
+                    text="The voyage north takes eight days.", occurrences=1,
+                    entity_ids=(),
+                ),
+            ),
+        )
+
+    def test_a_cluster_is_asked_for_only_when_requested(self):
+        plain = generator.build_messages(
+            "scene", "x", self._retrieval(), canon_context.Depth()
+        )[1]["content"]
+        clustered = generator.build_messages(
+            "scene", "x", self._retrieval(), canon_context.Depth(), cluster=True
+        )[1]["content"]
+        assert "elements" not in plain
+        assert "elements" in clustered and "edges" in clustered
+
+    def test_the_offered_vocabulary_is_in_the_prompt(self):
+        """A model told to pick from a vocabulary must be shown it."""
+        clustered = generator.build_messages(
+            "scene", "x", self._retrieval(), canon_context.Depth(), cluster=True
+        )[1]["content"]
+        assert "LOCATED_IN" in clustered and "GUARDS" in clustered
+
+    def test_a_cluster_response_missing_elements_is_rejected(self):
+        _, error = generator.parse(
+            json.dumps({"from_canon": [], "invented": []}), expect_cluster=True
+        )
+        assert "elements" in error
+
+    def test_empty_lists_are_legal(self):
+        """A generation that contains nothing worth minting is not a failure,
+        and is what every pre-cluster generation looks like."""
+        data, error = generator.parse(
+            json.dumps({"from_canon": [], "invented": [], "elements": [], "edges": []}),
+            expect_cluster=True,
+        )
+        assert error == "" and data["elements"] == []
+
+
+class TestTheVocabularyIsDerived:
+    def test_it_comes_from_the_layer_map(self):
+        from backend.graph.schema import LAYER_MAP
+
+        expected = {r.value for r, layer in LAYER_MAP.items() if layer is not None}
+        assert set(generator.homebrew_vocabulary()) == expected
+
+    def test_session_bookkeeping_is_excluded_without_a_denylist(self):
+        """`ATTENDED` and `PLAYS_AS` are runtime state, not authored world.
+        They fall out because `LAYER_MAP` maps them to no layer -- nothing here
+        lists them, so nothing here can forget to."""
+        offered = set(generator.homebrew_vocabulary())
+        assert not offered & {"ATTENDED", "PLAYS_AS", "HAS_CLASS", "HAS_RACE"}
+        assert "LOCATED_IN" in offered and "GUARDS" in offered
+
+
+class TestBadManifestEntriesAreCountedNotSwallowed:
+    """Dropped, tallied by reason, never coerced to the nearest valid thing."""
+
+    def test_an_unoffered_element_kind_is_dropped_and_counted(self):
+        _, _, dropped = generator.sift_manifest(
+            {"elements": [{"kind": "ship", "name": "The Barge"}], "edges": []}
+        )
+        assert sum(dropped.values()) == 1 and any("ship" in r for r in dropped)
+
+    def test_an_out_of_vocabulary_relationship_is_dropped(self):
+        _, edges, dropped = generator.sift_manifest(
+            {"elements": [], "edges": [{"source": "a", "target": "b", "rel_type": "PLAYS_AS"}]}
+        )
+        assert edges == () and any("PLAYS_AS" in r for r in dropped)
+
+    def test_a_self_edge_is_dropped(self):
+        _, edges, dropped = generator.sift_manifest(
+            {"elements": [], "edges": [{"source": "a", "target": "A", "rel_type": "KNOWS"}]}
+        )
+        assert edges == () and "edge points at itself" in dropped
+
+    def test_a_relationship_is_accepted_case_insensitively(self):
+        """A model writing `located_in` meant the type; that is spelling, not a
+        different claim."""
+        _, edges, _ = generator.sift_manifest(
+            {"elements": [], "edges": [{"source": "a", "target": "b", "rel_type": "located_in"}]}
+        )
+        assert edges[0]["rel_type"] == "LOCATED_IN"
+
+    def test_nothing_is_coerced_to_a_near_miss(self):
+        """`LOCATED` is not `LOCATED_IN`. Guessing what a model meant is how a
+        wrong edge becomes indistinguishable from a checked one."""
+        _, edges, dropped = generator.sift_manifest(
+            {"elements": [], "edges": [{"source": "a", "target": "b", "rel_type": "LOCATED"}]}
+        )
+        assert edges == () and dropped
+
+
+class TestClustersDoNotChangeWhatExisted:
+    """The compat pin: every generation that worked yesterday is byte-identical."""
+
+    def test_the_messages_are_unchanged_without_a_cluster(self):
+        retrieval = Retrieval(
+            question="a guard", book_title="Curse of Strahd", path=PATH_GRAPH,
+            passages=(
+                Passage(section_id="cos:c#0", chapter="c", chapter_index=0,
+                        section="S", section_index=0, text="t", occurrences=1,
+                        entity_ids=()),
+            ),
+        )
+        depth = canon_context.Depth()
+        before = generator.build_messages("npc", "a guard", retrieval, depth)
+        after = generator.build_messages("npc", "a guard", retrieval, depth, None, False)
+        assert before == after
+        assert "{cluster_rule}" not in before[1]["content"]
+
+    def test_a_plain_parse_ignores_the_manifest_entirely(self):
+        data, error = generator.parse(
+            json.dumps({"from_canon": [], "invented": []})
+        )
+        assert error == "" and "elements" not in data

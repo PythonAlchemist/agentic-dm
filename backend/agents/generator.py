@@ -30,7 +30,7 @@ automate exactly that kind of judgment.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from backend.agents import canon_context
@@ -40,6 +40,14 @@ from backend.core.pricing import Usage, estimate
 #: What can be generated. A closed set, checked before anything reaches a model:
 #: an unknown kind would otherwise become an unconstrained prompt.
 KINDS = ("quest", "npc", "monster", "scene")
+
+#: What a CLUSTER may declare as a member. A separate closed set from `KINDS`,
+#: because these are different questions: `KINDS` is what a DM may ask for on
+#: its own, `ELEMENT_KINDS` is what a generation may say it contains. A
+#: location, an item and a piece of lore are worth minting when a quest names
+#: them and are not worth a generator of their own -- nobody asks the chat for
+#: a bare LORE node.
+ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore")
 
 _SHAPES = {
     "quest": "a quest hook: who gives it, what it asks, what stands in the way, "
@@ -73,14 +81,14 @@ RULES, and the second is the one that matters:
    and detail you supplied -- goes in `invented`. A DM will act on this at a
    table, and cannot afford to mistake your invention for the book's text.
 3. If the passages are thin or absent, invent more and say so by putting more in
-   `invented`. Do not pad `from_canon` to look better sourced.{context_rule}
+   `invented`. Do not pad `from_canon` to look better sourced.{context_rule}{cluster_rule}
 
 Return ONLY JSON, of this shape:
 
 {{"title": "...",
   "body": "the generated material, written for a DM to read aloud or run from",
   "from_canon": [{{"claim": "what the book establishes", "cite": "[1]"}}],
-  "invented": ["each detail you supplied"]{context_field}}}"""
+  "invented": ["each detail you supplied"]{context_field}{cluster_field}}}"""
 
 #: Appended to the rules ONLY when a conversation handed context over.
 #:
@@ -95,6 +103,48 @@ _CONTEXT_RULE = """
 
 _CONTEXT_FIELD = """,
   "from_context": ["each detail taken from the conversation"]"""
+
+
+def homebrew_vocabulary() -> tuple[str, ...]:
+    """The relationship types a generation may declare between its elements.
+
+    DERIVED FROM `LAYER_MAP`, exactly as `extract.layer_vocabulary` derives the
+    extractor's, so one table feeds both pipelines and adding a type cannot
+    leave either silently unaware of it. The types mapped to NO layer are the
+    ones excluded, and they are excluded correctly without a hand-written
+    denylist: `ATTENDED`, `PLAYS_AS`, `HAS_CLASS` and their kind are session
+    bookkeeping and runtime state, not the authored world a DM invents.
+    """
+    from backend.graph.schema import LAYER_MAP
+
+    return tuple(sorted(r.value for r, layer in LAYER_MAP.items() if layer is not None))
+
+
+#: Asked for only when a cluster was requested, and required exactly then --
+#: `_CONTEXT_RULE`'s rule, for `_CONTEXT_RULE`'s reason: a list that is usually
+#: empty is one a model learns to leave empty on the occasion it matters.
+#:
+#: THE AUTHOR DECLARES, RATHER THAN A READER REDISCOVERING. A generation that
+#: writes "Captain Saltmarrow commands the Red Barge" already holds that edge;
+#: asking a second model to find it again in the prose is a lossy round-trip
+#: with nothing gained. Book extraction exists because the author is
+#: unavailable. Here the author is the same call.
+_CLUSTER_RULE = """
+{n}. LIST WHAT THIS CONTAINS. Anything the material names that a DM would want
+   as its own thing -- a place, a person, a creature, an object, a piece of
+   lore -- goes in `elements`, each with its OWN three provenance lists, split
+   by the same rule as above. Relationships between them go in `edges`.
+   Name an element by its `name`; name something from the CANON passages by
+   the id shown beside it, and never by an id you were not shown. Use only
+   these relationship types: {vocabulary}.
+   An element you would only mention in passing is scenery -- leave it out."""
+
+_CLUSTER_FIELD = """,
+  "elements": [{{"kind": "npc|monster|location|item|lore", "name": "...",
+                "role": "what it is here in one line",
+                "from_canon": [], "invented": ["..."]}}],
+  "edges": [{{"source": "...", "target": "...", "rel_type": "LOCATED_IN",
+             "provenance": "canon|context|invented", "cite": "[1]"}}]"""
 
 
 @dataclass(frozen=True)
@@ -161,6 +211,18 @@ class Generated:
     #: Sits here rather than beside its two siblings only because it carries a
     #: default and they do not; read it as the third of three.
     from_context: tuple[str, ...] = ()
+    #: What this generation says it contains, each with its own provenance
+    #: split, and the relationships it declares between them. Empty for a
+    #: single-artifact generation, which is every one that existed before
+    #: clusters -- so an empty manifest is the backward-compatible case rather
+    #: than a failure.
+    elements: tuple[dict, ...] = ()
+    edges: tuple[dict, ...] = ()
+    #: Manifest entries thrown away and WHY, keyed by reason. Counted rather
+    #: than dropped silently, and non-fatal: a bad element is not worth losing
+    #: a generation over, and the counts are what the reliability measurement
+    #: is made of.
+    manifest_dropped: dict = field(default_factory=dict)
     retrieval: dict | None = None
     #: Set when the model returned something that would not parse. The raw text
     #: travels with it: a malformed response is evidence about the prompt, and
@@ -177,6 +239,9 @@ class Generated:
             "from_canon": list(self.from_canon),
             "invented": list(self.invented),
             "from_context": list(self.from_context),
+            "elements": list(self.elements),
+            "edges": list(self.edges),
+            "manifest_dropped": dict(self.manifest_dropped),
             "sources": list(self.sources),
             "usage": self.usage,
             "cost": self.cost,
@@ -192,6 +257,7 @@ def build_messages(
     retrieval: Retrieval,
     depth: canon_context.Depth,
     context: GenerationContext | None = None,
+    cluster: bool = False,
 ) -> list[dict]:
     """The exact messages the model will see. Pure, so a test can read them.
 
@@ -222,12 +288,26 @@ def build_messages(
                 # it, and this one has to mean something the day it is used.
                 context_rule=_CONTEXT_RULE if not carried.empty else "",
                 context_field=_CONTEXT_FIELD if not carried.empty else "",
+                # Numbered after whatever came before it, so the rules read as
+                # a list rather than jumping from 3 to 4 with a gap where the
+                # context rule would have been.
+                cluster_rule=(
+                    _CLUSTER_RULE.format(
+                        n=5 if not carried.empty else 4,
+                        vocabulary=", ".join(homebrew_vocabulary()),
+                    )
+                    if cluster
+                    else ""
+                ),
+                cluster_field=_CLUSTER_FIELD if cluster else "",
             ),
         },
     ]
 
 
-def parse(text: str, *, expect_context: bool = False) -> tuple[dict, str]:
+def parse(
+    text: str, *, expect_context: bool = False, expect_cluster: bool = False
+) -> tuple[dict, str]:
     """The model's JSON, or an empty result and a reason.
 
     Tolerant of a fenced code block, because models wrap JSON in one often
@@ -256,12 +336,81 @@ def parse(text: str, *, expect_context: bool = False) -> tuple[dict, str]:
     # requested.
     if expect_context:
         required.append("from_context")
+    # STRUCTURE IS FATAL, ENTRIES ARE COUNTED. A response with no `elements`
+    # key at all did not follow the contract and is rejected like a missing
+    # `invented`; a single malformed element inside it is dropped and tallied,
+    # because losing a whole generation over one bad line would cost more than
+    # it saves and would hide the very counts the measurement needs.
+    if expect_cluster:
+        required.extend(("elements", "edges"))
     for field_name in required:
         if field_name not in data:
-            return {}, (
-                f"response omitted {field_name!r}, so its sources are not separated"
+            why = (
+                "so what it contains is undeclared"
+                if field_name in ("elements", "edges")
+                else "so its sources are not separated"
             )
+            return {}, f"response omitted {field_name!r}, {why}"
     return data, ""
+
+
+def sift_manifest(data: dict) -> tuple[tuple[dict, ...], tuple[dict, ...], dict]:
+    """Keep the manifest entries that are usable; count the rest by reason.
+
+    Returns `(elements, edges, dropped)`. Pure and separate from `parse` so the
+    rules can be read and tested without a model, and so the counts are
+    available to the reliability measurement rather than buried in a log.
+
+    NOTHING HERE INVENTS A CORRECTION. An element with an unknown kind is
+    dropped, not coerced to the nearest one; an edge naming a type outside the
+    vocabulary is dropped, not mapped to something similar. Guessing what a
+    model meant is how a wrong edge becomes indistinguishable from a checked
+    one -- the rule the whole proposed layer exists to respect.
+    """
+    dropped: dict[str, int] = {}
+
+    def drop(reason: str) -> None:
+        dropped[reason] = dropped.get(reason, 0) + 1
+
+    vocabulary = set(homebrew_vocabulary())
+    elements, names = [], set()
+    for entry in data.get("elements") or ():
+        if not isinstance(entry, dict):
+            drop("element not an object")
+            continue
+        name = str(entry.get("name") or "").strip()
+        kind = str(entry.get("kind") or "").strip().lower()
+        if not name:
+            drop("element without a name")
+        elif kind not in ELEMENT_KINDS:
+            drop(f"element kind {kind!r} not offered")
+        elif name.casefold() in names:
+            # Two elements of one name in one cluster is the model saying the
+            # same thing twice, not two things -- unlike two SEPARATE
+            # generations a DM named alike, which `AlreadyStored` refuses.
+            drop("element named twice in one cluster")
+        else:
+            names.add(name.casefold())
+            elements.append({**entry, "name": name, "kind": kind})
+
+    edges = []
+    for entry in data.get("edges") or ():
+        if not isinstance(entry, dict):
+            drop("edge not an object")
+            continue
+        rel = str(entry.get("rel_type") or "").strip().upper()
+        source = str(entry.get("source") or "").strip()
+        target = str(entry.get("target") or "").strip()
+        if not source or not target:
+            drop("edge missing an endpoint")
+        elif rel not in vocabulary:
+            drop(f"relationship {rel!r} not in the writable vocabulary")
+        elif source.casefold() == target.casefold():
+            drop("edge points at itself")
+        else:
+            edges.append({**entry, "source": source, "target": target, "rel_type": rel})
+
+    return tuple(elements), tuple(edges), dropped
 
 
 async def generate(
@@ -274,6 +423,9 @@ async def generate(
     model: str,
     temperature: float = 0.8,
     context: GenerationContext | None = None,
+    cluster: bool = False,
+    max_tokens: int = 1200,
+    seed: int | None = None,
 ) -> Generated:
     """Ask the model, then split what it says into sourced and invented.
 
@@ -282,14 +434,26 @@ async def generate(
     is the required split, not a low temperature.
     """
     carried = context or GenerationContext()
-    messages = build_messages(kind, subject, retrieval, depth, carried)
+    messages = build_messages(kind, subject, retrieval, depth, carried, cluster)
     response = await client.chat.completions.create(
-        model=model, messages=messages, temperature=temperature, max_tokens=1200
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        # PASSED THROUGH so a caller measuring stability can actually pin the
+        # draw. Without it, "temperature 0" alone still varies between calls,
+        # and a stability figure taken that way is not comparable to one taken
+        # with a seed -- which is exactly the comparison the cluster gate makes
+        # against `extract.py`'s 0.49.
+        **({"seed": seed} if seed is not None else {}),
     )
     text = response.choices[0].message.content or ""
     usage = Usage.from_response(response)
     cost = estimate(model, usage)
-    data, error = parse(text, expect_context=not carried.empty)
+    data, error = parse(
+        text, expect_context=not carried.empty, expect_cluster=cluster
+    )
+    elements, edges, manifest_dropped = sift_manifest(data) if cluster else ((), (), {})
 
     shown = canon_context.apply(retrieval, depth)
     return Generated(
@@ -300,6 +464,9 @@ async def generate(
         from_canon=tuple(data.get("from_canon", ()) or ()),
         invented=tuple(data.get("invented", ()) or ()),
         from_context=tuple(data.get("from_context", ()) or ()),
+        elements=elements,
+        edges=edges,
+        manifest_dropped=manifest_dropped,
         sources=tuple(canon_context.sources(shown)),
         usage={"input": usage.input_tokens, "output": usage.output_tokens, "total": usage.total},
         cost=cost.as_dict(),
