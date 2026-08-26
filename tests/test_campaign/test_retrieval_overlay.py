@@ -235,6 +235,25 @@ class TestANamedCampaignEntityBringsItsOwnProse:
         named = [p for p in result.passages if p.origin == "campaign" and not p.rode_with]
         assert named
 
+    def test_it_comes_back_first(self, overlaid):
+        """Ordering between the lists is a separate question from ordering
+        inside them, and nothing here is blended. A DM who asks about a thing
+        they made should not read eight keyword hits from the book before their
+        own write-up of it -- which is where it was landing."""
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        assert result.passages[0].origin == "campaign"
+
+    def test_a_canon_question_still_opens_with_the_book(self, overlaid):
+        """Only when a CAMPAIGN entity was named. A scene of yours mentioning
+        Strahd is not a better answer about Strahd than the chapter he is in,
+        so the rule is narrow on purpose."""
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            QUESTION
+        )
+        assert result.passages[0].origin == "canon"
+
     def test_a_campaign_less_session_still_sees_nothing(self, overlaid):
         """The wall holds: naming it without a campaign selected returns
         neither the anchor nor the prose."""

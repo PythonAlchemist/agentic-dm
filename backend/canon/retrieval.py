@@ -816,9 +816,23 @@ class CanonRetriever:
                     session, CAMPAIGN_ENTITY_FACTS, {"ids": campaign_ids}
                 )
 
+        # WHICH LIST LEADS IS A SEPARATE QUESTION FROM HOW EACH IS ORDERED,
+        # and nothing here blends them. `named` holds prose about an entity the
+        # question RESOLVED; when one of those is the DM's own, they asked
+        # about a thing they made, and their own write-up is the most direct
+        # answer there is. It was arriving ninth, behind eight canon passages
+        # the Lucene fallback had found on keywords -- so the panel that exists
+        # because "resolving a name and returning nothing about it is the worse
+        # half of a miss" was committing a quieter version of the same miss.
+        #
+        # Only when a CAMPAIGN entity was named. Asking about Strahd should
+        # still open with the book: a scene of yours that mentions him is not a
+        # better answer about him than the chapter he is in.
+        leading = named if campaign_ids else []
+        following = [] if campaign_ids else named
         return replace(
             found,
-            passages=tuple(labelled + named + riders),
+            passages=tuple(leading + labelled + following + riders),
             campaign_entities=tuple(facts),
             dropped=found.dropped + cut,
         )
