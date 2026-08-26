@@ -40,7 +40,13 @@ from pathlib import Path
 
 from backend.campaign import store
 from backend.campaign.chain import insert_plan, remove_plan, walk
-from backend.campaign.model import AUTHORED, CAMPAIGN_PLANE, campaign_prefix, mint_id
+from backend.campaign.model import (
+    AUTHORED,
+    CAMPAIGN_PLANE,
+    DRAWS_ON,
+    campaign_prefix,
+    mint_id,
+)
 from backend.canon.aliases import normalize
 from backend.graph.schema import (
     ALIAS_OF,
@@ -340,6 +346,10 @@ def write(
         )
         changes = result["changed"]
 
+    # LAST, so the prose exists to be read and every element this write minted
+    # is already a candidate. A scene naming its own cast then links to them
+    # because the words say so, not only because the manifest listed them.
+    rescan(tx, slug=slug, section_id=section_id)
     return Stored(
         entity_id=entity_id,
         section_id=section_id,
@@ -597,14 +607,156 @@ def write_cluster(
         )
         edges_written += 1
 
+    # AGAIN, and not redundantly: `write` scanned before this function minted a
+    # single element, so its pass could not match a name that did not exist
+    # yet. This is the one that sees the cast.
+    scan = rescan(tx, slug=plan.campaign, section_id=root.section_id)
     return {
         **root.as_dict(),
         "elements": written,
+        "scanned": scan["scanned"],
         "linked_to_canon": linked,
         "dropped": dict(plan.dropped),
         "edges": edges_written,
         "edges_dropped": dict(plan.edges_dropped),
     }
+
+
+#: A scanned mention says so, because reconciliation must not touch the ones
+#: `write_cluster` states outright. "This scene contains Captain Saltmarrow" is
+#: a fact about the manifest, true whether or not the prose ever spells his
+#: name; "this scene says `Revel\u2019s End`" is a fact about the text and stops
+#: being true when the DM deletes the words. One is authored, the other derived,
+#: and a rescan may only overwrite what it wrote.
+SCANNED = "scanned"
+
+
+def rescan(tx, *, slug: str, section_id: str) -> dict:
+    """Link a homebrew section to every entity its prose actually names.
+
+    THE PROSE WAS INVISIBLE. A cluster wrote one mention per declared element
+    and one per canon link, and nothing read the words. So a scene whose text
+    said "Captain Saltmarrow" three times was connected to him only because the
+    manifest happened to list him, and The Sea Battle -- which names him and
+    was written before he existed as an element -- was connected to him not at
+    all. Asking about him did not surface the scene he is in.
+
+    IT REUSES THE CANON SCANNER RATHER THAN GROWING A SECOND ONE.
+    `spine.scan_mentions` carries rules this needs and would otherwise have to
+    re-derive: the single-word case rule that keeps the LORE entity `Light` off
+    every lit torch, the common-noun filter, and the chapter-scoping rule. That
+    last one does real work here for free -- a chapter-scoped canon id is
+    scannable only inside its own chapter and a homebrew section is in none, so
+    thirteen heists' worth of `Guard` and `Kitchen` cannot match. Only names
+    the book itself treats as book-wide can.
+
+    CANON ENTITIES ARE IN SCOPE ON PURPOSE. A DM writing "the barge reaches
+    Revel's End" has said their scene involves the book's prison, which is
+    exactly what the cluster's `link` choice records by hand. Nothing about the
+    canon node changes: a campaign-plane mention points AT it, and `MENTIONS`
+    requires a `:Chapter` that a campaign section does not have, so canon reads
+    are unaffected by construction.
+
+    RECONCILES RATHER THAN APPENDS, which is what makes it safe to re-run after
+    an edit. A name the DM deleted should stop being a mention, and a scan that
+    only ever added would leave the graph asserting the old text forever.
+    """
+    from backend.canon.spine import EntityNames, WriteSection, scan_mentions
+
+    # READ HERE rather than taken as a parameter: every caller would have had
+    # to fetch the same thing, and a caller that passed the wrong books would
+    # scan a scene against a book its table is not playing.
+    # The `DRAWS_ON` edges, which is where a campaign's books actually live --
+    # there is no `books` property, and reading one returned an empty list that
+    # scanned nothing and then reconciled away everything a correct scan had
+    # found. Exactly the behaviour reconciliation is for, pointed the wrong way.
+    books = [
+        r["slug"]
+        for r in tx.run(
+            f"MATCH (:Campaign {{slug:$slug}})-[:{DRAWS_ON}]->(b:Book) "
+            "RETURN b.slug AS slug",
+            {"slug": slug},
+        )
+        if r["slug"]
+    ]
+
+    row = tx.run(
+        """
+        MATCH (s:Section {id:$id, plane:$plane, campaign:$slug})
+        RETURN s.text AS text, s.heading AS heading
+        """,
+        {"id": section_id, "plane": CAMPAIGN_PLANE, "slug": slug},
+    ).single()
+    if row is None:
+        raise NotEditable(section_id)
+
+    candidates = [
+        EntityNames(
+            id=r["id"], name=r["name"], aliases=tuple(a for a in (r["aliases"] or []) if a)
+        )
+        for r in tx.run(
+            """
+            MATCH (e:Entity)
+            WHERE (e.plane = $plane AND e.campaign = $slug)
+               OR (e.plane = 'canon' AND any(b IN $books WHERE e.id STARTS WITH b + ':'))
+            OPTIONAL MATCH (a:Alias)-[:ALIAS_OF]->(e)
+            RETURN e.id AS id, e.name AS name, collect(a.name) AS aliases
+            """,
+            {"plane": CAMPAIGN_PLANE, "slug": slug, "books": list(books)},
+        )
+    ]
+
+    section = WriteSection(
+        id=section_id,
+        # THE CAMPAIGN IS THE SCOPE, and passing it here is what makes one rule
+        # do the right thing on both planes. `spine.scannable_in` asks whether
+        # an id's middle segment matches the scope it is being read in, which
+        # for `cos:castle-ravenloft:k61a-closet` means a chapter and for
+        # `hb:p13-home:captain-saltmarrow` means a campaign. Passing "" made
+        # every campaign entity unscannable -- the whole point of this pass --
+        # while passing the campaign lets a table see its own cast and still
+        # keeps thirteen heists' worth of `Guard` and `Kitchen` out, since
+        # their middle segment is a chapter name and never this.
+        chapter_slug=slug,
+        heading=dict(row)["heading"] or "",
+        index=0,
+        depth=0,
+        parent_index=-1,
+        text=dict(row)["text"] or "",
+    )
+    found = scan_mentions([section], candidates, chapter_slug=slug)
+
+    kept = set()
+    for mention in found:
+        tx.run(
+            f"""
+            MATCH (e:Entity {{id:$entity_id}}), (s:Section {{id:$section_id}})
+            MERGE (m:Mention {{id:$id}})
+            SET m += $props, m.plane = $plane, m.campaign = $slug, m.{SCANNED} = true
+            MERGE (m)-[:{REFERS_TO}]->(e)
+            MERGE (m)-[:{IN_SECTION}]->(s)
+            """,
+            {
+                "id": mention.id,
+                "entity_id": mention.entity_id,
+                "section_id": section_id,
+                "props": mention.properties,
+                "plane": CAMPAIGN_PLANE,
+                "slug": slug,
+            },
+        )
+        kept.add(mention.id)
+
+    dropped = tx.run(
+        f"""
+        MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$section_id}})
+        WHERE m.{SCANNED} = true AND NOT m.id IN $kept
+        DETACH DELETE m
+        RETURN count(m) AS n
+        """,
+        {"section_id": section_id, "kept": list(kept)},
+    ).single()["n"]
+    return {"scanned": len(kept), "dropped": dropped}
 
 
 class NotEditable(Exception):
@@ -668,6 +820,11 @@ def edit(tx, *, slug: str, section_id: str, body: str) -> dict:
         "section_id": section_id,
         "edited": body.strip() != generated.strip(),
         "changed": body.strip() != (dict(row)["text"] or "").strip(),
+        # The prose IS the scanner's input and it just changed, so a name the
+        # DM deleted stops being a mention in the same transaction that
+        # deleted it. Leaving it to a later pass means the graph asserts the
+        # old text for however long that takes.
+        **rescan(tx, slug=slug, section_id=section_id),
     }
 
 
@@ -802,6 +959,10 @@ def expand(
             tx, slug, plan, in_chain | {section_id}, log_path=log_path
         )["changed"]
 
+    # LAST, so the prose exists to be read and every element this write minted
+    # is already a candidate. A scene naming its own cast then links to them
+    # because the words say so, not only because the manifest listed them.
+    rescan(tx, slug=slug, section_id=section_id)
     return Stored(
         entity_id=entity_id,
         section_id=section_id,

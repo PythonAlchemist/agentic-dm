@@ -880,3 +880,64 @@ class TestEditingSomethingAlreadyStored:
                     tx, slug="someone-elses", section_id=stored.section_id, body="Mine."
                 )
             )
+
+
+class TestTheProseIsRead:
+    """A cluster wrote one mention per DECLARED element and nothing read the
+    words, so a scene was connected to its cast only because the manifest
+    happened to list them. Asking about somebody did not surface the scene
+    they are in."""
+
+    def _scene(self, session, body):
+        return _store(
+            session, anchor=ANCHOR, title="Pytest Night Watch", body=body,
+            generated_body=body,
+        )
+
+    def test_a_name_in_the_prose_becomes_a_mention(self, table):
+        _store(table, anchor=None, title="Pytest Marlow Deeps", body="A pilot.",
+               generated_body="A pilot.")
+        stored = self._scene(table, "Pytest Marlow Deeps takes the wheel at dusk.")
+        found = table.run(
+            "MATCH (m:Mention {scanned:true})-[:IN_SECTION]->(:Section {id:$s}) "
+            "MATCH (m)-[:REFERS_TO]->(e:Entity) RETURN collect(e.name) AS names",
+            {"s": stored.section_id},
+        ).single()["names"]
+        assert "Pytest Marlow Deeps" in found
+
+    def test_deleting_the_name_deletes_the_mention(self, table):
+        """RECONCILED, not appended to. A scan that only ever added would leave
+        the graph asserting the old text forever."""
+        _store(table, anchor=None, title="Pytest Marlow Deeps", body="A pilot.",
+               generated_body="A pilot.")
+        stored = self._scene(table, "Pytest Marlow Deeps takes the wheel at dusk.")
+        table.execute_write(
+            lambda tx: homebrew.edit(
+                tx, slug=SLUG, section_id=stored.section_id, body="Nobody is at the wheel."
+            )
+        )
+        left = table.run(
+            "MATCH (m:Mention {scanned:true})-[:IN_SECTION]->(:Section {id:$s}) "
+            "RETURN count(m) AS n",
+            {"s": stored.section_id},
+        ).single()["n"]
+        assert left == 0
+
+    def test_a_declared_mention_survives_a_rescan(self, table):
+        """`write_cluster` states "this scene contains him" outright, which is
+        true whether or not the prose ever spells his name. Only what the scan
+        wrote may be taken back by the scan."""
+        stored = self._scene(table, "A quiet watch. Nobody is named.")
+        table.run(
+            "MATCH (s:Section {id:$s}) "
+            "CREATE (m:Mention {id:$m, plane:'campaign', campaign:$c}) "
+            "CREATE (m)-[:IN_SECTION]->(s)",
+            {"s": stored.section_id, "m": f"declared@{stored.section_id}", "c": SLUG},
+        )
+        table.execute_write(
+            lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=stored.section_id)
+        )
+        assert table.run(
+            "MATCH (m:Mention {id:$m}) RETURN count(m) AS n",
+            {"m": f"declared@{stored.section_id}"},
+        ).single()["n"] == 1
