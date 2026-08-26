@@ -511,3 +511,60 @@ class TestTheRandomTableCommandsAreRetired:
 
         assert not hasattr(DMAgent, "generate_npc")
         assert not hasattr(DMAgent, "generate_encounter")
+
+
+class TestOnlyContainerKindsAreAnnotated:
+    """A quest or a scene CONTAINS things; an NPC or a monster IS one.
+
+    The second call is spent where there is something to declare. Annotating a
+    monster would pay a model call to be told the monster is the monster.
+    """
+
+    def test_quest_and_scene_cluster(self):
+        from backend.agents.dm_agent import CLUSTER_KINDS
+
+        assert CLUSTER_KINDS == {"quest", "scene"}
+
+    def test_npc_and_monster_do_not(self):
+        from backend.agents.dm_agent import CLUSTER_KINDS
+
+        assert not CLUSTER_KINDS & {"npc", "monster"}
+
+    def test_every_cluster_kind_is_a_real_kind(self):
+        """A typo here would silently switch a kind off rather than error."""
+        from backend.agents.dm_agent import CLUSTER_KINDS
+        from backend.agents.generator import KINDS
+
+        assert CLUSTER_KINDS <= set(KINDS)
+
+
+class TestTheToolStillCarriesNoMaterial:
+    """Clusters must not leak into the tool loop.
+
+    The acknowledgement is what stops a model writing invention into an answer
+    with none of the provenance envelope around it. Adding elements gave that
+    envelope more to hold, and more to leak.
+    """
+
+    def test_the_acknowledgement_names_nothing_it_generated(self):
+        from backend.agents import homebrew_tool
+
+        request, error = homebrew_tool.validate(
+            {"kind": "scene", "subject": "a sea battle"},
+            held_ids=frozenset(),
+            seen_sections=frozenset(),
+        )
+        assert error == ""
+        payload = request.acknowledgement
+        for leaked in ("body", "title", "elements", "edges"):
+            assert leaked not in payload
+
+    def test_the_model_is_still_told_not_to_write_it(self):
+        from backend.agents import homebrew_tool
+
+        request, _ = homebrew_tool.validate(
+            {"kind": "quest", "subject": "x"},
+            held_ids=frozenset(),
+            seen_sections=frozenset(),
+        )
+        assert "Do not write it out yourself" in request.acknowledgement["instruction"]

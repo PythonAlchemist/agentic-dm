@@ -1,6 +1,7 @@
 """DM Agent for running games and assisting DMs."""
 
 import logging
+from dataclasses import replace
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -78,6 +79,12 @@ class DMResponse(BaseModel):
     #: the envelope the generator exists to enforce. A person approves a card;
     #: nothing here has been written to the graph.
     generations: list[dict] = Field(default_factory=list)
+
+
+#: Kinds that CONTAIN other things, and so are worth a second call to declare
+#: what they contain. An npc or a monster is one thing; annotating it would
+#: spend a call to be told so.
+CLUSTER_KINDS = frozenset({"quest", "scene"})
 
 
 class DMAgent:
@@ -607,6 +614,32 @@ class DMAgent:
                     model=self.model,
                     context=context,
                 )
+                # A QUEST OR A SCENE CONTAINS THINGS; an NPC or a monster IS
+                # one. Only the first two are annotated, so the second call is
+                # spent where there is something to declare.
+                #
+                # TWO CALLS RATHER THAN ONE, on measurement. Asking a single
+                # response to invent and to classify at once put 51% of its
+                # declared edges outside what the type table allows; annotating
+                # finished prose brought that to 27%, and element agreement
+                # over fixed prose to 0.78. See `measure_manifest`.
+                if request.kind in CLUSTER_KINDS and not drafted.error:
+                    elements, edges, dropped, annotate_error = await generator.annotate(
+                        self.openai,
+                        body=drafted.body,
+                        retrieval=own,
+                        depth=self.depth,
+                        model=self.model,
+                    )
+                    if not annotate_error:
+                        drafted = replace(
+                            drafted, elements=elements, edges=edges,
+                            manifest_dropped=dropped,
+                        )
+                    else:
+                        # A failed annotation loses the manifest, never the
+                        # prose: the DM still gets the scene they asked for.
+                        logger.warning("cluster annotation failed: %s", annotate_error)
                 card = drafted.as_dict()
             except Exception as exc:  # noqa: BLE001 - a bad card must not lose the answer
                 logger.warning("homebrew generation failed", exc_info=True)
