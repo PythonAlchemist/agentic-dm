@@ -226,3 +226,24 @@ class TestTheAccountingBalances:
 def test_every_offered_element_kind_plans(kind):
     plan = plan_cluster(campaign=CAMPAIGN, elements=[element(f"A {kind}", kind=kind)])
     assert plan.elements[0].kind == kind
+
+
+class TestHomebrewSlugsMatchCanonSlugs:
+    """Two slug rules in one graph would be two answers to one question.
+
+    `homebrew.slugify` and the canon writer's `mint_id` both turn a name into
+    an id, and they must agree: an apostrophe becoming a separator in one and
+    vanishing in the other would make `hb:...:the-kraken-s-purse` and
+    `cos:the-krakens-purse` two spellings of one thing, with the collision
+    scan blind to it.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        ["The Kraken's Purse", "Vidorant’s Vault", "Revel's End", "Chef Tiny Toulaine"],
+    )
+    def test_the_same_name_slugifies_the_same_way(self, name):
+        from backend.campaign.homebrew import slugify
+        from backend.canon.writer import mint_id
+
+        assert mint_id("a-chapter", name).split(":", 1)[1] == slugify(name)
