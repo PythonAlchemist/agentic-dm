@@ -299,3 +299,92 @@ class TestAStubDoesNotReadAsAbsent:
             "tell me about Corsair Boarding"
         )
         assert result.campaign_entities == ()
+
+
+class TestLinkingACanonEntityIntoAScene:
+    """"Use the book's" has to mean something.
+
+    THE HOLE THIS CLOSES. Choosing `link` correctly declined to mint a second
+    Marta Marthannis -- and then recorded nothing at all. Zero connections
+    existed from campaign material to canon entities, so a DM who had told the
+    system their scene involves the book's NPC got nothing back when they asked
+    about her. The decision was real and its consequence was not.
+    """
+
+    LINKED = f"{BOOK}:ch#3"
+    #: A NAME NO BOOK USES. `Alias.name` is globally unique, so a fixture
+    #: borrowing a real one ("Marta Marthannis", "Varrin") dies on the
+    #: constraint against live data. Third time in this suite.
+    CANON_NAME = "Pytestmarta Pytestmarthannis"
+
+    @pytest.fixture
+    def linked(self, overlaid):
+        """A canon entity, and a campaign scene that mentions it."""
+        overlaid.run(
+            """
+            CREATE (e:Entity {id:$id, name:$name, plane:'canon'})
+            CREATE (a:Alias {name:$name, normalized:$norm, plane:'canon'})
+            CREATE (a)-[:ALIAS_OF]->(e)
+            """,
+            {"id": self.LINKED, "name": self.CANON_NAME,
+             "norm": self.CANON_NAME.lower()},
+        )
+        overlaid.run(
+            """
+            MATCH (e:Entity {id:$e}), (s:Section {id:$s})
+            CREATE (m:Mention {plane:'campaign', campaign:$c, surface:$name})
+            CREATE (m)-[:REFERS_TO]->(e)
+            CREATE (m)-[:IN_SECTION]->(s)
+            """,
+            {"e": self.LINKED, "s": f"hb:{SLUG}:corsair-boarding#0", "c": SLUG,
+             "name": self.CANON_NAME},
+        )
+        yield overlaid
+        overlaid.run("MATCH (e:Entity {id:$id}) DETACH DELETE e", {"id": self.LINKED})
+        overlaid.run("MATCH (a:Alias {normalized:$n}) DETACH DELETE a",
+                     {"n": self.CANON_NAME.lower()})
+
+    def test_asking_about_the_book_s_npc_surfaces_the_scene(self, linked):
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            f"tell me about {self.CANON_NAME}"
+        )
+        campaign = [p for p in result.passages if p.origin == "campaign"]
+        assert campaign, "the link recorded nothing a question could reach"
+
+    def test_the_canon_entity_itself_is_untouched(self, linked):
+        """A mention points AT the node. It never changes it."""
+        row = dict(
+            linked.run(
+                "MATCH (e:Entity {id:$id}) RETURN e.plane AS plane, properties(e) AS p",
+                {"id": self.LINKED},
+            ).single()
+        )
+        assert row["plane"] == "canon"
+        assert "campaign" not in row["p"]
+
+    def test_a_campaign_less_session_sees_none_of_it(self, linked):
+        """THE CONTAMINATION QUESTION, and it holds by construction rather than
+        by a filter: `MENTIONS` requires the section to hang off a `:Chapter`,
+        and a campaign section hangs off a `:Campaign`."""
+        result = CanonRetriever(book=BOOK, limit=6).retrieve(
+            f"tell me about {self.CANON_NAME}"
+        )
+        assert not any(p.origin == "campaign" for p in result.passages)
+        assert not any("hb:" in p.section_id for p in result.passages)
+
+    def test_the_canon_read_is_byte_identical_either_way(self, linked):
+        """The stronger form: a linked canon entity answers canon questions
+        exactly as it did before anyone linked it."""
+        question = f"tell me about {self.CANON_NAME}"
+        without = [
+            p.section_id
+            for p in CanonRetriever(book=BOOK, limit=6).retrieve(question).passages
+        ]
+        with_campaign = [
+            p.section_id
+            for p in CanonRetriever(book=BOOK, limit=6, campaign=SLUG)
+            .retrieve(question)
+            .passages
+            if not p.section_id.startswith("hb:")
+        ]
+        assert with_campaign == without

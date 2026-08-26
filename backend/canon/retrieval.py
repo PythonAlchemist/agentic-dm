@@ -695,10 +695,16 @@ class CanonRetriever:
         # it is the worse half of a miss: it looks like the graph knows the
         # thing and has nothing to say.
         named: list[Passage] = []
-        campaign_ids = [a.entity_id for a in found.anchors if is_campaign_id(a.entity_id)]
-        if campaign_ids:
+        # EVERY ANCHOR, CANON OR CAMPAIGN. A canon entity can appear in a
+        # campaign scene -- that is exactly what choosing "use the book's"
+        # records -- so asking about the book's Marta Marthannis has to surface
+        # the scene the DM put her in. Filtering to `hb:` ids here made the
+        # link decision unanswerable and so pointless.
+        anchor_ids = [a.entity_id for a in found.anchors]
+        campaign_ids = [a for a in anchor_ids if is_campaign_id(a)]
+        if anchor_ids:
             with self._session() as session:
-                for row in self._rows(session, CAMPAIGN_MENTIONS, {"ids": campaign_ids}):
+                for row in self._rows(session, CAMPAIGN_MENTIONS, {"ids": anchor_ids}):
                     if row["section_id"] not in by_id:
                         named.append(
                             Passage(

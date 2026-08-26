@@ -86,6 +86,10 @@ class ClusterPlan:
     campaign: str
     elements: tuple[PlannedElement, ...] = ()
     collisions: tuple[Collision, ...] = ()
+    #: `(name, canon_id)` for elements the DM said were the book's own. NOT a
+    #: drop, though the element mints nothing: the scene genuinely involves
+    #: that entity, and saying so is the whole point of choosing `link`.
+    links: tuple[tuple[str, str], ...] = ()
     #: Reason -> count. Never a bare total: "3 dropped" tells a reader nothing
     #: about whether the generation or the rules were at fault.
     dropped: dict = field(default_factory=dict)
@@ -122,6 +126,7 @@ class ClusterPlan:
                 }
                 for c in self.collisions
             ],
+            "links": [{"name": n, "canon_id": c} for n, c in self.links],
             "dropped": dict(self.dropped),
             "edges_deferred": self.edges_deferred,
             "storable": self.storable,
@@ -159,6 +164,7 @@ def plan_cluster(
 
     planned: list[PlannedElement] = []
     collisions: list[Collision] = []
+    links: list[tuple[str, str]] = []
     minted: set[str] = set()
 
     for element in elements:
@@ -194,10 +200,14 @@ def plan_cluster(
         if canon_id and choice not in _RESOLUTIONS:
             collisions.append(Collision(name=name, element_kind=kind, canon_id=canon_id))
         elif canon_id and choice == "link":
-            # No node minted: the cluster points at the book's entity instead.
-            # The canon node is not touched -- linking is about what this table
-            # says the NPC DOES, never about who the book says they are.
-            drop("linked to a canon entity instead of minting")
+            # No node minted, but the link is RECORDED. It was a drop and
+            # nothing else, which made "use the book's" a decision with no
+            # consequence: the DM told the system their scene involves the
+            # book's Marta Marthannis, and asking about her tomorrow surfaced
+            # nothing. The canon node is still never touched -- what gets
+            # written is a mention pointing AT it, which says "this scene
+            # involves her" without claiming to know who she is.
+            links.append((name, canon_id))
             continue
 
         minted.add(entity_id)
@@ -217,6 +227,7 @@ def plan_cluster(
         campaign=campaign,
         elements=tuple(planned),
         collisions=tuple(collisions),
+        links=tuple(links),
         dropped=dropped,
         edges_deferred=len(tuple(edges)),
     )

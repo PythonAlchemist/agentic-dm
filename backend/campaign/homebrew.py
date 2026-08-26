@@ -475,9 +475,32 @@ def write_cluster(
             )
         written.append(element.entity_id)
 
+    # THE LINKS. A mention from this scene's section to the BOOK's entity,
+    # which is how "my scene involves Marta Marthannis" becomes something the
+    # graph can answer. Nothing about the canon node changes: a mention points
+    # AT it, the same shape `DERIVED_FROM` already uses for canon sections.
+    #
+    # It stays out of canon reads by construction rather than by a filter --
+    # `MENTIONS` requires the section to hang off a `:Chapter`, and a campaign
+    # section hangs off a `:Campaign`. A test pins that.
+    linked = 0
+    for name, canon_id in plan.links:
+        tx.run(
+            f"""
+            MATCH (e:Entity {{id:$e, plane:'canon'}}), (s:Section {{id:$s}})
+            CREATE (m:Mention {{plane:$plane, campaign:$slug, surface:$name}})
+            CREATE (m)-[:{REFERS_TO}]->(e)
+            CREATE (m)-[:{IN_SECTION}]->(s)
+            """,
+            {"e": canon_id, "s": root.section_id, "plane": CAMPAIGN_PLANE,
+             "slug": plan.campaign, "name": name},
+        )
+        linked += 1
+
     return {
         **root.as_dict(),
         "elements": written,
+        "linked_to_canon": linked,
         "dropped": dict(plan.dropped),
         "edges_deferred": plan.edges_deferred,
     }

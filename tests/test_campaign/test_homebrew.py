@@ -640,3 +640,86 @@ class TestExpandAcceptsWhatOnlyAClusterCanMint:
         ExpandRequest(
             campaign="c", entity_id="hb:c:x", kind="lore", title="t", body="b"
         )
+
+
+class TestWriteClusterRecordsTheLinks:
+    """The overlay test builds its mention by hand, so it cannot see this.
+
+    Caught by mutation: removing the link-writing loop from `write_cluster`
+    left every retrieval test passing, because the fixture that exercised
+    linking created the mention itself. A test that only proves the READ works
+    is a test that keeps passing after the WRITE stops.
+    """
+
+    #: A NAME NO BOOK USES. `Alias.name` is globally unique, so a fixture
+    #: borrowing a real one dies on the constraint against live data.
+    CANON_NAME = "Pytestwarden Pytestname"
+    ELEMENTS = [
+        {"name": "A Bent Turnkey", "kind": "npc", "role": "", "from_canon": [],
+         "invented": ["his name"]},
+        {"name": CANON_NAME, "kind": "npc", "role": "the warden",
+         "from_canon": [], "invented": []},
+    ]
+
+    @pytest.fixture
+    def with_canon(self, table):
+        table.run(
+            """
+            CREATE (e:Entity {id:'pytest-canon:warden', name:$n, plane:'canon'})
+            CREATE (a:Alias {name:$n, normalized:$norm, plane:'canon'})
+            CREATE (a)-[:ALIAS_OF]->(e)
+            """,
+            {"n": self.CANON_NAME, "norm": self.CANON_NAME.lower()},
+        )
+        yield table
+        table.run("MATCH (e:Entity {id:'pytest-canon:warden'}) DETACH DELETE e")
+        table.run("MATCH (a:Alias {normalized:$n}) DETACH DELETE a",
+                  {"n": self.CANON_NAME.lower()})
+
+    def _write(self, session):
+        from backend.campaign.cluster import plan_cluster
+
+        plan = plan_cluster(
+            campaign=SLUG,
+            elements=self.ELEMENTS,
+            canon_aliases=frozenset({(self.CANON_NAME.lower(), "pytest-canon:warden")}),
+            resolutions={self.CANON_NAME: "link"},
+        )
+        payload = {**PAYLOAD}
+        payload.pop("slug", None)
+        return session.execute_write(
+            lambda tx: homebrew.write_cluster(
+                tx, plan=plan, manifest={}, log_path=session.log_path,
+                anchor=ANCHOR, **payload
+            )
+        )
+
+    def test_it_reports_what_it_linked(self, with_canon):
+        assert self._write(with_canon)["linked_to_canon"] == 1
+
+    def test_a_mention_reaches_the_canon_entity(self, with_canon):
+        result = self._write(with_canon)
+        found = with_canon.run(
+            """
+            MATCH (:Entity {id:'pytest-canon:warden'})<-[:REFERS_TO]-(m:Mention)
+                  -[:IN_SECTION]->(:Section {id:$s})
+            RETURN m.plane AS plane
+            """,
+            {"s": result["section_id"]},
+        ).single()
+        assert found is not None and dict(found)["plane"] == "campaign"
+
+    def test_the_linked_entity_is_not_minted_twice(self, with_canon):
+        assert self._write(with_canon)["elements"] == [f"hb:{SLUG}:a-bent-turnkey"]
+
+    def test_the_canon_entity_is_not_mutated(self, with_canon):
+        def props():
+            return dict(
+                with_canon.run(
+                    "MATCH (e:Entity {id:'pytest-canon:warden'}) RETURN properties(e) AS p"
+                ).single()
+            )["p"]
+
+        before = props()
+        self._write(with_canon)
+        assert props() == before

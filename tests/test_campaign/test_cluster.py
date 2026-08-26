@@ -127,7 +127,10 @@ class TestCanonCollisions:
         )
         assert not plan.storable
 
-    def test_linking_mints_nothing(self):
+    def test_linking_mints_nothing_but_records_the_link(self):
+        """It was a drop and nothing else, which made "use the book's" a
+        decision with no consequence: the DM said their scene involves the
+        book's Varrin and asking about him tomorrow surfaced nothing."""
         plan = plan_cluster(
             campaign=CAMPAIGN,
             elements=[element("Varrin Axebreaker")],
@@ -135,7 +138,20 @@ class TestCanonCollisions:
             resolutions={"Varrin Axebreaker": "link"},
         )
         assert plan.elements == () and plan.storable
-        assert "linked to a canon entity" in next(iter(plan.dropped))
+        assert plan.links == (
+            ("Varrin Axebreaker", "kftgv:prisoner-13:varrin-axebreaker"),
+        )
+
+    def test_a_link_is_not_counted_as_a_drop(self):
+        """A drop report is what a DM reads to see what was thrown away. A
+        link was not thrown away."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("Varrin Axebreaker")],
+            canon_aliases=self.ALIASES,
+            resolutions={"Varrin Axebreaker": "link"},
+        )
+        assert plan.dropped == {}
 
     def test_there_is_no_mint_it_anyway_choice(self):
         """`Alias.name` is globally unique, so a second node spelled the same
