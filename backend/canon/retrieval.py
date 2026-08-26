@@ -130,6 +130,23 @@ MATCH (a:Section)-[r:NEXT {campaign:$campaign}]->(b:Section)
 RETURN a.id AS source, b.id AS target
 """
 
+#: The prose a campaign entity is described in, reached the way canon reaches
+#: its own: through the mention triangle.
+#:
+#: A SEPARATE QUERY BECAUSE `MENTIONS` CANNOT DO IT, twice over. That one
+#: filters `Entity {plane:'canon'}`, and it requires a `:Chapter` to hang the
+#: section from -- a campaign section hangs off a `:Campaign`. So an anchored
+#: campaign entity resolved by name and then returned NO PROSE: the DM could
+#: say "tell me about Captain Saltmarrow", watch the name resolve, and get
+#: nothing back about him. The ride-along hid this, because a scene chained
+#: beside a retrieved canon section still arrived -- by position, never by name.
+CAMPAIGN_MENTIONS = """
+MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
+MATCH (:Campaign {slug:$campaign})-[:HAS_SECTION]->(s)
+WHERE e.id IN $ids
+RETURN DISTINCT s.id AS section_id, s.heading AS section, s.text AS text
+"""
+
 #: Sections this campaign has cut. Retrieved all the same -- the chain is the
 #: running order, not the knowledge scope, and "what was in the bit I skipped"
 #: is a real question -- but marked, so nothing reads as in play that is not.
@@ -648,6 +665,31 @@ class CanonRetriever:
 
         by_id = {p.section_id: p for p in found.passages}
         labelled: list[Passage] = []
+        # A campaign entity the QUESTION named brings its own prose, before any
+        # positional ride-along. Resolving a name and returning nothing about
+        # it is the worse half of a miss: it looks like the graph knows the
+        # thing and has nothing to say.
+        named: list[Passage] = []
+        campaign_ids = [a.entity_id for a in found.anchors if is_campaign_id(a.entity_id)]
+        if campaign_ids:
+            with self._session() as session:
+                for row in self._rows(session, CAMPAIGN_MENTIONS, {"ids": campaign_ids}):
+                    if row["section_id"] not in by_id:
+                        named.append(
+                            Passage(
+                                section_id=row["section_id"],
+                                chapter=self.campaign or "",
+                                chapter_index=0,
+                                section=row["section"] or "",
+                                section_index=0,
+                                text=row["text"] or "",
+                                occurrences=1,
+                                entity_ids=(),
+                                origin="campaign",
+                                chain_status="in-chain",
+                            )
+                        )
+                        by_id[row["section_id"]] = named[-1]
         riders: list[Passage] = []
         cut = 0
         for passage in found.passages:
@@ -673,7 +715,7 @@ class CanonRetriever:
 
         return replace(
             found,
-            passages=tuple(labelled + riders),
+            passages=tuple(labelled + named + riders),
             dropped=found.dropped + cut,
         )
 

@@ -47,10 +47,23 @@ from backend.graph.schema import ALIAS_OF, DESCRIBES, IN_SECTION, REFERS_TO
 #: What a `cite` looks like in a generation: `[1]`, pointing at a source slot.
 _CITE = re.compile(r"\[(\d+)\]")
 
-#: Homebrew entity kinds, mapped from the generator's own `KINDS`. A `scene`
-#: becomes an EVENT, which the canon ontology already has (26 of them) -- this
-#: invents no vocabulary.
-LABELS = {"npc": "NPC", "monster": "MONSTER", "quest": "QUEST", "scene": "EVENT"}
+#: Homebrew kinds mapped to the labels the canon ontology already uses, so a
+#: stored thing wears the same type as the book's own. A `scene` becomes an
+#: EVENT; nothing here invents vocabulary.
+#:
+#: COVERS `KINDS` AND `ELEMENT_KINDS` BOTH. The first four are what a DM may
+#: ask for outright; `location`, `item` and `lore` arrive only as members of a
+#: cluster, and without them every element a quest declared was silently
+#: labelled LORE -- a barge and a strongbox filed as folklore.
+LABELS = {
+    "npc": "NPC",
+    "monster": "MONSTER",
+    "quest": "QUEST",
+    "scene": "EVENT",
+    "location": "LOCATION",
+    "item": "ITEM",
+    "lore": "LORE",
+}
 
 #: A homebrew section cites the canon it was built on.
 DERIVED_FROM = "DERIVED_FROM"
@@ -315,3 +328,214 @@ def delete(tx, *, slug: str, entity_id: str, log_path: Path | None = None) -> di
             {"id": section_id, "plane": CAMPAIGN_PLANE},
         )
     return {"entity": removed, "section": 1 if section_id else 0, "chain_changes": spliced}
+
+
+def write_cluster(
+    tx,
+    *,
+    plan,
+    kind: str,
+    title: str,
+    body: str,
+    generated_body: str,
+    from_canon,
+    invented,
+    from_context,
+    sources,
+    manifest,
+    anchor: str | None,
+    model: str = "",
+    log_path: Path | None = None,
+) -> dict:
+    """A cluster: one Section of prose, and every element it declares.
+
+    ONE SECTION, MANY ENTITIES. Each element gets a node, an alias and a
+    Mention into the SHARED section -- the mention triangle is what makes a
+    thing retrievable as a passage, and giving every element its own section
+    would multiply the prose a DM has to read without adding a word to it.
+
+    ONE TRANSACTION OR NOTHING, which matters more here than for a single
+    artifact: a half-written cluster is entities nobody can find and a section
+    describing things that do not exist.
+
+    `plan` is a `cluster.ClusterPlan` and is trusted to have decided WHAT to
+    write -- ids minted, collisions resolved, drops counted. Refusing an
+    unstorable plan happens at the boundary, before a transaction opens.
+    """
+    if not plan.storable:
+        raise AlreadyStored(
+            f"{len(plan.collisions)} unresolved name collision(s); nothing was written"
+        )
+
+    root = write(
+        tx,
+        slug=plan.campaign,
+        kind=kind,
+        title=title,
+        body=body,
+        generated_body=generated_body,
+        from_canon=from_canon,
+        invented=invented,
+        from_context=from_context,
+        sources=sources,
+        anchor=anchor,
+        model=model,
+        log_path=log_path,
+    )
+    tx.run(
+        """
+        MATCH (s:Section {id:$id})
+        SET s.manifest = $manifest, s.generated_manifest = $generated
+        """,
+        {
+            "id": root.section_id,
+            # BESIDE the model's original, never instead of it -- the
+            # `generated_body` rule applied to the manifest, so "what did the
+            # DM override" stays answerable after the fact.
+            "manifest": json.dumps(
+                [
+                    {"name": e.name, "kind": e.kind, "entity_id": e.entity_id}
+                    for e in plan.elements
+                ]
+            ),
+            "generated": json.dumps(manifest),
+        },
+    )
+
+    written = []
+    for element in plan.elements:
+        label = LABELS.get(element.kind, "LORE")
+        tx.run(
+            f"""
+            CREATE (e:Entity:{label} {{
+                id:$id, name:$name, plane:$plane, status:$status,
+                campaign:$slug, kind:$kind, role:$role,
+                from_canon:$from_canon, invented:$invented,
+                cluster:$section
+            }})
+            """,
+            {
+                "id": element.entity_id,
+                "name": element.name,
+                "plane": CAMPAIGN_PLANE,
+                "status": AUTHORED,
+                "slug": plan.campaign,
+                "kind": element.kind,
+                "role": element.role,
+                "from_canon": json.dumps(list(element.from_canon)),
+                "invented": json.dumps(list(element.invented)),
+                # Which cluster minted it, so delete can find its siblings and
+                # a reader can ask what a scene brought into the world.
+                "section": root.section_id,
+            },
+        )
+        tx.run(
+            f"""
+            MATCH (e:Entity {{id:$id}})
+            MERGE (a:Alias {{name:$name}})
+            ON CREATE SET a.normalized = $normalized, a.plane = $plane
+            MERGE (a)-[:{ALIAS_OF}]->(e)
+            """,
+            {
+                "id": element.entity_id,
+                "name": element.name,
+                "normalized": normalize(element.name),
+                "plane": CAMPAIGN_PLANE,
+            },
+        )
+        tx.run(
+            f"""
+            MATCH (e:Entity {{id:$e}}), (s:Section {{id:$s}})
+            CREATE (m:Mention {{plane:$plane, campaign:$slug, surface:$name}})
+            CREATE (m)-[:{REFERS_TO}]->(e)
+            CREATE (m)-[:{IN_SECTION}]->(s)
+            """,
+            {
+                "e": element.entity_id,
+                "s": root.section_id,
+                "plane": CAMPAIGN_PLANE,
+                "slug": plan.campaign,
+                "name": element.name,
+            },
+        )
+        # Each element's OWN citations become structure, unioned with the
+        # cluster's: "what in my campaign leans on this passage" has to answer
+        # for a scene's cast, not only for the scene.
+        for target in cited_sections(element.from_canon, sources)[0]:
+            tx.run(
+                f"""
+                MATCH (s:Section {{id:$s}}), (canon:Section {{id:$t}})
+                MERGE (s)-[r:{DERIVED_FROM}]->(canon)
+                SET r.plane = $plane, r.campaign = $slug, r.status = $status
+                """,
+                {
+                    "s": root.section_id, "t": target, "plane": CAMPAIGN_PLANE,
+                    "slug": plan.campaign, "status": AUTHORED,
+                },
+            )
+        written.append(element.entity_id)
+
+    return {
+        **root.as_dict(),
+        "elements": written,
+        "dropped": dict(plan.dropped),
+        "edges_deferred": plan.edges_deferred,
+    }
+
+
+def delete_cluster(tx, *, slug: str, entity_id: str, cascade: bool = False) -> dict:
+    """Remove a cluster root, and refuse by default while its elements remain.
+
+    AN ELEMENT WHOSE ONLY SECTION DIES BECOMES UNRETRIEVABLE AS A PASSAGE. It
+    still exists, still resolves by name, and can never come back as prose --
+    which is a worse state than either keeping it or removing it, and is not
+    something to leave a DM in by accident. So this names them and stops.
+    `cascade` is spelled out, and what it removed is counted.
+    """
+    section = tx.run(
+        f"MATCH (s:Section)-[:{DESCRIBES}]->(:Entity {{id:$id}}) RETURN s.id AS id",
+        {"id": entity_id},
+    ).single()
+    section_id = dict(section)["id"] if section else ""
+
+    members = [
+        dict(r)["id"]
+        for r in tx.run(
+            "MATCH (e:Entity {cluster:$s, plane:$p}) RETURN e.id AS id",
+            {"s": section_id, "p": CAMPAIGN_PLANE},
+        )
+    ] if section_id else []
+
+    if members and not cascade:
+        raise ClusterHasElements(entity_id, tuple(sorted(members)))
+
+    removed = 0
+    for member in members:
+        tx.run(
+            """
+            MATCH (e:Entity {id:$id, plane:$plane})
+            OPTIONAL MATCH (m:Mention)-[:REFERS_TO]->(e)
+            OPTIONAL MATCH (a:Alias)-[:ALIAS_OF]->(e)
+            DETACH DELETE m, e
+            WITH a WHERE a IS NOT NULL AND NOT (a)-[:ALIAS_OF]->()
+            DELETE a
+            """,
+            {"id": member, "plane": CAMPAIGN_PLANE},
+        )
+        removed += 1
+
+    root = delete(tx, slug=slug, entity_id=entity_id)
+    return {**root, "elements": removed}
+
+
+class ClusterHasElements(Exception):
+    """Deleting the root would orphan the elements it minted."""
+
+    def __init__(self, entity_id: str, members: tuple[str, ...]) -> None:
+        super().__init__(
+            f"refusing to delete {entity_id}: {len(members)} element(s) were minted "
+            f"with it and would be left with no section to be read from "
+            f"({', '.join(members[:3])}). Pass cascade to remove them too."
+        )
+        self.entity_id = entity_id
+        self.members = members

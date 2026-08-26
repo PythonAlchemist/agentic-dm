@@ -311,3 +311,206 @@ class TestAnAliasThatAlreadyExistsDoesNotCrash:
             assert row["plane"] == "canon"
         finally:
             table.run("MATCH (a:Alias {name:'The Sea Battle'}) DETACH DELETE a")
+
+
+class TestWritingACluster:
+    """One prose section, many typed things, in one transaction."""
+
+    ELEMENTS = [
+        {"name": "Captain Saltmarrow", "kind": "npc", "role": "the corsair captain",
+         "from_canon": [], "invented": ["his name", "his scar"]},
+        {"name": "The Red Barge", "kind": "location", "role": "the prison barge",
+         "from_canon": [{"claim": "the voyage is by sea", "cite": "[1]"}],
+         "invented": ["her name"]},
+        {"name": "The Sealed Strongbox", "kind": "item", "role": "what they want",
+         "from_canon": [], "invented": ["its lock"]},
+    ]
+
+    def _plan(self, **kw):
+        from backend.campaign.cluster import plan_cluster
+
+        return plan_cluster(campaign=SLUG, elements=self.ELEMENTS, **kw)
+
+    def _write(self, session, plan, **overrides):
+        payload = {**PAYLOAD, **overrides}
+        payload.pop("slug", None)
+        return session.execute_write(
+            lambda tx: homebrew.write_cluster(
+                tx, plan=plan, manifest={"elements": self.ELEMENTS},
+                log_path=session.log_path, anchor=ANCHOR, **payload
+            )
+        )
+
+    def test_every_element_becomes_a_typed_entity(self, table):
+        result = self._write(table, self._plan())
+        rows = {
+            dict(r)["id"]: dict(r)["labels"]
+            for r in table.run(
+                "MATCH (e:Entity) WHERE e.id IN $ids RETURN e.id AS id, labels(e) AS labels",
+                {"ids": result["elements"]},
+            )
+        }
+        assert len(rows) == 3
+        assert "NPC" in rows["hb:pytest-hb:captain-saltmarrow"]
+        assert "LOCATION" in rows["hb:pytest-hb:the-red-barge"]
+        assert "ITEM" in rows["hb:pytest-hb:the-sealed-strongbox"]
+
+    def test_every_element_resolves_by_name(self, table):
+        result = self._write(table, self._plan())
+        found = table.run(
+            "MATCH (a:Alias)-[:ALIAS_OF]->(e:Entity) WHERE e.id IN $ids RETURN count(a) AS c",
+            {"ids": result["elements"]},
+        ).single()["c"]
+        assert found == 3
+
+    def test_every_element_is_retrievable_through_the_shared_section(self, table):
+        """One section, three mentions. The triangle is what makes a passage."""
+        result = self._write(table, self._plan())
+        found = table.run(
+            """
+            MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section {id:$s})
+            WHERE e.id IN $ids RETURN count(m) AS c
+            """,
+            {"s": result["section_id"], "ids": result["elements"]},
+        ).single()["c"]
+        assert found == 3
+
+    def test_an_element_carries_its_own_provenance(self, table):
+        self._write(table, self._plan())
+        row = dict(
+            table.run(
+                "MATCH (e:Entity {id:$id}) RETURN e.invented AS i, e.role AS r",
+                {"id": "hb:pytest-hb:captain-saltmarrow"},
+            ).single()
+        )
+        assert json.loads(row["i"]) == ["his name", "his scar"]
+        assert row["r"] == "the corsair captain"
+
+    def test_the_model_s_original_manifest_is_kept_beside_the_approved_one(self, table):
+        """`generated_body`'s rule: what the DM overrode stays answerable."""
+        result = self._write(table, self._plan(approved=frozenset({"The Red Barge"})))
+        row = dict(
+            table.run(
+                "MATCH (s:Section {id:$id}) RETURN s.manifest AS m, s.generated_manifest AS g",
+                {"id": result["section_id"]},
+            ).single()
+        )
+        assert len(json.loads(row["m"])) == 1
+        assert len(json.loads(row["g"])["elements"]) == 3
+
+    def test_a_rejected_element_is_not_written_and_is_counted(self, table):
+        result = self._write(table, self._plan(approved=frozenset({"The Red Barge"})))
+        assert result["elements"] == ["hb:pytest-hb:the-red-barge"]
+        assert result["dropped"] == {"rejected by the DM": 2}
+
+    def test_deferred_edges_are_reported(self, table):
+        result = self._write(
+            table, self._plan(edges=[{"source": "a", "target": "b", "rel_type": "GUARDS"}])
+        )
+        assert result["edges_deferred"] == 1
+
+    def test_an_unstorable_plan_is_refused_before_anything_is_written(self, table):
+        plan = self._plan(
+            canon_aliases=frozenset({("captain saltmarrow", "kftgv:someone")})
+        )
+        with pytest.raises(homebrew.AlreadyStored):
+            self._write(table, plan)
+        left = table.run(
+            "MATCH (e:Entity) WHERE e.id STARTS WITH 'hb:pytest-hb:' RETURN count(e) AS c"
+        ).single()["c"]
+        assert left == 0
+
+    def test_canon_is_untouched(self, table):
+        before = dict(
+            table.run("MATCH (s:Section {id:$i}) RETURN properties(s) AS p",
+                      {"i": ANCHOR}).single()
+        )["p"]
+        self._write(table, self._plan())
+        after = dict(
+            table.run("MATCH (s:Section {id:$i}) RETURN properties(s) AS p",
+                      {"i": ANCHOR}).single()
+        )["p"]
+        assert before == after
+
+
+class TestDeletingACluster:
+    def test_it_refuses_while_elements_would_be_orphaned(self, table):
+        cluster = TestWritingACluster()
+        result = cluster._write(table, cluster._plan())
+        with pytest.raises(homebrew.ClusterHasElements) as raised:
+            table.execute_write(
+                lambda tx: homebrew.delete_cluster(
+                    tx, slug=SLUG, entity_id=result["entity_id"]
+                )
+            )
+        assert len(raised.value.members) == 3
+
+    def test_cascade_removes_them_and_counts(self, table):
+        cluster = TestWritingACluster()
+        result = cluster._write(table, cluster._plan())
+        removed = table.execute_write(
+            lambda tx: homebrew.delete_cluster(
+                tx, slug=SLUG, entity_id=result["entity_id"], cascade=True
+            )
+        )
+        assert removed["elements"] == 3
+        left = table.run(
+            "MATCH (e:Entity) WHERE e.id STARTS WITH 'hb:pytest-hb:' RETURN count(e) AS c"
+        ).single()["c"]
+        assert left == 0
+
+
+def test_every_generatable_kind_has_a_label():
+    """A kind with no mapping is silently filed as LORE. Both closed sets are
+    checked here so adding to either cannot leave a barge labelled folklore."""
+    from backend.agents.generator import ELEMENT_KINDS, KINDS
+
+    for kind in set(KINDS) | set(ELEMENT_KINDS):
+        assert kind in homebrew.LABELS, kind
+
+
+class TestTheClusterEndpointsReDeriveEverything:
+    """The browser's word is worth nothing: the boundary re-plans."""
+
+    def _payload(self, **overrides):
+        return {
+            "campaign": SLUG, "kind": "scene", "title": "Endpoint Scene",
+            "body": "b", "generated_body": "b",
+            "from_canon": [], "invented": ["x"], "from_context": [],
+            "sources": [], "anchor": None,
+            "elements": [{"name": "A Deckhand", "kind": "npc", "role": "",
+                          "from_canon": [], "invented": ["his name"]}],
+            "edges": [], **overrides,
+        }
+
+    def test_a_tampered_approval_cannot_smuggle_an_element_in(self, table):
+        """A payload approving a name that is not in `elements` must not
+        conjure one -- the plan is derived from the elements, never from the
+        approval list."""
+        from backend.api.routes.homebrew import ClusterRequest, _plan_for
+
+        plan = _plan_for(ClusterRequest(**self._payload(approved=["Someone Else"])))
+        assert plan.elements == ()
+        assert plan.dropped == {"rejected by the DM": 1}
+
+    def test_the_plan_route_writes_nothing(self, table):
+        from backend.api.routes.homebrew import ClusterRequest, _plan_for
+
+        _plan_for(ClusterRequest(**self._payload()))
+        left = table.run(
+            "MATCH (e:Entity) WHERE e.id = 'hb:pytest-hb:a-deckhand' RETURN count(e) AS c"
+        ).single()["c"]
+        assert left == 0
+
+    def test_existing_ids_are_read_from_the_graph_not_the_payload(self, table):
+        """A second cluster naming something already stored is refused, and the
+        refusal comes from what the graph holds rather than what was posted."""
+        from backend.api.routes.homebrew import ClusterRequest, _plan_for
+
+        table.run(
+            "CREATE (:Entity {id:'hb:pytest-hb:a-deckhand', plane:'campaign', "
+            "campaign:$c, name:'A Deckhand'})",
+            {"c": SLUG},
+        )
+        plan = _plan_for(ClusterRequest(**self._payload()))
+        assert plan.dropped == {"already in this campaign": 1}

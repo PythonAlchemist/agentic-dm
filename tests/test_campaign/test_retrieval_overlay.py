@@ -204,3 +204,41 @@ class TestTheEvalHarnessesAreCampaignLess:
 
     def test_the_default_is_no_campaign(self):
         assert CanonRetriever(book="cos").campaign is None
+
+
+class TestANamedCampaignEntityBringsItsOwnProse:
+    """Resolving a name and returning nothing about it is the worse half of a miss.
+
+    THE GAP THIS CLOSED, which the ride-along hid. `MENTIONS` filters
+    `Entity {plane:'canon'}` AND requires a `:Chapter` to hang the section
+    from, while a campaign section hangs off a `:Campaign`. So a campaign
+    entity resolved by name and then returned no passage: ask "tell me about
+    Captain Saltmarrow", watch the name resolve, get nothing back about him.
+    It went unnoticed because a scene chained beside a retrieved canon section
+    still arrived -- by POSITION, never by name.
+    """
+
+    def test_the_scene_comes_back_when_named(self, overlaid):
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        campaign = [p for p in result.passages if p.origin == "campaign"]
+        assert campaign, "the entity resolved but brought no prose"
+        assert SCENE_TEXT[:20] in campaign[0].text
+
+    def test_it_is_not_a_ride_along(self, overlaid):
+        """Distinguished from the positional path: this passage rode with
+        nothing, because the question named it outright."""
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        named = [p for p in result.passages if p.origin == "campaign" and not p.rode_with]
+        assert named
+
+    def test_a_campaign_less_session_still_sees_nothing(self, overlaid):
+        """The wall holds: naming it without a campaign selected returns
+        neither the anchor nor the prose."""
+        result = CanonRetriever(book=BOOK, limit=6).retrieve(
+            "tell me about Corsair Boarding"
+        )
+        assert not any(p.origin == "campaign" for p in result.passages)

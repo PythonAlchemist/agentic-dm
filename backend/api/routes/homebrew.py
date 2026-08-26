@@ -53,6 +53,23 @@ class StoreRequest(BaseModel):
     model: str = ""
 
 
+class ClusterRequest(StoreRequest):
+    """A generation that declares what it contains.
+
+    Extends `StoreRequest` rather than replacing it, so the single-artifact
+    path and its tests are untouched and the two cannot drift apart on the
+    fields they share.
+    """
+
+    elements: list[dict] = Field(default_factory=list)
+    edges: list[dict] = Field(default_factory=list)
+    #: Element names the DM kept. None means all of them, which is what a
+    #: freshly generated card sends before anyone has touched it.
+    approved: list[str] | None = None
+    #: Colliding name -> `link` or `rename`.
+    resolutions: dict[str, str] = Field(default_factory=dict)
+
+
 class OrderRequest(BaseModel):
     campaign: str
     section_id: str
@@ -135,6 +152,130 @@ def running_order(campaign: str) -> dict:
             },
         )
     return {"campaign": campaign, "sections": rows}
+
+
+def _plan_for(request: ClusterRequest):
+    """Re-derive the plan from the payload and the graph. Never the client's.
+
+    THE BROWSER'S WORD IS WORTH NOTHING, which is the same rule
+    `store_generation` already follows for citations. A payload has been round
+    tripped through a page and edited by a person since the model produced it,
+    so the collision scan, the id minting and every drop are recomputed here
+    rather than trusted.
+    """
+    from backend.campaign.cluster import plan_cluster
+
+    with read_only_session() as session:
+        found = {c.slug: c for c in store.read_campaigns(session)}
+        campaign = found.get(request.campaign)
+        if campaign is None:
+            raise HTTPException(status_code=404, detail=f"no campaign {request.campaign!r}")
+        aliases = store.canon_aliases(session, campaign.books)
+        existing = frozenset(
+            dict(r)["id"]
+            for r in session.run(
+                "MATCH (e:Entity {plane:'campaign', campaign:$c}) RETURN e.id AS id",
+                {"c": request.campaign},
+            )
+        )
+    return plan_cluster(
+        campaign=request.campaign,
+        elements=request.elements,
+        edges=request.edges,
+        canon_aliases=aliases,
+        approved=None if request.approved is None else frozenset(request.approved),
+        existing_ids=existing,
+        resolutions=request.resolutions,
+    )
+
+
+@router.post("/plan-cluster")
+def plan_cluster_route(request: ClusterRequest) -> dict:
+    """What storing this WOULD do. Writes nothing.
+
+    The card calls this on every edit -- a rename, a rejection, a collision
+    resolved -- which is why `plan_cluster` is pure and why this reads rather
+    than writes. It is the dry run, and `/store-cluster` is the apply.
+    """
+    return _plan_for(request).as_dict()
+
+
+@router.post("/store-cluster")
+def store_cluster(request: ClusterRequest) -> dict:
+    """Write an approved cluster. One transaction, or nothing."""
+    plan = _plan_for(request)
+    if not plan.storable:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"{len(plan.collisions)} name(s) already exist in this "
+                    "campaign's book. Choose what each one means before storing."
+                ),
+                "collisions": plan.as_dict()["collisions"],
+            },
+        )
+
+    _resolved, bad = homebrew.cited_sections(request.from_canon, request.sources)
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(bad)} citation(s) point at nothing that was shown: {bad[:3]}",
+        )
+    if request.anchor:
+        with read_only_session() as session:
+            found = session.run(
+                "MATCH (s:Section {id:$id, plane:'canon'}) RETURN count(s) AS c",
+                {"id": request.anchor},
+            ).single()["c"]
+        if not found:
+            raise HTTPException(
+                status_code=400, detail=f"anchor {request.anchor!r} is not a canon section"
+            )
+
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(
+                lambda tx: homebrew.write_cluster(
+                    tx,
+                    plan=plan,
+                    kind=request.kind,
+                    title=request.title,
+                    body=request.body,
+                    generated_body=request.generated_body or request.body,
+                    from_canon=request.from_canon,
+                    invented=request.invented,
+                    from_context=request.from_context,
+                    sources=request.sources,
+                    manifest={"elements": request.elements, "edges": request.edges},
+                    anchor=request.anchor,
+                    model=request.model,
+                )
+            )
+    except homebrew.AlreadyStored as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except store.ChainCorrupted as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("storing a cluster failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete("/store-cluster")
+def delete_cluster_route(campaign: str, entity_id: str, cascade: bool = False) -> dict:
+    """Remove a cluster, refusing by default while its elements would orphan."""
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(
+                lambda tx: homebrew.delete_cluster(
+                    tx, slug=campaign, entity_id=entity_id, cascade=cascade
+                )
+            )
+    except homebrew.ClusterHasElements as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"message": str(exc), "elements": list(exc.members)},
+        ) from exc
 
 
 @router.post("/store")
