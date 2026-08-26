@@ -458,3 +458,56 @@ class TestTheSentenceLayerIsForTheReaderOnly:
         response = await agent.process_message("Who is Ismark?", use_rag=False)
         assert response.message == "an answer"
         assert response.subgraph["together"] == []
+
+
+class TestTheRandomTableCommandsAreRetired:
+    """`generate npc` must not steal the turn from the grounded path.
+
+    THE TRAP THIS CLOSES. `_check_tool_commands` ran before retrieval, and two
+    of its prefixes returned NPCs and encounters built by `random.choice` over
+    hardcoded lists -- no model, no canon, no provenance split. So in one chat
+    box "generate npc" got random tables and "make me an NPC for the tavern"
+    got a grounded card with citations, the phrasing chose the engine, and the
+    answer never said which had written it.
+    """
+
+    def _agent(self):
+        from backend.agents.dm_agent import DMAgent
+
+        return DMAgent.__new__(DMAgent)
+
+    @pytest.mark.parametrize(
+        "typed",
+        [
+            "generate npc",
+            "create npc merchant",
+            "/npc",
+            "generate encounter",
+            "create encounter",
+            "/encounter",
+        ],
+    )
+    def test_a_generation_phrase_no_longer_short_circuits(self, typed):
+        from backend.agents.dm_agent import DMAgent
+
+        assert DMAgent._check_tool_commands(self._agent(), typed) is None
+
+    def test_the_dice_command_still_works(self):
+        """Retiring the generators must not take the dice roller with them: it
+        invents nothing and claims nothing about the book."""
+        from backend.agents.dm_agent import DMAgent
+        from backend.agents.tools import DMTools
+
+        agent = self._agent()
+        agent.tools = DMTools()
+        found = DMAgent._check_tool_commands(agent, "/roll 1d20")
+        assert found is not None and found["type"] == "dice"
+
+    def test_the_agent_offers_no_random_table_generator(self):
+        """`agent.generate_npc()` returned random tables while
+        `generator.generate(kind='npc')` returned a grounded card. One name,
+        two engines, is the same trap one level in."""
+        from backend.agents.dm_agent import DMAgent
+
+        assert not hasattr(DMAgent, "generate_npc")
+        assert not hasattr(DMAgent, "generate_encounter")

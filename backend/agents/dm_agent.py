@@ -11,7 +11,7 @@ from backend.agents.conversation import ConversationManager
 from backend.agents.prompts import SYSTEM_PROMPT
 from backend.agents.subgraph import Subgraph, note_named
 from backend.agents.subgraph import seed as seed_subgraph
-from backend.agents.tools import DiceResult, DMTools, EncounterResult, NPCResult
+from backend.agents.tools import DiceResult, DMTools
 from backend.canon import ontology
 from backend.canon.lookup import CANON_PLANE, TOGETHER
 from backend.canon.retrieval import (
@@ -256,23 +256,23 @@ class DMAgent:
             result = self.tools.roll_dice(expression)
             return {"type": "dice", "result": result}
 
-        # NPC generation
-        if input_lower.startswith(("generate npc", "create npc", "/npc")):
-            # Parse role from command
-            parts = user_input.split(" ")
-            role = parts[-1] if len(parts) > 2 else "merchant"
-            result = self.tools.generate_npc(role=role)
-            return {"type": "npc", "result": result}
-
-        # Encounter generation
-        if input_lower.startswith(("generate encounter", "create encounter", "/encounter")):
-            # Default encounter params
-            result = self.tools.generate_encounter(
-                difficulty="medium",
-                environment="dungeon",
-                party_level=3,
-            )
-            return {"type": "encounter", "result": result}
+        # NO `generate npc` OR `generate encounter` HERE, DELIBERATELY.
+        #
+        # Both used to short-circuit to random tables in `DMTools` -- name
+        # sampled from a pool, two traits, an appearance keyed off race -- with
+        # no model, no canon and no provenance split. And they ran BEFORE
+        # retrieval, so in one chat box "generate npc" got random tables while
+        # "make me an NPC for the tavern" got a grounded card with citations.
+        # The phrasing silently chose the engine and the answer never said
+        # which one had written it, in a project whose whole method is that a
+        # DM can always tell.
+        #
+        # Both phrasings now fall through to the ordinary grounded path, where
+        # the model can call `generate_homebrew` and the result arrives as a
+        # card a person approves. `DMTools.generate_npc` still exists and is
+        # still reachable at `POST /api/chat/tools/npc`, which nothing calls;
+        # that surface is dormant rather than misleading, because reaching it
+        # takes a deliberate request rather than a turn of phrase.
 
         # Start combat
         if input_lower.startswith(("/combat", "start combat")):
@@ -314,36 +314,6 @@ class DMAgent:
             return DMResponse(
                 message=message,
                 tool_results=[{"type": "dice", "result": dice.model_dump()}],
-            )
-
-        elif tool_type == "npc":
-            npc: NPCResult = result
-            message = f"**{npc.name}** ({npc.race} {npc.role})\n\n"
-            message += f"*Appearance:* {npc.appearance}\n"
-            message += f"*Personality:* {', '.join(npc.personality)}\n"
-            message += f"*Motivations:* {', '.join(npc.motivations)}\n"
-            message += f"*Voice Notes:* {npc.voice_notes}"
-            if npc.secret:
-                message += f"\n\n*Secret:* {npc.secret}"
-
-            return DMResponse(
-                message=message,
-                tool_results=[{"type": "npc", "result": npc.model_dump()}],
-            )
-
-        elif tool_type == "encounter":
-            enc: EncounterResult = result
-            message = f"**{enc.difficulty.title()} Encounter** ({enc.environment}, Level {enc.party_level})\n\n"
-            message += "*Monsters:*\n"
-            for m in enc.monsters:
-                message += f"- {m['name']} (CR {m['cr']})\n"
-            message += f"\n*Total XP:* {enc.total_xp}\n"
-            message += f"*Description:* {enc.description}\n"
-            message += f"*Tactics:* {enc.tactics}"
-
-            return DMResponse(
-                message=message,
-                tool_results=[{"type": "encounter", "result": enc.model_dump()}],
             )
 
         elif tool_type == "combat_next":
@@ -866,47 +836,6 @@ class DMAgent:
             DiceResult with the roll outcome.
         """
         return self.tools.roll_dice(expression)
-
-    def generate_npc(
-        self,
-        role: str,
-        race: str | None = None,
-    ) -> NPCResult:
-        """Generate a random NPC.
-
-        Args:
-            role: NPC's role.
-            race: Optional race.
-
-        Returns:
-            NPCResult with NPC details.
-        """
-        return self.tools.generate_npc(role=role, race=race)
-
-    def generate_encounter(
-        self,
-        difficulty: str = "medium",
-        environment: str = "dungeon",
-        party_level: int = 3,
-        party_size: int = 4,
-    ) -> EncounterResult:
-        """Generate a combat encounter.
-
-        Args:
-            difficulty: Encounter difficulty.
-            environment: Environment type.
-            party_level: Average party level.
-            party_size: Number of party members.
-
-        Returns:
-            EncounterResult with encounter details.
-        """
-        return self.tools.generate_encounter(
-            difficulty=difficulty,
-            environment=environment,
-            party_level=party_level,
-            party_size=party_size,
-        )
 
     def get_conversation_history(self) -> list[dict]:
         """Get conversation history.
