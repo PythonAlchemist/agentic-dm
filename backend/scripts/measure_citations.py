@@ -41,14 +41,15 @@ Lords' Alliance controls Revel's End, and the prison has 75 guards on
 eight-hour shifts" -- where the cite covers the first half and the second half
 lives elsewhere. One citation was asked to carry two facts.
 
-The other is an artifact of THIS SCRIPT and not a defect in the thing it
-measures. `Castle Ravenloft -CONTAINS-> Tower Roof` is a claim the model took
-from the graph EDGES in its context, and the judge is shown passages only, so
-it cannot be supported by construction. The "unsupported anywhere" count
-therefore reads high by however many edge-derived claims a run produces: one,
-here, which means the true rate of an invention wearing a citation was 0/47.
-Fixing it means showing the judge the edge list too, and is worth doing before
-that number is ever used to decide something.
+The other WAS an artifact of this script and is fixed here. `Castle Ravenloft
+-CONTAINS-> Tower Roof` is a claim the model took from the graph EDGES in its
+context, and the judge saw passages only -- so it could not be supported by
+construction, and "unsupported anywhere" read high by however many edge-derived
+claims a run turned up. The relationships a generation was shown are now part
+of what the judge reads for that question, which is what the generation
+actually had in front of it. The FIRST judgement is unchanged and still asks
+only about the cited passage: a claim citing `[6]` is a claim about `[6]`, and
+letting an edge elsewhere rescue it would measure something else.
 
 COSTS MONEY, so `--dry-run` is the default and prints the plan, and the cap is
 enforced in the loop rather than hoped for.
@@ -267,8 +268,13 @@ async def main() -> None:
             if supported:
                 row["anywhere"] = True
             else:
+                # THE EDGES TOO, because they were in the model's context and a
+                # claim drawn from one is not an invention. What this asks is
+                # "did the graph put this in front of it anywhere", and the
+                # graph speaks in both prose and relationships.
                 everything = "\n\n".join(
-                    p.text for p in shown.passages if p.origin == "canon"
+                    [p.text for p in shown.passages if p.origin == "canon"]
+                    + [canon_context.render(shown, max_edges=canon_context.Depth().max_edges)]
                 )
                 anywhere, _why, usage2 = await judge(
                     client, args.model, everything, row["claim"]

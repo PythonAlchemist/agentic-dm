@@ -640,6 +640,44 @@ def expand_element(request: ExpandRequest) -> dict:
     return stored.as_dict()
 
 
+class RescanRequest(BaseModel):
+    campaign: str
+
+
+@router.post("/rescan")
+def rescan_campaign(request: RescanRequest) -> dict:
+    """Read every stored section's prose again, for this campaign.
+
+    NEW WRITES AND EDITS SCAN THEMSELVES, so this is for what predates that --
+    and for the day a name is added to a book's `global_names` and becomes
+    scannable outside its own chapter, which is not a campaign event at all.
+    Both cases are "the graph could see more of this prose than it does", and
+    neither announces itself.
+
+    Idempotent by construction: `rescan` reconciles rather than appends, so
+    running it twice is running it once.
+    """
+    with neo4j_session() as session:
+        sections = [
+            r["id"]
+            for r in session.run(
+                "MATCH (:Campaign {slug:$c})-[:HAS_SECTION]->(s:Section) "
+                "RETURN s.id AS id ORDER BY s.id",
+                {"c": request.campaign},
+            )
+        ]
+        totals = {"sections": len(sections), "scanned": 0, "dropped": 0}
+        for section_id in sections:
+            result = session.execute_write(
+                lambda tx, s=section_id: homebrew.rescan(
+                    tx, slug=request.campaign, section_id=s
+                )
+            )
+            totals["scanned"] += result["scanned"]
+            totals["dropped"] += result["dropped"]
+    return totals
+
+
 class EditRequest(BaseModel):
     campaign: str
     section_id: str
