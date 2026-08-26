@@ -49,6 +49,8 @@ will happily subtract them anyway -- it compares numbers, not suites.
 |---|---|---|---|---|
 | `2026-08-25-post-homebrew.json` | 108 | 68% | 58–76% | **Curse of Strahd only.** The campaign chain, homebrew, and the chapter-anchor ranking rule. First recorded baseline; its interval contains the 73% the project had been carrying unrecorded, so nothing suggested a regression. Superseded as a comparison point by the row below. |
 | `2026-08-25-both-books.json` | 228 | 73% | 67–79% | **Both books**, ten questions each. Per book: cos 70% (61–78%), kftgv 76% (67–83%). Those intervals overlap heavily, so the six-point gap is NOT a real difference. |
+| `2026-08-26-edges-as-shipped.json` | 570 | 85% | 82–88% | **Control arm** for the edge-filter question above. Per book: cos 80%, kftgv 89%. |
+| `2026-08-26-edges-filtered.json` | 570 | 85% | 82–88% | **Treatment arm**, `--only-supported-edges`. Identical to the control within ±4%. |
 | `2026-08-26-citation-rule.json` | 228 | 83% | 78–88% | Same twenty questions; the citation rule was given a reason. **+10% against the row above, 95% CI +3% to +18% — the first change this project has measured as real rather than asserted.** Per book: cos 81% (72–87%), kftgv 86% (78–91%). Compare future runs against this one. |
 
 ## What the citation change did, and what it did not
@@ -76,6 +78,33 @@ answers it is a known anchored miss for retrieval, so the model is hedging
 honestly about canon it genuinely did not receive, and the suite counts the
 hedge as uncited. That is arguably right behaviour scored as wrong, and it is
 left alone rather than tuned away.
+
+## The edge filter: asked three times, now answered
+
+`--only-supported-edges` withholds a guessed edge whose cited sentence a model
+judged unsupported or reversed. It would remove **234 of Curse of Strahd's 598
+proposed edges and 757 of Golden Vault's 1,541** -- half the anthology's
+guesswork -- so if bad edges were costing answers, this is where it would show.
+
+It was measured twice before and both runs were too weak to say anything:
++1% (CI -8 to +9) over ten Barovia questions, then +4% (CI -2 to +11) over 228
+samples. The second was tempting -- a10 moved 1/12 to 10/12 -- and tempting is
+exactly when to buy more samples rather than believe it.
+
+At 570 samples per arm, same questions, same code, one flag apart:
+
+    edges as shipped     483/570 = 85%
+    only supported       482/570 = 85%
+    change               -0%   95% CI -4% to +4%
+
+**It buys nothing.** The interval is now tight enough for that to mean
+something, and the earlier +4% was noise. Both arms are recorded below so the
+next person to wonder can read the answer instead of spending the calls.
+
+What it does NOT say: that the bad edges are harmless in general. It says the
+answer suite cannot see their effect at ±4%, on twenty questions whose answers
+mostly live in prose rather than in relationships. A question set built to
+exercise edges might well find something; this one does not.
 
 ## What the current run says, and does not
 
