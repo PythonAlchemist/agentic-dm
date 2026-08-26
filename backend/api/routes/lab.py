@@ -210,7 +210,14 @@ async def generate(request: GenerateRequest) -> dict:
         logger.exception("lab generate failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return result.as_dict() | {"model": model}
+    # The Generate tab gets the same suggestion the chat card does: one
+    # generator, two callers, neither left guessing where a scene belongs.
+    anchor, chapters = canon_context.suggest_anchor(retrieval)
+    return result.as_dict() | {
+        "model": model,
+        "anchor": anchor,
+        "relevant_chapters": list(chapters),
+    }
 
 
 @router.post("/reset")

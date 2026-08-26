@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from backend.canon.retrieval import DEFAULT_LIMIT, PATH_TEXT, Retrieval
+from backend.canon.retrieval import PATH_GRAPH, DEFAULT_LIMIT, PATH_TEXT, Retrieval
 
 
 @dataclass(frozen=True)
@@ -242,6 +242,55 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
         parts.append(heading + "\n" + "\n".join(lines))
 
     return "\n\n".join(parts)
+
+
+def suggest_anchor(retrieval: Retrieval) -> tuple[str, tuple[str, ...]]:
+    """Where a generation grounded in this retrieval belongs, and near what.
+
+    Returns `(section_id, chapters)` -- the passage to put it after, and every
+    chapter the retrieval touched, first-seen order.
+
+    THE GENERATION ALREADY KNOWS THIS AND WAS THROWING IT AWAY. A scene about
+    the voyage retrieves `Trek to the Prison`, `Approaching the Prison`,
+    `Prison Features` -- six passages, all from one chapter -- and the card
+    then asked the DM to find the right one among 546 sections spanning
+    thirteen unconnected heists, offering `V13: Gemstone Wing` from a museum
+    robbery with equal prominence.
+
+    THE CHAPTER IS CHOSEN BEFORE THE PASSAGE, and by WEIGHT rather than by
+    rank. A scene belongs to a chapter, not to a paragraph, so the chapter that
+    most of the retrieval came from is a better answer than whichever single
+    passage scored highest. Taking the top passage alone proposed the book's
+    INTRODUCTION for a mutiny on a prison barge -- front matter outranked the
+    voyage because one general passage about rival crews scored well, while
+    four passages from the adventure itself sat below it.
+
+    A GRAPH PASSAGE IS PREFERRED OVER A TEXT ONE within the chosen chapter. A
+    resolved name is a fact about what the scene is about; a keyword hit is a
+    guess, and a guess is a weaker claim about where something belongs.
+
+    It always proposes something rather than nothing: a suggestion a DM can
+    override beats a list of 546 they have to search.
+    """
+    shown = sources(retrieval)
+    if not shown:
+        return "", ()
+
+    weight: dict[str, int] = {}
+    for rank, source in enumerate(shown):
+        chapter = source.get("chapter")
+        if not chapter:
+            continue
+        # Rank still breaks ties, so a chapter contributing one very good
+        # passage beats another contributing one mediocre one.
+        weight[chapter] = weight.get(chapter, 0) + (len(shown) - rank)
+
+    chapters = tuple(sorted(weight, key=lambda c: -weight[c]))
+    home = chapters[0]
+    within = [s for s in shown if s.get("chapter") == home]
+    by_graph = [s for s in within if s.get("path") == PATH_GRAPH]
+    best = (by_graph or within)[0]
+    return str(best.get("source") or ""), chapters
 
 
 def sources(retrieval: Retrieval) -> list[dict]:

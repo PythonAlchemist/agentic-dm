@@ -118,13 +118,23 @@ def running_order(campaign: str) -> dict:
             if campaign_row
             else []
         )
-        headings = {
-            dict(r)["id"]: dict(r)["heading"]
+        # The chapter travels with the heading so a picker can group by
+        # adventure. An anthology's running order is thirteen unconnected
+        # heists in a row, and a flat list of 546 sections offers a museum
+        # room as readily as the voyage a scene is actually about.
+        rows = {
+            dict(r)["id"]: (dict(r)["heading"], dict(r)["chapter"])
             for r in session.run(
-                "MATCH (s:Section) WHERE s.id IN $ids RETURN s.id AS id, s.heading AS heading",
+                """
+                MATCH (s:Section) WHERE s.id IN $ids
+                OPTIONAL MATCH (c:Chapter)-[:HAS_SECTION]->(s)
+                RETURN s.id AS id, s.heading AS heading, c.slug AS chapter
+                """,
                 {"ids": order + sorted(skipped)},
             )
         }
+        headings = {k: v[0] for k, v in rows.items()}
+        chapters = {k: v[1] for k, v in rows.items()}
 
     placed = {section_id: index for index, section_id in enumerate(order)}
     rows = [
@@ -133,6 +143,7 @@ def running_order(campaign: str) -> dict:
             "heading": headings.get(section_id, section_id),
             "origin": "campaign" if section_id.startswith("hb:") else "canon",
             "skipped": False,
+            "chapter": chapters.get(section_id) or "",
         }
         for section_id in order
     ]
@@ -149,6 +160,7 @@ def running_order(campaign: str) -> dict:
                 "heading": headings.get(section_id, section_id),
                 "origin": "canon",
                 "skipped": True,
+                "chapter": chapters.get(section_id) or "",
             },
         )
     return {"campaign": campaign, "sections": rows}

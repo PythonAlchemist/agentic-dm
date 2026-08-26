@@ -139,6 +139,9 @@ export interface GeneratedReply {
   model: string
   /** Set on a card the chat agent asked for: the canon section it goes after. */
   anchor?: string
+  /** Chapters this generation is actually about, heaviest first. The picker
+   *  leads with them instead of listing the whole book flat. */
+  relevant_chapters?: string[]
   carried?: string[]
   /** What the generation says it contains. Absent on a single-artifact card,
    *  which is every card that existed before clusters. */
@@ -191,6 +194,8 @@ export interface OrderRow {
   heading: string
   origin: 'canon' | 'campaign'
   skipped: boolean
+  /** Which chapter it belongs to, so a picker can group by adventure. */
+  chapter?: string
 }
 
 export interface StoredResult {

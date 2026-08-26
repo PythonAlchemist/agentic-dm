@@ -223,3 +223,76 @@ class TestSources:
 
     def test_no_passages_means_no_citations(self):
         assert canon_context.sources(Retrieval(question="q")) == []
+
+
+class TestSuggestingWhereAGenerationFits:
+    """The agent already knows; it was throwing the answer away.
+
+    A scene about the voyage retrieves six passages from Prisoner 13, the top
+    one literally `Trek to the Prison` -- and the card then offered 546
+    sections across thirteen unconnected heists with no suggestion, listing a
+    museum room as readily as the voyage.
+    """
+
+    def _sourced(self, *pairs, path=PATH_GRAPH):
+        return Retrieval(
+            question="x",
+            path=path,
+            passages=tuple(
+                Passage(
+                    section_id=f"kftgv:{chapter}#{index}",
+                    chapter=chapter,
+                    chapter_index=0,
+                    section=heading,
+                    section_index=index,
+                    text="t",
+                    occurrences=1,
+                    entity_ids=(),
+                    path=path,
+                )
+                for index, (chapter, heading) in enumerate(pairs)
+            ),
+        )
+
+    def test_it_proposes_a_passage_from_the_heaviest_chapter(self):
+        retrieval = self._sourced(
+            ("prisoner-13", "Trek to the Prison"),
+            ("prisoner-13", "Approaching the Prison"),
+            ("prisoner-13", "Prison Features"),
+        )
+        anchor, chapters = canon_context.suggest_anchor(retrieval)
+        assert anchor == "kftgv:prisoner-13#0"
+        assert chapters[0] == "prisoner-13"
+
+    def test_weight_beats_rank_so_front_matter_does_not_win(self):
+        """THE DEFECT THIS FIXES. Taking the single top passage proposed the
+        book's Introduction for a mutiny on a prison barge: one general
+        passage about rival crews outranked four from the adventure itself."""
+        retrieval = self._sourced(
+            ("introduction-a-collection-of-heists", "Rival Crew"),
+            ("prisoner-13", "Trek to the Prison"),
+            ("prisoner-13", "Revel's End"),
+            ("prisoner-13", "Prison Features"),
+        )
+        anchor, chapters = canon_context.suggest_anchor(retrieval)
+        assert chapters[0] == "prisoner-13"
+        assert "introduction" not in anchor
+
+    def test_a_single_chapter_still_wins_on_rank(self):
+        """Weight must not swamp quality: one chapter contributing one very
+        good passage beats another contributing one mediocre one."""
+        retrieval = self._sourced(
+            ("the-stygian-gambit", "Casino Features"),
+            ("axe-from-the-grave", "Toadhop"),
+        )
+        anchor, _ = canon_context.suggest_anchor(retrieval)
+        assert "the-stygian-gambit" in anchor
+
+    def test_nothing_retrieved_proposes_nothing(self):
+        assert canon_context.suggest_anchor(Retrieval(question="x")) == ("", ())
+
+    def test_it_always_proposes_something_when_it_can(self):
+        """A suggestion a DM can override beats a list of 546 to search."""
+        retrieval = self._sourced(("prisoner-13", "Trek"), path=PATH_TEXT)
+        anchor, _ = canon_context.suggest_anchor(retrieval)
+        assert anchor

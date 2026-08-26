@@ -645,7 +645,16 @@ class DMAgent:
                 logger.warning("homebrew generation failed", exc_info=True)
                 card = {"kind": request.kind, "subject": request.subject,
                         "error": f"{type(exc).__name__}: {exc}"}
-            card["anchor"] = request.insert_after
+            # WHERE IT FITS, PROPOSED RATHER THAN LEFT TO A SEARCH. The model
+            # may name an anchor; when it does not, the generation's own
+            # retrieval already says which passages it is grounded in, and the
+            # best of those is the obvious place. The card offered 546 sections
+            # across thirteen unconnected heists with no suggestion at all.
+            suggested, chapters = canon_context.suggest_anchor(own)
+            card["anchor"] = request.insert_after or suggested
+            #: The chapters this scene is actually about, so a picker can lead
+            #: with them instead of listing the whole book flat.
+            card["relevant_chapters"] = list(chapters)
             card["carried"] = list(names)
             cards.append(card)
         return cards

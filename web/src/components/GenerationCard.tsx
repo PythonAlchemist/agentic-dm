@@ -153,14 +153,28 @@ export function GenerationCard({
               className="mt-1 w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200"
             >
               <option value="">Nowhere in particular</option>
-              {order
-                .filter((row) => row.origin === 'canon' && !row.skipped)
-                .map((row) => (
-                  <option key={row.section_id} value={row.section_id}>
-                    after {row.heading}
-                  </option>
-                ))}
+              {/* GROUPED BY ADVENTURE, WITH THIS SCENE'S OWN FIRST. A flat
+                  list offered a museum room from an unrelated heist as
+                  readily as the voyage the scene is about -- 546 options
+                  across thirteen books that share no continuity. */}
+              {groupByChapter(order, card.relevant_chapters ?? []).map((group) => (
+                <optgroup
+                  key={group.chapter}
+                  label={`${group.relevant ? '● ' : ''}${prettyChapter(group.chapter)}`}
+                >
+                  {group.rows.map((row) => (
+                    <option key={row.section_id} value={row.section_id}>
+                      after {row.heading}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
+            {card.anchor && anchor === card.anchor && (
+              <span className="mt-1 block text-[11px] text-neutral-500">
+                Suggested from the passages this draft was written against.
+              </span>
+            )}
           </label>
 
           <div className="mt-2 flex items-center gap-3">
@@ -194,6 +208,43 @@ export function GenerationCard({
       )}
     </div>
   )
+}
+
+/**
+ * The running order as chapters, with the ones this generation is about first.
+ *
+ * `relevant` comes from the generation's OWN retrieval -- the chapters its
+ * passages came from, heaviest first -- so the picker leads with the adventure
+ * the scene belongs to rather than with whatever the book prints first.
+ */
+function groupByChapter(order: OrderRow[], relevant: string[]) {
+  const groups = new Map<string, OrderRow[]>()
+  for (const row of order) {
+    if (row.origin !== 'canon' || row.skipped) continue
+    const chapter = row.chapter || 'elsewhere'
+    if (!groups.has(chapter)) groups.set(chapter, [])
+    groups.get(chapter)!.push(row)
+  }
+  const rank = new Map(relevant.map((chapter, index) => [chapter, index]))
+  return [...groups.entries()]
+    .map(([chapter, rows]) => ({
+      chapter,
+      rows,
+      relevant: rank.has(chapter),
+    }))
+    .sort((a, b) => {
+      const left = rank.get(a.chapter) ?? Number.MAX_SAFE_INTEGER
+      const right = rank.get(b.chapter) ?? Number.MAX_SAFE_INTEGER
+      return left - right
+    })
+}
+
+/** `prisoner-13` reads as `Prisoner 13` in a menu a person is scanning. */
+function prettyChapter(slug: string) {
+  return slug
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 function Provenance({
