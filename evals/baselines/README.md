@@ -48,7 +48,34 @@ will happily subtract them anyway -- it compares numbers, not suites.
 | File | Samples | Rate | 95% CI | Scope and what had changed |
 |---|---|---|---|---|
 | `2026-08-25-post-homebrew.json` | 108 | 68% | 58–76% | **Curse of Strahd only.** The campaign chain, homebrew, and the chapter-anchor ranking rule. First recorded baseline; its interval contains the 73% the project had been carrying unrecorded, so nothing suggested a regression. Superseded as a comparison point by the row below. |
-| `2026-08-25-both-books.json` | 228 | 73% | 67–79% | **Both books**, ten questions each. Per book: cos 70% (61–78%), kftgv 76% (67–83%). Those intervals overlap heavily, so the six-point gap is NOT a real difference -- 228 samples resolve 7% overall and much less per book. Compare future runs against this one. |
+| `2026-08-25-both-books.json` | 228 | 73% | 67–79% | **Both books**, ten questions each. Per book: cos 70% (61–78%), kftgv 76% (67–83%). Those intervals overlap heavily, so the six-point gap is NOT a real difference. |
+| `2026-08-26-citation-rule.json` | 228 | 83% | 78–88% | Same twenty questions; the citation rule was given a reason. **+10% against the row above, 95% CI +3% to +18% — the first change this project has measured as real rather than asserted.** Per book: cos 81% (72–87%), kftgv 86% (78–91%). Compare future runs against this one. |
+
+## What the citation change did, and what it did not
+
+Every answer failure was one shape: correct and uncited. The instruction
+existed in both the system prompt and the canon preamble, and was the ONLY rule
+in either with no reason attached -- every neighbouring bullet explains its
+consequence at length. Giving it one moved a06 from 0/12 to 11/12 and b03 from
+2/12 to 12/12.
+
+A SECOND EDIT IS RECORDED AS NOT MEASURABLY BETTER. The first wording said
+"every answer drawn from a passage carries a citation", which a model can
+satisfy by deciding its answer is not drawn from one: a10 hedges "the canon
+does not provide specific details", states a canon fact anyway, and cites
+nothing. The second closed that by requiring a citation for any fact taken from
+the block even inside an answer that says canon is thin. Against the first:
++1%, 95% CI -6% to +8%. **Zero is inside that interval.** The second wording
+shipped because it reasons correctly about a case that is understood, not
+because the numbers preferred it -- and this is written down so nobody later
+reads the change as evidence it worked.
+
+a10 STILL SCORES BELOW ITS BASELINE, 7/12 to 4/12, inside a run that gained 10
+points overall. Its own note explains why it is unusual: the section that
+answers it is a known anchored miss for retrieval, so the model is hedging
+honestly about canon it genuinely did not receive, and the suite counts the
+hedge as uncited. That is arguably right behaviour scored as wrong, and it is
+left alone rather than tuned away.
 
 ## What the current run says, and does not
 

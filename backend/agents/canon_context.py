@@ -108,7 +108,12 @@ def _preamble(book_title: str) -> str:
     book = book_title or "the loaded canon"
     return (
         f"CANON — passages retrieved from {book} for this question.\n"
-        "Answer from these passages. Cite the section you used, like [1].\n"
+        "Answer from these passages, and CITE THE ONE YOU USED, like [1]. Cite "
+        "every fact you take from them, however short the answer, and cite it "
+        "even inside an answer that says the canon is thin — if you can state "
+        "the fact, you can name where it came from. A DM checks your answer "
+        "against the book, and an uncited claim is indistinguishable from one "
+        "you remembered.\n"
         "If they do not cover what was asked, say so plainly rather than filling "
         "the gap from memory — a DM acting on an invented detail finds out at the "
         "table."
