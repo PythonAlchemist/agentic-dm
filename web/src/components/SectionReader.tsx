@@ -107,6 +107,15 @@ export function SectionReader({
     setFailed('')
     try {
       await labAPI.editSection(campaign, sectionId, draft)
+      // THE PROSE CHANGED, SO WHAT IT SAYS ABOUT RELATIONSHIPS MAY HAVE. Read
+      // back after the write, never inside it. Failure here is not failure of
+      // the edit -- the words are saved either way -- so it is caught
+      // separately rather than surfacing as "your edit did not go through".
+      try {
+        await labAPI.deriveEdges(campaign, sectionId)
+      } catch {
+        /* the edit stands; the guesses can be re-derived later */
+      }
       // Re-read rather than patching state locally: `edited` is DERIVED on the
       // server from whether the text still matches what the model wrote, and
       // guessing at it here is how the two come to disagree.

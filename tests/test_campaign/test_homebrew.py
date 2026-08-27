@@ -1065,3 +1065,78 @@ class TestSomethingTheCampaignAlreadyHoldsStaysInTheCluster:
             {"s": result["section_id"], "e": existing.entity_id},
         ).single()["n"]
         assert named >= 1, "the involvement is recorded even though nothing was minted"
+
+
+class TestRelationshipsReadBackOutOfTheProse:
+    """A DM writes "Captain Saltmarrow commands the Red Barge" and the graph
+    held the two of them with nothing between. Cluster edges only ever covered
+    what a generation DECLARED about itself, so prose written by hand, revised
+    afterwards, or made before edges existed had none at all."""
+
+    def _scene(self, table, body):
+        stored = _store(table, anchor=None, title="Pytest Read Back",
+                        body=body, generated_body=body)
+        return stored.section_id
+
+    def test_an_edge_between_two_things_it_names_is_written(self, table):
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        result = table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Sloop",
+                        "rel_type": "OWNS"}],
+            )
+        )
+        assert result["written"] == 1
+
+    def test_it_is_proposed_and_never_authored(self, table):
+        """The DM asserting a relationship and a model guessing one from their
+        sentences are different claims. The second is dimmed and labelled
+        rather than mixed in with the first."""
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Sloop",
+                        "rel_type": "OWNS"}],
+            )
+        )
+        status = table.run(
+            "MATCH (:Entity {name:'Pytest Skipper'})-[r:OWNS]->(:Entity {name:'Pytest Sloop'}) "
+            "RETURN r.status AS s, r.plane AS p"
+        ).single()
+        assert dict(status) == {"s": "proposed", "p": "campaign"}
+
+    def test_an_endpoint_the_section_does_not_name_is_refused(self, table):
+        """The scan has already decided what this prose mentions. An edge
+        reaching outside that is about something the section does not
+        discuss, whatever the model thought."""
+        section = self._scene(table, "Nobody in particular is here.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        result = table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Somebody Else", "target": "Another",
+                        "rel_type": "OWNS"}],
+            )
+        )
+        assert result["written"] == 0
+        assert result["dropped"] == {"an endpoint is not named in this section": 1}
+
+    def test_a_relationship_the_graph_does_not_write_is_refused(self, table):
+        section = self._scene(table, "Pytest Read Back happens.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        result = table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Read Back", "target": "Pytest Read Back",
+                        "rel_type": "VIBES_WITH"}],
+            )
+        )
+        assert result["written"] == 0

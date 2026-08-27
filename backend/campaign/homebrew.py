@@ -859,6 +859,79 @@ def _anchor_chapter(tx, slug: str, section_id: str) -> str:
     return (dict(row)["chapter"] or "") if row else ""
 
 
+PROPOSED = "proposed"
+
+
+def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
+    """Write relationships READ BACK out of stored prose, as guesses.
+
+    A DM writes "Captain Saltmarrow commands the Red Barge" and the graph held
+    the two of them and nothing between. Cluster edges only ever covered what a
+    generation DECLARED about itself, so anything written by hand, revised
+    afterwards, or made before edges existed had none.
+
+    PROPOSED, NEVER AUTHORED, and that is the whole care here. An `authored`
+    edge is the DM saying so; this is a model reading their prose and guessing,
+    which is the same act the canon extractor performs and gets wrong about a
+    third of the time. Written on the campaign plane with `status = proposed`,
+    so the reader dims them and says "guessed" -- visible, checkable, and never
+    passing for something the DM asserted.
+
+    BOTH ENDPOINTS MUST BE NAMED IN THE SECTION. The scan has already decided
+    which entities this prose mentions; an edge reaching outside that set is
+    about something the section does not discuss, whatever the model thought.
+    """
+    named = {
+        row["name"].casefold(): row["id"]
+        for row in tx.run(
+            f"""
+            MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$s}})
+            MATCH (m)-[:{REFERS_TO}]->(e:Entity)
+            RETURN DISTINCT e.id AS id, e.name AS name
+            """,
+            {"s": section_id},
+        )
+    }
+    written, dropped = 0, {}
+
+    def drop(reason: str) -> None:
+        dropped[reason] = dropped.get(reason, 0) + 1
+
+    for edge in edges or ():
+        source = str(edge.get("source") or "").strip().casefold()
+        target = str(edge.get("target") or "").strip().casefold()
+        rel = str(edge.get("rel_type") or "").strip().upper()
+        if source not in named or target not in named:
+            drop("an endpoint is not named in this section")
+            continue
+        if source == target:
+            drop("points at itself")
+            continue
+        try:
+            relationship = RelationshipType(rel)
+        except ValueError:
+            drop(f"{rel or '(none)'} is not a relationship this graph writes")
+            continue
+        layer = LAYER_MAP.get(relationship)
+        tx.run(
+            f"""
+            MATCH (a:Entity {{id:$a}}), (b:Entity {{id:$b}})
+            MERGE (a)-[r:{relationship.value}]->(b)
+            ON CREATE SET r.plane = $plane, r.campaign = $slug,
+                          r.status = $status, r.layer = $layer
+            """,
+            {
+                "a": named[source], "b": named[target], "plane": CAMPAIGN_PLANE,
+                "slug": slug, "status": PROPOSED,
+                "layer": layer.value if layer else "",
+            },
+        )
+        written += 1
+    # ON CREATE ONLY: an edge the DM approved on a card is `authored`, and a
+    # later re-read must not quietly demote it to a guess.
+    return {"written": written, "dropped": dropped}
+
+
 class NotEditable(Exception):
     """Asked to change prose this campaign does not own.
 

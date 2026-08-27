@@ -449,6 +449,17 @@ export const labAPI = {
     )
   },
 
+  /** Read a stored section back and propose the relationships in its prose.
+   *  Costs a model call, so it runs AFTER a write rather than inside one, and
+   *  what it writes is `proposed` — a guess, dimmed and labelled, never mixed
+   *  in with what the DM asserted. */
+  deriveEdges(campaign: string, sectionId: string) {
+    return postTo<{ written: number; dropped: Record<string, number> }>(
+      '/homebrew/derive-edges',
+      { campaign, section_id: sectionId },
+    )
+  },
+
   /** Put a section immediately after another in the running order.
    *  Sequence only — what it sits inside is untouched. */
   move(campaign: string, sectionId: string, after: string) {

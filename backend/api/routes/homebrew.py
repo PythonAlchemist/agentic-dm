@@ -30,6 +30,7 @@ from backend.agents.generator import KINDS, SHAPES
 from backend.campaign import homebrew, ontology, store
 from backend.campaign.chain import move_plan, position_for, remove_plan, walk
 from backend.campaign.model import PART_OF
+from backend.core.config import settings
 from backend.core.database import neo4j_session, read_only_session
 
 logger = logging.getLogger(__name__)
@@ -834,6 +835,81 @@ def set_role(request: RoleRequest) -> dict:
             )
         except homebrew.NotStored as refused:
             raise HTTPException(status_code=404, detail=str(refused)) from refused
+
+
+class DeriveRequest(BaseModel):
+    campaign: str
+    section_id: str
+    model: str | None = None
+
+
+@router.post("/derive-edges")
+async def derive_edges(request: DeriveRequest) -> dict:
+    """Read a stored section back and propose the relationships in it.
+
+    RUN AFTER A WRITE OR AN EDIT, not inside one. It is a model call and a real
+    cost, and holding a Neo4j transaction open across one would be trading a
+    lock for a network round trip.
+
+    IT REUSES `annotate`, the same second pass a cluster gets, rather than the
+    canon extractor. That one was measured: declaring edges WHILE writing put
+    37-51% of them outside the type table, and reading finished prose brought
+    it to 27%. Prose written by hand deserves the better of the two.
+
+    What it writes is `proposed`. The DM asserting a relationship and a model
+    guessing one from their sentences are different claims, and the second gets
+    dimmed and labelled rather than mixed in with the first.
+    """
+    from backend.agents import canon_context, generator
+    from backend.canon.retrieval import CanonRetriever
+    from openai import AsyncOpenAI
+
+    with read_only_session() as session:
+        row = session.run(
+            "MATCH (s:Section {id:$id, plane:'campaign', campaign:$c}) "
+            "RETURN s.text AS text, s.heading AS heading",
+            {"id": request.section_id, "c": request.campaign},
+        ).single()
+    if row is None:
+        raise HTTPException(404, f"no section {request.section_id!r} here")
+    body = dict(row)["text"] or ""
+    if not body.strip():
+        return {"written": 0, "dropped": {}, "note": "nothing written yet to read"}
+
+    model = request.model or settings.openai_model
+    books = _books_for(request.campaign)
+    retrieval = CanonRetriever(
+        book=books[0] if books else "cos", campaign=request.campaign
+    ).retrieve(dict(row)["heading"] or body[:80])
+    _elements, edges, _dropped, error = await generator.annotate(
+        AsyncOpenAI(api_key=settings.openai_api_key),
+        body=body,
+        retrieval=retrieval,
+        depth=canon_context.Depth(),
+        model=model,
+    )
+    if error:
+        raise HTTPException(502, f"could not read it back: {error}")
+
+    with neo4j_session() as session:
+        return session.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=request.campaign, section_id=request.section_id, edges=edges
+            )
+        )
+
+
+def _books_for(campaign: str) -> list[str]:
+    """Which books a campaign draws on, for the retrieval that grounds a read."""
+    with read_only_session() as session:
+        return [
+            r["slug"]
+            for r in session.run(
+                "MATCH (:Campaign {slug:$c})-[:DRAWS_ON]->(b:Book) RETURN b.slug AS slug",
+                {"c": campaign},
+            )
+            if r["slug"]
+        ]
 
 
 class NestRequest(BaseModel):

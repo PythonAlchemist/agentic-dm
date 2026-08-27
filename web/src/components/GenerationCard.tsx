@@ -112,6 +112,16 @@ export function GenerationCard({
             model: card.model,
           })
       setStored(result.entity_id)
+      // A NEW NODE IS READ BACK the same way an edited one is: the graph
+      // should hold what the prose says, not only what the manifest declared.
+      const section = (result as { section_id?: string }).section_id
+      if (campaign && section) {
+        try {
+          await labAPI.deriveEdges(campaign, section)
+        } catch {
+          /* stored is stored; the guesses can be re-derived later */
+        }
+      }
       onStored?.()
     } catch (error) {
       setFailed(error instanceof Error ? error.message : String(error))
