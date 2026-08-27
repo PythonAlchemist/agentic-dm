@@ -323,7 +323,12 @@ def write(
         {"e": entity_id, "s": section_id, "plane": CAMPAIGN_PLANE, "slug": slug, "name": name},
     )
 
-    resolved, _bad = cited_sections(from_canon, sources)
+    # BOTH LISTS. `split_by_origin` moved claims that cite the DM's own
+    # sections out of `from_canon`, and this kept reading only `from_canon` --
+    # so a draft built entirely on their own material recorded no
+    # `DERIVED_FROM` at all and its "Built on:" line came back empty. What a
+    # thing was built on does not care which plane it was built on.
+    resolved, _bad = cited_sections([*from_canon, *from_yours], sources)
     for target in resolved:
         tx.run(
             f"""
@@ -593,6 +598,22 @@ def write_cluster(
     # It stays out of canon reads by construction rather than by a filter --
     # `MENTIONS` requires the section to hang off a `:Chapter`, and a campaign
     # section hangs off a `:Campaign`. A test pins that.
+    # WHAT THIS SCENE INVOLVES THAT ALREADY EXISTED. A mention, exactly as a
+    # canon `link` is: nothing about the existing node changes, and the scene
+    # gains the connection it was written to have.
+    for name, entity_id in plan.reused:
+        tx.run(
+            f"""
+            MATCH (e:Entity {{id:$e}}), (s:Section {{id:$s}})
+            MERGE (m:Mention {{id:$e + '@' + $s}})
+            SET m.plane = $plane, m.campaign = $slug, m.display_name = $name
+            MERGE (m)-[:{REFERS_TO}]->(e)
+            MERGE (m)-[:{IN_SECTION}]->(s)
+            """,
+            {"e": entity_id, "s": root.section_id, "plane": CAMPAIGN_PLANE,
+             "slug": plan.campaign, "name": name},
+        )
+
     linked = 0
     for name, canon_id in plan.links:
         tx.run(
@@ -617,6 +638,9 @@ def write_cluster(
     # let one edge sit on a layer nothing else of its type sits on.
     by_name = {e.name.casefold(): e.entity_id for e in plan.elements}
     by_name[title.strip().casefold()] = root.entity_id
+    # Reused things resolve by name too, or every edge naming one would fail
+    # to find an endpoint that is sitting right there in the campaign.
+    by_name.update({name.casefold(): entity_id for name, entity_id in plan.reused})
     edges_written = 0
     for source, target, rel_type in plan.edges:
         relationship = RelationshipType(rel_type)  # raises on anything unknown
@@ -646,6 +670,7 @@ def write_cluster(
     return {
         **root.as_dict(),
         "elements": written,
+        "reused": [entity_id for _name, entity_id in plan.reused],
         "scanned": scan["scanned"],
         "linked_to_canon": linked,
         "dropped": dict(plan.dropped),
@@ -1048,7 +1073,12 @@ def expand(
          "slug": slug, "name": name},
     )
 
-    resolved, _bad = cited_sections(from_canon, sources)
+    # BOTH LISTS. `split_by_origin` moved claims that cite the DM's own
+    # sections out of `from_canon`, and this kept reading only `from_canon` --
+    # so a draft built entirely on their own material recorded no
+    # `DERIVED_FROM` at all and its "Built on:" line came back empty. What a
+    # thing was built on does not care which plane it was built on.
+    resolved, _bad = cited_sections([*from_canon, *from_yours], sources)
     for target in resolved:
         tx.run(
             f"""

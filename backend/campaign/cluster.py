@@ -108,6 +108,10 @@ class ClusterPlan:
     #: drop, though the element mints nothing: the scene genuinely involves
     #: that entity, and saying so is the whole point of choosing `link`.
     links: tuple[tuple[str, str], ...] = ()
+    #: `(name, entity_id)` for things this campaign already holds that the
+    #: generation names again. Nothing is minted; the involvement is recorded,
+    #: and they stand as edge endpoints because they are genuinely here.
+    reused: tuple[tuple[str, str], ...] = ()
     #: Reason -> count. Never a bare total: "3 dropped" tells a reader nothing
     #: about whether the generation or the rules were at fault.
     dropped: dict = field(default_factory=dict)
@@ -155,6 +159,7 @@ class ClusterPlan:
                 for c in self.collisions
             ],
             "links": [{"name": n, "canon_id": c} for n, c in self.links],
+            "reused": [{"name": n, "entity_id": e} for n, e in self.reused],
             "dropped": dict(self.dropped),
             "edges": [
                 {"source": s, "target": t, "rel_type": r} for s, t, r in self.edges
@@ -214,6 +219,9 @@ def plan_cluster(
     planned: list[PlannedElement] = []
     collisions: list[Collision] = []
     links: list[tuple[str, str]] = []
+    #: `(name, entity_id)` for elements this campaign already holds. Not a
+    #: drop: nothing is minted, and the scene's involvement with them is.
+    reused: list[tuple[str, str]] = []
     minted: set[str] = set()
     # THE GENERATION'S OWN ID, so an element cannot claim it. `write_cluster`
     # creates the root first and then the elements, so a member sharing the
@@ -242,10 +250,18 @@ def plan_cluster(
             drop("this is the generation itself, not something it contains")
             continue
         if entity_id in existing_ids:
-            # The campaign already holds this. Refused rather than merged, the
-            # rule `AlreadyStored` states, checked here so the card can say so
-            # before a person presses store.
-            drop("already in this campaign")
+            # REUSED, NOT DROPPED. The campaign already holds this, so nothing
+            # is minted -- `AlreadyStored` is right that a second Captain
+            # Saltmarrow is not what naming him means. But dropping him
+            # outright took him out of the cluster entirely, and every
+            # relationship the generation declared about him then lost an
+            # endpoint: an encounter whose central figure is the corsair
+            # captain stored with no edge to the corsair captain.
+            #
+            # Same shape as `link` for a canon collision: no node minted, the
+            # involvement recorded. He counts as an edge endpoint because he
+            # is genuinely here.
+            reused.append((name, entity_id))
             continue
         if entity_id in minted:
             drop("two elements mint the same id")
@@ -283,18 +299,30 @@ def plan_cluster(
         )
 
     kept_edges, edges_dropped, reversible = _plan_edges(
-        edges, planned, root_name, root_kind, accept_reversed
+        edges, planned, root_name, root_kind, accept_reversed, reused
     )
     return ClusterPlan(
         campaign=campaign,
         elements=tuple(planned),
         collisions=tuple(collisions),
         links=tuple(links),
+        reused=tuple(reused),
         dropped=dropped,
         edges=kept_edges,
         edges_dropped=edges_dropped,
         edges_reversible=reversible,
     )
+
+
+#: Filled by `plan_cluster` from what the caller read out of the graph, so the
+#: pure planner still touches no database. Empty means "assume NPC", which is
+#: what a person naming somebody usually means and is the safest guess for a
+#: domain check that is about to reject the edge anyway if it is wrong.
+_REUSED_KINDS: dict[str, str] = {}
+
+
+def _kind_of(entity_id: str) -> str:
+    return _REUSED_KINDS.get(entity_id, "NPC")
 
 
 def edge_key(source: str, target: str, rel_type: str) -> str:
@@ -309,6 +337,7 @@ def _plan_edges(
     root_name: str,
     root_kind: str,
     accept_reversed: frozenset[str] = frozenset(),
+    reused: list[tuple[str, str]] | None = None,
 ) -> tuple[tuple[tuple[str, str, str], ...], dict, tuple[tuple[str, str, str], ...]]:
     """Which declared relationships are writable. `(kept, dropped_by_reason)`.
 
@@ -345,6 +374,13 @@ def _plan_edges(
         CandidateNode(name=e.name, entity_type=LABELS.get(e.kind, "LORE"))
         for e in planned
     ]
+    # THINGS THE CAMPAIGN ALREADY HOLDS ARE ENDPOINTS TOO. Their type comes
+    # from the id rather than from the manifest -- the generation is naming
+    # something that exists, and what it IS was settled when it was made.
+    for name, entity_id in reused or ():
+        nodes.append(
+            CandidateNode(name=name, entity_type=_kind_of(entity_id))
+        )
     if root_name:
         nodes.append(
             CandidateNode(name=root_name, entity_type=LABELS.get(root_kind, "LORE"))

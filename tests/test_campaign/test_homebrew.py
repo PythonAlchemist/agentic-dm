@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from backend.campaign import homebrew, store
+from backend.campaign import cluster, homebrew, store
 from backend.campaign.homebrew import split_by_origin
 from backend.campaign.model import AUTHORED, CAMPAIGN_PLANE, Campaign
 from backend.canon.retrieval import CanonRetriever
@@ -515,7 +515,8 @@ class TestTheClusterEndpointsReDeriveEverything:
             {"c": SLUG},
         )
         plan = _plan_for(ClusterRequest(**self._payload()))
-        assert plan.dropped == {"already in this campaign": 1}
+        assert plan.dropped == {}
+        assert len(plan.reused) == 1, "read from the graph, and reused not dropped"
 
 
 class TestFleshingOutAStub:
@@ -1032,3 +1033,35 @@ class TestDeletingOneThingDoesNotUnnameAnother:
         assert table.run(
             "MATCH (a:Alias {name:'Pytest Sole Owner'}) RETURN count(a) AS n"
         ).single()["n"] == 0
+
+
+class TestSomethingTheCampaignAlreadyHoldsStaysInTheCluster:
+    """A stored encounter whose central figure was Captain Saltmarrow had no
+    edge to Captain Saltmarrow. He was dropped as "already in this campaign",
+    which took him out of the cluster, and all three declared relationships
+    then failed for an endpoint that was sitting right there."""
+
+    def test_the_scene_records_that_it_involves_him(self, table):
+        existing = _store(table, anchor=None, title="Pytest Reused NPC",
+                          body="a", generated_body="a")
+        plan = cluster.plan_cluster(
+            campaign=SLUG,
+            elements=[{"name": "Pytest Reused NPC", "kind": "npc", "role": "here again"}],
+            existing_ids=frozenset({existing.entity_id}),
+            root_name="Pytest Reuse Scene", root_kind="scene",
+        )
+        result = table.execute_write(
+            lambda tx: homebrew.write_cluster(
+                tx, plan=plan, kind="scene", title="Pytest Reuse Scene",
+                body="Pytest Reused NPC is here.", generated_body="x",
+                from_canon=[], invented=[], from_context=[], sources=[],
+                manifest=[], anchor=None, log_path=None,
+            )
+        )
+        assert result["reused"] == [existing.entity_id]
+        named = table.run(
+            "MATCH (m:Mention)-[:IN_SECTION]->(:Section {id:$s}) "
+            "MATCH (m)-[:REFERS_TO]->(e:Entity {id:$e}) RETURN count(m) AS n",
+            {"s": result["section_id"], "e": existing.entity_id},
+        ).single()["n"]
+        assert named >= 1, "the involvement is recorded even though nothing was minted"

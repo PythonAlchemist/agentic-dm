@@ -65,8 +65,14 @@ class TestDropsAreCountedAndNamed:
             elements=[element("Captain Saltmarrow")],
             existing_ids=frozenset({"hb:p13-home:captain-saltmarrow"}),
         )
+        # NOTHING IS MINTED -- a second Captain Saltmarrow is not what naming
+        # him means -- but he is not thrown away either. Dropping him outright
+        # took him out of the cluster, so every relationship the generation
+        # declared about him lost an endpoint, and an encounter whose central
+        # figure is the corsair captain stored with no edge to him.
         assert plan.elements == ()
-        assert plan.dropped == {"already in this campaign": 1}
+        assert plan.dropped == {}
+        assert len(plan.reused) == 1
 
     def test_an_edge_reaching_outside_the_cluster_is_dropped_and_named(self):
         """A cross-plane edge into canon is readable from neither plane, so it

@@ -198,7 +198,9 @@ def _plan_for(request: ClusterRequest):
     so the collision scan, the id minting and every drop are recomputed here
     rather than trusted.
     """
+    from backend.campaign import cluster as cluster_module
     from backend.campaign.cluster import plan_cluster
+    from backend.campaign.homebrew import LABELS
 
     with read_only_session() as session:
         found = {c.slug: c for c in store.read_campaigns(session)}
@@ -206,13 +208,22 @@ def _plan_for(request: ClusterRequest):
         if campaign is None:
             raise HTTPException(status_code=404, detail=f"no campaign {request.campaign!r}")
         aliases = store.canon_aliases(session, campaign.books)
-        existing = frozenset(
-            dict(r)["id"]
+        rows = [
+            dict(r)
             for r in session.run(
-                "MATCH (e:Entity {plane:'campaign', campaign:$c}) RETURN e.id AS id",
+                "MATCH (e:Entity {plane:'campaign', campaign:$c}) "
+                "RETURN e.id AS id, e.kind AS kind",
                 {"c": request.campaign},
             )
-        )
+        ]
+        existing = frozenset(r["id"] for r in rows)
+        existing_kinds = {
+            r["id"]: LABELS.get(r["kind"] or "", "LORE") for r in rows
+        }
+    # WHAT THE CAMPAIGN ALREADY HOLDS, AND WHAT EACH OF THEM IS. `plan_cluster`
+    # stays pure; the types it needs for a reused endpoint are read here and
+    # handed over, the same way `canon_aliases` and `existing_ids` are.
+    cluster_module._REUSED_KINDS.update(existing_kinds)
     return plan_cluster(
         campaign=request.campaign,
         elements=request.elements,
