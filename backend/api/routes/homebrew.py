@@ -544,7 +544,14 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             OPTIONAL MATCH (m:Mention)-[:IN_SECTION]->(s)
             OPTIONAL MATCH (m)-[:REFERS_TO]->(named:Entity)
             OPTIONAL MATCH (named)-[edge]->(far:Entity)
-            WHERE far.plane = 'canon' OR far.campaign = $campaign
+            // BOTH ENDS HAVE TO BE IN THIS SECTION. Reading `The Corsair
+            // Ambush`, "Connected" listed `Revel's End contains Stables` and
+            // two more of the same -- true of Revel's End, which the prose
+            // mentions in passing, and nothing to do with the scene. One end
+            // here is a second-order fact about somewhere else; both ends here
+            // is a fact about what is happening in this section.
+            WHERE (far.plane = 'canon' OR far.campaign = $campaign)
+              AND (far)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(s)
             RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
                    s.plane AS plane, s.kind AS kind, s.invented AS invented,
                    s.from_canon AS from_canon, s.from_yours AS from_yours,

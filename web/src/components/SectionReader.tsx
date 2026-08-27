@@ -283,41 +283,73 @@ export function SectionReader({
               </div>
             )}
 
-            {/* ONE HOP OUT, for reference while reading. Every name in the
-                prose is already a link; this is what those names are
-                CONNECTED to, which the prose does not say. Guessed edges are
-                dimmed rather than hidden -- the extractor is wrong about
-                roughly a third of them, and a DM deciding whether to lean on
-                one needs to see which kind it is. */}
-            {shown.connections.length > 0 && (
+            {/* ONE HOP FROM THIS SECTION, for reference while reading.
+                What a section is connected to IS the set of things it names --
+                that is the edge the graph actually holds from a section -- so
+                those are the list, with the relationships among them
+                underneath when there are any.
+
+                IT USED TO BE THE EDGES OF EVERYTHING NAMED, one hop further
+                out, and reading `The Corsair Ambush` that gave "Revel's End
+                contains Stables" and two more like it: true of Revel's End,
+                which the prose mentions in passing, and nothing to do with the
+                scene. */}
+            {shown.mentions.length > 0 && (
               <div className="mt-5 border-t border-neutral-800 pt-4">
                 <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-                  Connected ({shown.connections.length})
+                  Connected ({shown.mentions.length})
                 </div>
-                <ul className="mt-1 space-y-0.5 text-xs">
-                  {shown.connections.map((edge, index) => (
-                    <li
-                      key={`${edge.from}-${edge.rel}-${edge.to_id}-${index}`}
-                      className={edge.status === 'accepted' ? '' : 'opacity-60'}
-                    >
-                      <span className="text-neutral-400">{edge.from}</span>{' '}
-                      <span className="text-neutral-600">{edge.rel.toLowerCase().replace(/_/g, ' ')}</span>{' '}
+                <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                  {shown.mentions.map((named) => (
+                    <li key={named.entity_id}>
                       <button
-                        onClick={() => openEntity(edge.to_id)}
+                        onClick={() => openEntity(named.entity_id)}
                         className={`hover:underline ${
-                          edge.plane === 'campaign'
+                          named.plane === 'campaign'
                             ? 'text-amber-200/90'
-                            : 'text-neutral-200'
+                            : 'text-neutral-300'
                         }`}
                       >
-                        {edge.to}
+                        {named.name}
                       </button>
-                      {edge.status !== 'accepted' && (
-                        <span className="text-neutral-600"> · guessed</span>
+                      {named.kind && (
+                        <span className="text-neutral-600"> {named.kind}</span>
                       )}
                     </li>
                   ))}
                 </ul>
+
+                {/* Guessed edges dimmed rather than hidden: the extractor is
+                    wrong about roughly a third, and a DM deciding whether to
+                    lean on one needs to see which kind it is. */}
+                {shown.connections.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 text-xs">
+                    {shown.connections.map((edge, index) => (
+                      <li
+                        key={`${edge.from}-${edge.rel}-${edge.to_id}-${index}`}
+                        className={edge.status === 'accepted' ? '' : 'opacity-60'}
+                      >
+                        <span className="text-neutral-400">{edge.from}</span>{' '}
+                        <span className="text-neutral-600">
+                          {edge.rel.toLowerCase().replace(/_/g, ' ')}
+                        </span>{' '}
+                        <button
+                          onClick={() => openEntity(edge.to_id)}
+                          className={`hover:underline ${
+                            edge.plane === 'campaign'
+                              ? 'text-amber-200/90'
+                              : 'text-neutral-200'
+                          }`}
+                        >
+                          {edge.to}
+                        </button>
+                        {edge.status !== 'accepted' && (
+                          <span className="text-neutral-600"> · guessed</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
 
