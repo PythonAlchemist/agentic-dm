@@ -26,6 +26,12 @@ export function RunningOrder({
   onRead: (sectionId: string) => void
 }) {
   const [rows, setRows] = useState<OrderRow[]>([])
+  //: FINDING TONIGHT'S SCENE WAS FREEHAND SCROLLING through 547 rows. A DM
+  //  mid-session knows the name of what they want, so a filter beats any
+  //  amount of grouping -- and grouping is offered too, because between
+  //  sessions they are browsing rather than searching.
+  const [filter, setFilter] = useState('')
+  const [openChapters, setOpenChapters] = useState<Set<string>>(new Set())
   const [failed, setFailed] = useState('')
   const [busy, setBusy] = useState('')
 
@@ -84,15 +90,70 @@ export function RunningOrder({
 
   const mine = rows.filter((r) => r.origin === 'campaign').length
   const cut = rows.filter((r) => r.skipped).length
+  const needle = filter.trim().toLowerCase()
+  const shown = needle
+    ? rows.filter((r) => r.heading.toLowerCase().includes(needle))
+    : rows
+  const groups = byChapter(shown)
+  // A chapter holding the DM's own material opens by default -- it is the part
+  // of the book this table has actually touched, and the one they came for.
+  const isOpen = (chapter: string) =>
+    openChapters.has(chapter) ||
+    (openChapters.size === 0 &&
+      groups.find((g) => g.chapter === chapter)?.mine !== 0)
 
   return (
     <Card title="Running order">
-      <p className="border-b border-neutral-800 px-3 py-2 text-xs text-neutral-500">
-        {rows.length - cut} in play · {mine} yours · {cut} cut
-      </p>
+      <div className="flex items-baseline gap-2 border-b border-neutral-800 px-3 py-2">
+        <input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="find a scene…"
+          className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-amber-600/60"
+        />
+        <span className="shrink-0 text-xs tabular-nums text-neutral-600">
+          {shown.length === rows.length
+            ? `${rows.length - cut} · ${mine} yours`
+            : `${shown.length} found`}
+        </span>
+      </div>
       {failed && <p className="px-3 py-2 text-xs text-red-400">{failed}</p>}
       <ol className="max-h-[26rem] overflow-y-auto p-1">
-        {rows.map((row) => (
+        {groups.map((group) => (
+          <li key={group.chapter}>
+            {/* CHAPTERS COLLAPSE, and while filtering they do not: a search
+                result hidden inside a folded chapter is a search that failed.
+                The DM's own scenes keep their chapter open by default, since
+                that is the part of the book this table has actually touched. */}
+            {!filter && (
+              <button
+                onClick={() =>
+                  setOpenChapters((prior) => {
+                    const next = new Set(prior)
+                    if (next.has(group.chapter)) next.delete(group.chapter)
+                    else next.add(group.chapter)
+                    return next
+                  })
+                }
+                className="flex w-full items-baseline gap-1 rounded px-2 py-1 text-left text-[11px] uppercase tracking-wide text-neutral-500 hover:bg-neutral-800/40"
+              >
+                <span className="text-neutral-700">
+                  {isOpen(group.chapter) ? '▾' : '▸'}
+                </span>
+                <span className="min-w-0 flex-1 truncate">
+                  {prettyChapter(group.chapter)}
+                </span>
+                <span className="tabular-nums text-neutral-700">
+                  {group.rows.length}
+                  {group.mine > 0 && (
+                    <span className="text-amber-500/70"> ·{group.mine}</span>
+                  )}
+                </span>
+              </button>
+            )}
+            {(filter !== '' || isOpen(group.chapter)) && (
+              <ol>
+                {group.rows.map((row) => (
           <li
             key={row.section_id}
             className="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40"
@@ -127,9 +188,52 @@ export function RunningOrder({
                 {row.skipped ? 'restore' : 'cut'}
               </button>
             )}
+                  </li>
+                ))}
+              </ol>
+            )}
           </li>
         ))}
       </ol>
     </Card>
   )
+}
+
+/** `prisoner-13` reads as `Prisoner 13` to somebody scanning for a scene. */
+function prettyChapter(slug: string) {
+  return slug
+    .split('-')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+/**
+ * The order as chapters, in the order the chain visits them.
+ *
+ * NOT SORTED, and that is the point: a running order is a sequence a DM
+ * arranged, so the chapters come out in the order they are played rather than
+ * alphabetically or by the book's own numbering.
+ */
+function byChapter(rows: OrderRow[]) {
+  const groups: { chapter: string; rows: OrderRow[]; mine: number }[] = []
+  const index = new Map<string, number>()
+  // A CAMPAIGN ROW INHERITS THE CHAPTER IT WAS INSERTED INTO. It carries none
+  // of its own -- it hangs off a `:Campaign`, not a `:Chapter` -- and bucketing
+  // those into a "Yours" group at the end destroys the single thing this panel
+  // exists to show: a scene sitting WHERE THE DM PUT IT, between the book's
+  // sections. Same reasoning as showing a cut section struck through in place
+  // rather than removing it.
+  let carried = 'elsewhere'
+  for (const row of rows) {
+    const chapter = row.chapter || carried
+    carried = chapter
+    if (!index.has(chapter)) {
+      index.set(chapter, groups.length)
+      groups.push({ chapter, rows: [], mine: 0 })
+    }
+    const group = groups[index.get(chapter)!]
+    group.rows.push(row)
+    if (row.origin === 'campaign') group.mine += 1
+  }
+  return groups
 }
