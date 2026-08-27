@@ -215,7 +215,7 @@ export function ClusterReview({
           </div>
           <ul className="mt-1 space-y-1 text-[11px] text-neutral-400">
             {plan.edges_reversible.map((edge) => {
-              const key = `${edge.source.toLowerCase()}|${edge.target.toLowerCase()}|${edge.rel_type}`
+              const key = edge.key
               return (
                 <li key={key} className="flex items-baseline gap-2">
                   <span className="min-w-0 flex-1">

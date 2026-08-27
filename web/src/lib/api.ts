@@ -216,7 +216,13 @@ export interface ClusterPlan {
   edges_dropped: Record<string, number>
   /** Relationships the model wrote backwards, held in the direction that
    *  would be legal. Offered, never applied. */
-  edges_reversible: { source: string; target: string; rel_type: string }[]
+  edges_reversible: {
+    source: string
+    target: string
+    rel_type: string
+    /** Sent BY the server so the client never re-folds it. */
+    key: string
+  }[]
   storable: boolean
 }
 

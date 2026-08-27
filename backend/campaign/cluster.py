@@ -160,8 +160,14 @@ class ClusterPlan:
                 {"source": s, "target": t, "rel_type": r} for s, t, r in self.edges
             ],
             "edges_dropped": dict(self.edges_dropped),
+            # THE KEY TRAVELS, rather than the client rebuilding it. A card
+            # folding with JavaScript `toLowerCase` and a server folding with
+            # `casefold` agree on almost every string and not on all of them --
+            # and the failure is a button that silently does nothing, which is
+            # the worst shape a failure can take on a card whose whole job is
+            # to tell you what will happen.
             "edges_reversible": [
-                {"source": s, "target": t, "rel_type": r}
+                {"source": s, "target": t, "rel_type": r, "key": edge_key(s, t, r)}
                 for s, t, r in self.edges_reversible
             ],
             "storable": self.storable,
