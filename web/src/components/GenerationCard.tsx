@@ -231,6 +231,31 @@ export function GenerationCard({
             {card.expands
               ? 'Where it goes in your running order (a write-up usually goes nowhere)'
               : 'Where it goes in your running order'}
+            {/* CHIPS FOR THE SHORTLIST, because the answer is almost always
+                one of these and a <select> hides them behind a click. These
+                are the passages the draft was written against; `suggest_anchor`
+                picks one of them and picks it by score, which answers "which
+                section does the subject name most" rather than "which beat is
+                this" -- so the DM's eye needs to reach the alternatives, not
+                just the default. The full 546 stay in the select below for the
+                times the right answer is somewhere else entirely. */}
+            {writtenAgainst(card, order).length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {writtenAgainst(card, order).map((row) => (
+                  <button
+                    key={`chip-${row.section_id}`}
+                    onClick={() => setAnchor(row.section_id)}
+                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                      anchor === row.section_id
+                        ? 'border-neutral-500 bg-neutral-700 text-neutral-100'
+                        : 'border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300'
+                    }`}
+                  >
+                    {row.heading}
+                  </button>
+                ))}
+              </div>
+            )}
             <select
               value={anchor}
               onChange={(e) => setAnchor(e.target.value)}
