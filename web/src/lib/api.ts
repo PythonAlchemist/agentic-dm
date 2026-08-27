@@ -171,6 +171,27 @@ export interface SectionRead {
   invented: string[]
   edited: boolean | null
   cites: string[]
+  /** Which entities this prose names, from the mention triangle — not from
+   *  matching strings, so the highlight agrees with what retrieval believes. */
+  mentions: {
+    entity_id: string
+    name: string
+    kind: string | null
+    plane: 'canon' | 'campaign'
+    surface: string
+  }[]
+}
+
+export interface EntityRead {
+  entity_id: string
+  name: string
+  kind: string | null
+  plane: 'canon' | 'campaign'
+  role: string | null
+  invented: string[]
+  labels: string[]
+  own_section: string | null
+  named_in: { section_id: string; heading: string; plane: string }[]
 }
 
 export interface CampaignElement {
@@ -383,6 +404,12 @@ export const labAPI = {
   section(sectionId: string, campaign: string | null): Promise<SectionRead> {
     const scope = campaign ? `&campaign=${encodeURIComponent(campaign)}` : ''
     return getJSON(`/homebrew/section?section_id=${encodeURIComponent(sectionId)}${scope}`)
+  },
+
+  /** What the graph holds about one thing, for a reader who clicked its name. */
+  entity(entityId: string, campaign: string | null): Promise<EntityRead> {
+    const scope = campaign ? `&campaign=${encodeURIComponent(campaign)}` : ''
+    return getJSON(`/homebrew/entity?entity_id=${encodeURIComponent(entityId)}${scope}`)
   },
 
   /** Rewrite stored prose. Refuses anything that is not this campaign's,

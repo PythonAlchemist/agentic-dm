@@ -242,6 +242,7 @@ export default function Lab() {
         campaign={campaign}
         onClose={() => setReading(null)}
         onEdited={noteChainChanged}
+        onJump={setReading}
       />
     </TooltipProvider>
   )

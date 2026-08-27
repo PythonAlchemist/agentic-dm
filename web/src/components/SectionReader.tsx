@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import type { SectionRead } from '@/lib/api'
+import type { EntityRead, SectionRead } from '@/lib/api'
 import { labAPI } from '@/lib/api'
 
 /**
@@ -21,11 +21,14 @@ export function SectionReader({
   campaign,
   onClose,
   onEdited,
+  onJump,
 }: {
   sectionId: string | null
   campaign: string | null
   onClose: () => void
   onEdited?: () => void
+  /** Follow a name to another section, without closing the drawer. */
+  onJump: (sectionId: string) => void
 }) {
   const [section, setSection] = useState<SectionRead | null>(null)
   const [failed, setFailed] = useState('')
@@ -34,6 +37,19 @@ export function SectionReader({
   //  and which would flash the previous section's prose under the new
   //  heading for a frame, the one thing a provenance-first panel must not do.
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  //: An entity the reader clicked a NAME to reach. Shown over the section
+  //  rather than instead of it: they were reading something, and a name is a
+  //  glance away from it and back — so the section stays underneath and the
+  //  back arrow returns to exactly where they were.
+  const [entity, setEntity] = useState<EntityRead | null>(null)
+
+  const openEntity = async (entityId: string) => {
+    try {
+      setEntity(await labAPI.entity(entityId, campaign))
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error))
+    }
+  }
   //: The draft, while a DM is rewriting. `null` means they are reading --
   //  which is the state to be in by default, because this drawer is opened
   //  mid-session to look something up far more often than to change it.
@@ -50,6 +66,7 @@ export function SectionReader({
         setSection(found)
         setLoadedFor(sectionId)
         setDraft(null)
+        setEntity(null)
         setFailed('')
       })
       .catch((error) => {
@@ -68,11 +85,12 @@ export function SectionReader({
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (draft !== null) setDraft(null)
+      else if (entity) setEntity(null)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sectionId, onClose, draft])
+  }, [sectionId, onClose, draft, entity])
 
   const save = async () => {
     if (draft === null || !campaign || !sectionId || saving) return
@@ -158,13 +176,26 @@ export function SectionReader({
 
         {failed && <p className="text-sm text-red-400">{failed}</p>}
 
+        {entity && (
+          <EntityCard
+            entity={entity}
+            onBack={() => setEntity(null)}
+            onRead={(sectionId) => {
+              setEntity(null)
+              onJump(sectionId)
+            }}
+          />
+        )}
+
         {shown && (
           <>
             {draft === null ? (
               <div className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200">
-                {forReading(shown.text, shown.heading) || (
-                  <span className="text-neutral-600">No prose.</span>
-                )}
+                <Named
+                  text={forReading(shown.text, shown.heading)}
+                  mentions={shown.mentions}
+                  onOpen={openEntity}
+                />
               </div>
             ) : (
               <div>
@@ -279,6 +310,72 @@ function forReading(text: string, heading: string) {
     .trim()
 }
 
+/**
+ * The prose, with the names the GRAPH says are in it made clickable.
+ *
+ * WHICH names is not decided here. The mention triangle already records that
+ * this section refers to this entity, so the surfaces arrive with the section
+ * and this only has to locate them; a reader scanning for names of its own
+ * would disagree with retrieval the first time two things shared a spelling,
+ * and would light up every "guard" in the book.
+ *
+ * MATCHED IN THE RENDERED TEXT, not by stored offset. `forReading` drops the
+ * H1 and rewrites image lines, so an offset into the raw body points somewhere
+ * else by the time a person sees it. Searching for a surface the graph has
+ * already vouched for is exact enough: the only thing being guessed is WHERE a
+ * confirmed name sits, and a surface that fell inside a dropped line simply
+ * is not found, which is the right answer.
+ *
+ * LONGEST FIRST, so `Captain Saltmarrow` wins over `Saltmarrow` and the短
+ * match cannot eat the start of the long one.
+ */
+function Named({
+  text,
+  mentions,
+  onOpen,
+}: {
+  text: string
+  mentions: SectionRead['mentions']
+  onOpen: (entityId: string) => void
+}) {
+  if (!text) return <span className="text-neutral-600">No prose.</span>
+  const surfaces = [...mentions]
+    .filter((m) => m.surface)
+    .sort((a, b) => b.surface.length - a.surface.length)
+  if (surfaces.length === 0) return <>{text}</>
+
+  const pattern = new RegExp(
+    `(${surfaces.map((m) => escapeRegExp(m.surface)).join('|')})`,
+    'g',
+  )
+  const bySurface = new Map(surfaces.map((m) => [m.surface, m]))
+
+  return (
+    <>
+      {text.split(pattern).map((piece, index) => {
+        const hit = bySurface.get(piece)
+        if (!hit) return <span key={index}>{piece}</span>
+        return (
+          <button
+            key={index}
+            onClick={() => onOpen(hit.entity_id)}
+            title={`${hit.name}${hit.kind ? ` · ${hit.kind}` : ''}`}
+            className={`underline decoration-dotted underline-offset-2 hover:decoration-solid ${
+              hit.plane === 'campaign' ? 'text-amber-200/90' : 'text-neutral-100'
+            }`}
+          >
+            {piece}
+          </button>
+        )
+      })}
+    </>
+  )
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 function Split({
   label,
   items,
@@ -299,6 +396,108 @@ function Split({
           <li key={index}>· {item}</li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * What the graph holds about a name somebody clicked.
+ *
+ * NOT PROSE, and it says so. Most entities have no write-up — a canon place
+ * exists because the book named it, and the honest answer is the record: what
+ * it is, whose it is, and every section that names it. That last list is the
+ * useful half: a name on its own is a dictionary entry, and the sections are
+ * what let a DM follow a thread through the book and their own material at
+ * once.
+ */
+function EntityCard({
+  entity,
+  onBack,
+  onRead,
+}: {
+  entity: EntityRead
+  onBack: () => void
+  onRead: (sectionId: string) => void
+}) {
+  const yours = entity.plane === 'campaign'
+  return (
+    <div className="mb-5 rounded-md border border-neutral-800 bg-neutral-900/60 p-4">
+      <div className="mb-2 flex items-baseline justify-between gap-4">
+        <h3
+          className={`text-sm font-medium ${
+            yours ? 'text-amber-200' : 'text-neutral-100'
+          }`}
+        >
+          {entity.name}
+          {entity.kind && (
+            <span className="ml-2 text-[10px] uppercase tracking-wide text-neutral-600">
+              {entity.kind}
+            </span>
+          )}
+        </h3>
+        <button
+          onClick={onBack}
+          className="shrink-0 text-xs text-neutral-500 hover:text-neutral-300"
+        >
+          back (esc)
+        </button>
+      </div>
+
+      <p className="text-xs text-neutral-500">
+        {yours ? (
+          <>
+            <span className="text-amber-400">Yours.</span> Written for this
+            campaign.
+          </>
+        ) : (
+          <>
+            <span className="text-emerald-400/80">The book.</span>{' '}
+            {entity.labels.join(' · ').toLowerCase() || 'named in the text'}
+          </>
+        )}
+        {entity.role && <> — {entity.role}</>}
+      </p>
+
+      {entity.invented.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs text-rose-300/80">
+          {entity.invented.map((line, index) => (
+            <li key={index}>· {line}</li>
+          ))}
+        </ul>
+      )}
+
+      {entity.own_section && (
+        <button
+          onClick={() => onRead(entity.own_section!)}
+          className="mt-3 text-xs text-neutral-400 underline hover:text-neutral-200"
+        >
+          read its write-up
+        </button>
+      )}
+
+      {entity.named_in.length > 0 && (
+        <div className="mt-3 border-t border-neutral-800 pt-2">
+          <div className="text-[11px] uppercase tracking-wide text-neutral-600">
+            Named in ({entity.named_in.length})
+          </div>
+          <ul className="mt-1 space-y-0.5">
+            {entity.named_in.map((where) => (
+              <li key={where.section_id}>
+                <button
+                  onClick={() => onRead(where.section_id)}
+                  className={`text-xs hover:underline ${
+                    where.plane === 'campaign'
+                      ? 'text-amber-200/90'
+                      : 'text-neutral-400'
+                  }`}
+                >
+                  {where.heading}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

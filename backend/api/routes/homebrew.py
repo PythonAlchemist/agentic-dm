@@ -494,12 +494,29 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             WHERE s.plane = 'canon' OR s.campaign = $campaign
             OPTIONAL MATCH (c:Chapter)-[:HAS_SECTION]->(s)
             OPTIONAL MATCH (s)-[:DERIVED_FROM]->(cited:Section)
+            OPTIONAL MATCH (m:Mention)-[:IN_SECTION]->(s)
+            OPTIONAL MATCH (m)-[:REFERS_TO]->(named:Entity)
             RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
                    s.plane AS plane, s.kind AS kind, s.invented AS invented,
                    s.from_canon AS from_canon, s.from_yours AS from_yours,
                    s.from_context AS from_context,
                    s.edited AS edited, c.slug AS chapter,
-                   collect(DISTINCT cited.heading) AS cites
+                   collect(DISTINCT cited.heading) AS cites,
+                   // THE NAMES THIS PROSE ACTUALLY USES, from the mention
+                   // triangle rather than from matching strings in the reader.
+                   // The graph is the authority on which entity a word refers
+                   // to; a client scanning for names of its own would disagree
+                   // with retrieval the first time two things shared one.
+                   //
+                   // `display_name` OR `surface`: canon mentions carry the
+                   // first, homebrew writers the second. One fact under two
+                   // property names, which is worth knowing and not worth a
+                   // migration in the middle of a feature.
+                   collect(DISTINCT {
+                     entity_id: named.id, name: named.name, kind: named.kind,
+                     plane: named.plane,
+                     surface: coalesce(m.display_name, m.surface, named.name)
+                   }) AS mentions
             """,
             {"id": section_id, "campaign": campaign},
         ).single()
@@ -513,6 +530,7 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
         # section has none of these at all.
         found[field] = json.loads(raw) if raw else []
     found["cites"] = [c for c in found["cites"] if c]
+    found["mentions"] = [m for m in found["mentions"] if m.get("entity_id")]
     return found
 
 
@@ -638,6 +656,45 @@ def expand_element(request: ExpandRequest) -> dict:
     except homebrew.AlreadyExpanded as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return stored.as_dict()
+
+
+@router.get("/entity")
+def read_entity(entity_id: str, campaign: str | None = None) -> dict:
+    """What the graph holds about one thing, for a reader who clicked its name.
+
+    BOTH PLANES, because a DM reading their own scene clicks straight through
+    to `Jolly Pelican`, which is the book's. Scoped the same way `/section` is:
+    canon is open, campaign material only to the campaign that owns it.
+
+    WHERE ELSE IT IS NAMED is the useful half of this. A name in isolation is a
+    dictionary entry; the list of scenes and sections that mention it is what
+    lets a DM follow a thread — and it is the same triangle the highlight was
+    drawn from, so the two cannot disagree.
+    """
+    with read_only_session() as session:
+        row = session.run(
+            """
+            MATCH (e:Entity {id:$id})
+            WHERE e.plane = 'canon' OR e.campaign = $campaign
+            OPTIONAL MATCH (own:Section {expands:e.id})
+            OPTIONAL MATCH (e)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(sec:Section)
+            WHERE sec.plane = 'canon' OR sec.campaign = $campaign
+            RETURN e.id AS entity_id, e.name AS name, e.kind AS kind,
+                   e.plane AS plane, e.role AS role, e.invented AS invented,
+                   labels(e) AS labels, own.id AS own_section,
+                   collect(DISTINCT {
+                     section_id: sec.id, heading: sec.heading, plane: sec.plane
+                   }) AS named_in
+            """,
+            {"id": entity_id, "campaign": campaign},
+        ).single()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no entity {entity_id!r} here")
+    found = dict(row)
+    found["invented"] = json.loads(found["invented"]) if found["invented"] else []
+    found["named_in"] = [s for s in found["named_in"] if s.get("section_id")]
+    found["labels"] = [x for x in (found["labels"] or []) if x != "Entity"]
+    return found
 
 
 class RoleRequest(BaseModel):

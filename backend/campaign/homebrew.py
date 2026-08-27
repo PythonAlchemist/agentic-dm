@@ -40,6 +40,7 @@ from pathlib import Path
 
 from backend.campaign import store
 from backend.campaign.chain import insert_plan, remove_plan, walk
+from backend.campaign.model import NEXT
 from backend.campaign.model import (
     AUTHORED,
     CAMPAIGN_PLANE,
@@ -689,6 +690,8 @@ def rescan(tx, *, slug: str, section_id: str) -> dict:
     an edit. A name the DM deleted should stop being a mention, and a scan that
     only ever added would leave the graph asserting the old text forever.
     """
+    from dataclasses import replace
+
     from backend.canon.spine import EntityNames, WriteSection, scan_mentions
 
     # READ HERE rather than taken as a parameter: every caller would have had
@@ -752,7 +755,27 @@ def rescan(tx, *, slug: str, section_id: str) -> dict:
         parent_index=-1,
         text=dict(row)["text"] or "",
     )
-    found = scan_mentions([section], candidates, chapter_slug=slug)
+    found = list(scan_mentions([section], candidates, chapter_slug=slug))
+
+    # AND AGAIN UNDER THE CHAPTER IT SITS IN. A homebrew section has a POSITION
+    # -- it was inserted after some canon section -- and the entities keyed to
+    # that chapter are exactly the ones its prose is likely to name. Scanned
+    # only under the campaign scope, `kftgv:prisoner-13:jolly-pelican` is
+    # unreachable, so a scene about boarding the Jolly Pelican was linked to
+    # everything except the ship.
+    #
+    # It stays ONE chapter, the one the scene is in, rather than the whole
+    # book: that is what the anthology rule protects, and a scene on the voyage
+    # has no business matching a `Guard` from a museum robbery six heists away.
+    home = _anchor_chapter(tx, slug, section_id)
+    if home:
+        seen = {m.id for m in found}
+        found += [
+            m
+            for m in scan_mentions([replace(section, chapter_slug=home)], candidates,
+                                   chapter_slug=home)
+            if m.id not in seen
+        ]
 
     kept = set()
     for mention in found:
@@ -785,6 +808,27 @@ def rescan(tx, *, slug: str, section_id: str) -> dict:
         {"section_id": section_id, "kept": list(kept)},
     ).single()["n"]
     return {"scanned": len(kept), "dropped": dropped}
+
+
+def _anchor_chapter(tx, slug: str, section_id: str) -> str:
+    """The chapter a homebrew section was inserted into, or "".
+
+    Walks BACK along the running order to the first canon section and reads its
+    chapter. Position rather than citation: `DERIVED_FROM` says what a scene was
+    written against, which is often a different chapter from the one it is
+    played in, and it is the played-in one whose cast the prose will name.
+    """
+    row = tx.run(
+        f"""
+        MATCH path = (:Section {{id:$id}})<-[:{NEXT}*0..40 {{campaign:$slug}}]-(s:Section)
+        WHERE s.plane = 'canon'
+        WITH s, length(path) AS back ORDER BY back LIMIT 1
+        MATCH (c:Chapter)-[:HAS_SECTION]->(s)
+        RETURN c.slug AS chapter
+        """,
+        {"id": section_id, "slug": slug},
+    ).single()
+    return (dict(row)["chapter"] or "") if row else ""
 
 
 class NotEditable(Exception):
