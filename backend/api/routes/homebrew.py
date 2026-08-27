@@ -27,8 +27,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.agents.generator import KINDS, SHAPES
 
-from backend.campaign import homebrew, store
+from backend.campaign import homebrew, ontology, store
 from backend.campaign.chain import move_plan, position_for, remove_plan, walk
+from backend.campaign.model import PART_OF
 from backend.core.database import neo4j_session, read_only_session
 
 logger = logging.getLogger(__name__)
@@ -145,19 +146,50 @@ def running_order(campaign: str) -> dict:
         # adventure. An anthology's running order is thirteen unconnected
         # heists in a row, and a flat list of 546 sections offers a museum
         # room as readily as the voyage a scene is actually about.
-        rows = {
-            dict(r)["id"]: (dict(r)["heading"], dict(r)["chapter"])
+        # THE NESTING TRAVELS TOO. The harvest recorded `depth` and
+        # `parent_index` on every canon section and the running order threw
+        # both away, so a tree arrived as one flat list -- which is why an
+        # encounter that happens DURING a scene could only be placed as its
+        # sibling, before the thing it occurs inside.
+        found = {
+            dict(r)["id"]: dict(r)
             for r in session.run(
-                """
+                f"""
                 MATCH (s:Section) WHERE s.id IN $ids
                 OPTIONAL MATCH (c:Chapter)-[:HAS_SECTION]->(s)
-                RETURN s.id AS id, s.heading AS heading, c.slug AS chapter
+                OPTIONAL MATCH (s)-[:{PART_OF}]->(inside:Section)
+                RETURN s.id AS id, s.heading AS heading, c.slug AS chapter,
+                       s.depth AS depth, s.index AS index,
+                       s.parent_index AS parent_index,
+                       s.kind AS kind, inside.id AS inside
                 """,
                 {"ids": order + sorted(skipped)},
             )
         }
-        headings = {k: v[0] for k, v in rows.items()}
-        chapters = {k: v[1] for k, v in rows.items()}
+        headings = {k: v["heading"] for k, v in found.items()}
+        chapters = {k: v["chapter"] for k, v in found.items()}
+        # A canon section names its parent by INDEX within its chapter; a
+        # campaign one by an edge, because it may sit inside another campaign
+        # section and has no index of its own.
+        # Keyed on a section's OWN index, which is what `parent_index` points
+        # at. Keying it on `parent_index` made every section its own sibling's
+        # child: `Trek to the Prison` came back inside `Using the Golden
+        # Vault` rather than inside the chapter.
+        by_index = {
+            (v["chapter"], v["index"]): k
+            for k, v in found.items()
+            if v["chapter"] is not None
+        }
+        parents = {
+            k: (
+                v["inside"]
+                or by_index.get((v["chapter"], v["parent_index"]), "")
+            )
+            for k, v in found.items()
+        }
+        levels = {
+            k: ontology.level_of(v["kind"] or "", v["depth"]) for k, v in found.items()
+        }
 
     placed = {section_id: index for index, section_id in enumerate(order)}
     rows = [
@@ -167,6 +199,8 @@ def running_order(campaign: str) -> dict:
             "origin": "campaign" if section_id.startswith("hb:") else "canon",
             "skipped": False,
             "chapter": chapters.get(section_id) or "",
+            "parent": parents.get(section_id) or "",
+            "level": levels.get(section_id, "section"),
         }
         for section_id in order
     ]
@@ -184,6 +218,8 @@ def running_order(campaign: str) -> dict:
                 "origin": "canon",
                 "skipped": True,
                 "chapter": chapters.get(section_id) or "",
+                "parent": parents.get(section_id) or "",
+                "level": levels.get(section_id, "section"),
             },
         )
     return {"campaign": campaign, "sections": rows}
@@ -777,6 +813,60 @@ def set_role(request: RoleRequest) -> dict:
             )
         except homebrew.NotStored as refused:
             raise HTTPException(status_code=404, detail=str(refused)) from refused
+
+
+class NestRequest(BaseModel):
+    campaign: str
+    section_id: str
+    #: What it now sits inside. Empty puts it at the top level.
+    parent: str = ""
+
+
+@router.post("/nest")
+def nest(request: NestRequest) -> dict:
+    """Put a section INSIDE another, or take it out of one.
+
+    SEQUENCE IS NOT TOUCHED. `/move` reorders; this re-parents; and a story has
+    both axes. Conflating them is what made "The Sea Battle Encounter" -- a
+    fight during The Sea Battle -- placeable only as its sibling, landing
+    before the scene it happens inside.
+
+    CHECKED AGAINST THE ONTOLOGY, and refused in a sentence rather than a code:
+    this reaches a person, and "an encounter goes inside a scene, not inside an
+    encounter" is the whole explanation.
+    """
+    with neo4j_session() as session:
+        rows = {
+            dict(r)["id"]: dict(r)
+            for r in session.run(
+                "MATCH (s:Section) WHERE s.id IN $ids "
+                "RETURN s.id AS id, s.kind AS kind, s.depth AS depth, "
+                "s.plane AS plane",
+                {"ids": [request.section_id, request.parent] if request.parent
+                        else [request.section_id]},
+            )
+        }
+        child = rows.get(request.section_id)
+        if child is None:
+            raise HTTPException(404, f"no section {request.section_id!r}")
+        if request.parent:
+            parent = rows.get(request.parent)
+            if parent is None:
+                raise HTTPException(404, f"no section {request.parent!r}")
+            refusal = ontology.refuse(
+                ontology.level_of(parent["kind"] or "", parent["depth"]),
+                ontology.level_of(child["kind"] or "", child["depth"]),
+            )
+            if refusal:
+                raise HTTPException(422, refusal)
+        try:
+            return session.execute_write(
+                lambda tx: store.set_parent(
+                    tx, request.campaign, request.section_id, request.parent
+                )
+            )
+        except ValueError as refused:
+            raise HTTPException(404, str(refused)) from refused
 
 
 class RescanRequest(BaseModel):

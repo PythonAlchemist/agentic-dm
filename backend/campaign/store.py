@@ -31,6 +31,7 @@ from backend.campaign.model import (
     CAMPAIGN_PLANE,
     DRAWS_ON,
     NEXT,
+    PART_OF,
     SKIPPED,
     STARTS_AT,
     Campaign,
@@ -151,6 +152,36 @@ def read_campaigns(session) -> list[Campaign]:
         )
         for r in session.run(CAMPAIGNS)
     ]
+
+
+def set_parent(tx, slug: str, section_id: str, parent_id: str) -> dict:
+    """Record what a campaign section sits INSIDE. `""` puts it at top level.
+
+    ONE PARENT AT A TIME: the edge is deleted before it is written, because two
+    would make "what is this inside" a question with two answers, and the
+    running order would draw the thing twice.
+
+    Says nothing about ORDER. That is the chain's job, and keeping them apart
+    is the whole reason this exists -- re-parenting must not shuffle the new
+    neighbours, and reordering must not change what anything is inside.
+    """
+    tx.run(
+        f"MATCH (s:Section {{id:$id}})-[r:{PART_OF}]->() DELETE r", {"id": section_id}
+    )
+    if not parent_id:
+        return {"section_id": section_id, "parent": ""}
+    written = tx.run(
+        f"""
+        MATCH (s:Section {{id:$id, plane:$plane, campaign:$slug}}), (p:Section {{id:$parent}})
+        MERGE (s)-[r:{PART_OF}]->(p)
+        SET r.campaign = $slug
+        RETURN count(r) AS n
+        """,
+        {"id": section_id, "parent": parent_id, "plane": CAMPAIGN_PLANE, "slug": slug},
+    ).single()["n"]
+    if not written:
+        raise ValueError(f"{section_id} is not this campaign's, or {parent_id} is gone")
+    return {"section_id": section_id, "parent": parent_id}
 
 
 def running_order(session, slug: str) -> list[str]:

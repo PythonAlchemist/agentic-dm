@@ -264,6 +264,11 @@ export interface CampaignInfo {
 }
 
 export interface OrderRow {
+  /** What this sits INSIDE, or "". Containment, which is a different axis
+   *  from the order — see `backend/campaign/ontology.py`. */
+  parent: string
+  /** chapter | section | subsection | scene | encounter */
+  level: string
   section_id: string
   heading: string
   origin: 'canon' | 'campaign'

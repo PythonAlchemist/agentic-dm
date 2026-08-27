@@ -126,6 +126,22 @@ export function RunningOrder({
     ? rows.filter((r) => r.heading.toLowerCase().includes(needle))
     : rows
   const groups = byChapter(shown)
+  // HOW DEEP EACH ROW SITS, walked from its parent chain. The book recorded
+  // this all along -- `Prisoner 13` holds `Varrin's Proposition` holds `The
+  // Breaker's Map` -- and a flat list threw it away, which is why an encounter
+  // that happens DURING a scene could only be drawn as its sibling.
+  const depthOf = new Map<string, number>()
+  const byId = new Map(rows.map((r) => [r.section_id, r]))
+  const walk = (row: OrderRow): number => {
+    const cached = depthOf.get(row.section_id)
+    if (cached !== undefined) return cached
+    depthOf.set(row.section_id, 0) // breaks a cycle rather than hanging on one
+    const parent = row.parent ? byId.get(row.parent) : undefined
+    const deep = parent ? walk(parent) + 1 : 0
+    depthOf.set(row.section_id, deep)
+    return deep
+  }
+  rows.forEach(walk)
   // A chapter holding the DM's own material opens by default -- it is the part
   // of the book this table has actually touched, and the one they came for.
   const isOpen = (chapter: string) =>
@@ -207,6 +223,7 @@ export function RunningOrder({
                 chat about text sitting one query away. */}
             <button
               onClick={() => onRead(row.section_id)}
+              style={{ paddingLeft: `${(depthOf.get(row.section_id) ?? 1) - 1}rem` }}
               className={`min-w-0 flex-1 truncate text-left text-xs hover:underline ${
                 row.skipped
                   ? 'text-neutral-600 line-through'

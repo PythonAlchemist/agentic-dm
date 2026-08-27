@@ -67,6 +67,15 @@ SKIPPED = "SKIPPED"
 #: invented world.
 DRAWS_ON = "DRAWS_ON"
 
+#: What a campaign section sits INSIDE, canon or campaign.
+#:
+#: SEPARATE FROM `NEXT`, which is sequence. A story has both and the chain only
+#: ever had one, so an encounter that happens DURING a scene could only be
+#: placed as its sibling -- landing before the thing it occurs inside. Two
+#: axes, two edges: reordering siblings leaves containment alone, and
+#: re-parenting leaves the neighbours' order alone.
+PART_OF = "PART_OF"
+
 #: Ids minted by a campaign. `hb:` marks plane-of-origin in the id itself, so a
 #: citation is self-identifying without a lookup, and guarantees a campaign slug
 #: can never collide with a book prefix -- `books.BookScheme` owns bare ones.
