@@ -22,7 +22,7 @@ from backend.canon.retrieval import (
     Retrieval,
 )
 from backend.core.config import settings
-from backend.core.database import read_only_session
+from backend.core.database import neo4j_session, read_only_session
 from backend.core.pricing import Usage, estimate
 from backend.rag import HybridRAGPipeline, QueryType
 
@@ -733,7 +733,11 @@ class DMAgent:
                     # material" to a canon-only session invites a tool call
                     # that can only ever come back empty.
                     *(
-                        [homebrew_tool.READ_SCHEMA, homebrew_tool.REVISE_SCHEMA]
+                        [
+                            homebrew_tool.READ_SCHEMA,
+                            homebrew_tool.REVISE_SCHEMA,
+                            homebrew_tool.ARRANGE_SCHEMA,
+                        ]
                         if self.canon.campaign
                         else []
                     ),
@@ -800,6 +804,18 @@ class DMAgent:
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(payload, default=str),
                 }
+            if name == homebrew_tool.ARRANGE_SCHEMA["function"]["name"]:
+                # RUN, NOT QUEUED. Unlike a generation there is nothing to
+                # review: moving a scene is reversible by moving it back, and
+                # putting a card in front of somebody to confirm a drag they
+                # just described in words would be asking twice.
+                payload = self._arrange(arguments)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(payload, default=str),
+                }
+
             if name == homebrew_tool.REVISE_SCHEMA["function"]["name"]:
                 # RESOLVED HERE, AGAINST THE GRAPH, and defaulting to whatever
                 # is open. A model asked to rewrite "this" means the thing on
@@ -861,6 +877,91 @@ class DMAgent:
             "tool_call_id": tool_call.id,
             "content": json.dumps(payload, default=str),
         }
+
+    def _arrange(self, arguments: dict) -> dict:
+        """Move something in the running order. Both axes, one sentence.
+
+        A person says "put the encounter inside the sea battle, after the
+        ambush" without thinking of containment and sequence as two
+        operations. The graph keeps them apart and this is where one sentence
+        becomes whichever of them was meant -- or both.
+
+        THE ONTOLOGY REFUSES BEFORE ANYTHING MOVES. A refusal comes back as the
+        sentence it is, so the model can tell the DM why rather than reporting
+        that something unspecified went wrong.
+        """
+        from backend.campaign import ontology, store
+        from backend.campaign.chain import move_plan, walk
+
+        slug = self.canon.campaign or ""
+        with read_only_session() as session:
+            what = (
+                homebrew_tool.section_by_name(session, slug, arguments["what"])
+                if arguments.get("what")
+                else {"id": self.focus, "heading": "what you are reading"}
+            )
+            if not what or not what.get("id"):
+                return {"error": "nothing here by that name, and nothing open"}
+            if not what["id"].startswith("hb:"):
+                return {
+                    "error": (
+                        f"{what['heading']!r} is the book's own. Only the "
+                        "table's material can be moved."
+                    )
+                }
+            inside = (
+                homebrew_tool.section_by_name(session, slug, arguments["inside"])
+                if arguments.get("inside")
+                else None
+            )
+            if arguments.get("inside") and inside is None:
+                return {"error": f"nothing here called {arguments['inside']!r}"}
+            after = (
+                homebrew_tool.section_by_name(session, slug, arguments["after"])
+                if arguments.get("after")
+                else None
+            )
+            if arguments.get("after") and after is None:
+                return {"error": f"nothing here called {arguments['after']!r}"}
+            mover = session.run(
+                "MATCH (s:Section {id:$id}) RETURN s.kind AS kind, s.depth AS depth",
+                {"id": what["id"]},
+            ).single()
+
+        done = []
+        with neo4j_session() as session:
+            if "inside" in arguments:
+                if inside is not None:
+                    refusal = ontology.refuse(
+                        ontology.level_of(inside["kind"] or "", inside["depth"]),
+                        ontology.level_of(
+                            dict(mover)["kind"] or "", dict(mover)["depth"]
+                        ),
+                    )
+                    if refusal:
+                        return {"refused": refusal}
+                session.execute_write(
+                    lambda tx: store.set_parent(
+                        tx, slug, what["id"], inside["id"] if inside else ""
+                    )
+                )
+                done.append(
+                    f"now inside {inside['heading']!r}" if inside else "now at the top level"
+                )
+
+            if after is not None:
+                def reorder(tx):
+                    links, start = store.read_chain(tx, slug)
+                    order = frozenset(walk(links, start, bound=len(links) + 2).order)
+                    plan = move_plan(links, start, what["id"], after["id"])
+                    return store.apply_rewire(tx, slug, plan, order)
+
+                session.execute_write(reorder)
+                done.append(f"now after {after['heading']!r}")
+
+        if not done:
+            return {"error": "say where it should go: inside something, or after something"}
+        return {"moved": what["heading"], "how": done}
 
     def _fold_tool_result(self, name: str, result) -> None:
         """Put what a tool found into the subgraph, marked as EXPANDED.

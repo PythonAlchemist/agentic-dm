@@ -439,6 +439,26 @@ export const labAPI = {
     )
   },
 
+  /** Put a section immediately after another in the running order.
+   *  Sequence only — what it sits inside is untouched. */
+  move(campaign: string, sectionId: string, after: string) {
+    return postTo<{ changed: number; noop?: string }>('/homebrew/move', {
+      campaign,
+      section_id: sectionId,
+      after,
+    })
+  },
+
+  /** Put a section INSIDE another, or pass '' to pull it to the top level.
+   *  Containment only — the order is untouched. */
+  nest(campaign: string, sectionId: string, parent: string) {
+    return postTo<{ section_id: string; parent: string }>('/homebrew/nest', {
+      campaign,
+      section_id: sectionId,
+      parent,
+    })
+  },
+
   /** Change the one line a stub is made of. */
   setRole(campaign: string, entityId: string, role: string) {
     return postTo<{ entity_id: string; role: string }>('/homebrew/role', {

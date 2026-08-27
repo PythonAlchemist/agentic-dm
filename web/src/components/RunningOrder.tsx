@@ -45,6 +45,29 @@ export function RunningOrder({
   //  when `campaign` changes: an effect setting state on mount cascades a
   //  second render on every switch, and reading storage during render breaks
   //  hydration. A map read once and indexed is neither.
+  //: What is being dragged, and where it would land. `where` is the two axes
+  //  made visible: dropping ON a row puts the dragged thing INSIDE it, dropping
+  //  on the line BETWEEN rows puts it AFTER. A tree view has to offer both or
+  //  it can only express one of them, which is the whole defect this repairs.
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [over, setOver] = useState<{ id: string; where: 'inside' | 'after' } | null>(null)
+
+  const drop = async (target: OrderRow, where: 'inside' | 'after') => {
+    if (!campaign || !dragging || dragging === target.section_id) return
+    setDragging(null)
+    setOver(null)
+    try {
+      if (where === 'inside') await labAPI.nest(campaign, dragging, target.section_id)
+      else await labAPI.move(campaign, dragging, target.section_id)
+      await load()
+    } catch (error) {
+      // THE ONTOLOGY'S REFUSAL, SHOWN AS WRITTEN. "an encounter goes inside a
+      // scene, not inside an encounter" is the whole explanation and needs no
+      // rewording here.
+      setFailed(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   const [pins, setPins] = useState<Record<string, string>>(() => {
     if (typeof window === 'undefined') return {}
     try {
@@ -203,8 +226,37 @@ export function RunningOrder({
                 {group.rows.map((row) => (
                   <li
                     key={row.section_id}
+                    // ONLY YOUR OWN MOVES. The book's sections stay where the
+                    // book put them, so they are drop targets but never
+                    // draggable.
+                    draggable={row.origin === 'campaign'}
+                    onDragStart={() => setDragging(row.section_id)}
+                    onDragEnd={() => { setDragging(null); setOver(null) }}
+                    onDragOver={(event) => {
+                      if (!dragging || dragging === row.section_id) return
+                      event.preventDefault()
+                      const box = event.currentTarget.getBoundingClientRect()
+                      // The lower quarter is the seam BETWEEN rows; anywhere
+                      // else means into the row itself.
+                      const where =
+                        event.clientY > box.bottom - box.height / 4 ? 'after' : 'inside'
+                      setOver({ id: row.section_id, where })
+                    }}
+                    onDragLeave={() => setOver((o) => (o?.id === row.section_id ? null : o))}
+                    onDrop={(event) => {
+                      event.preventDefault()
+                      drop(row, over?.where ?? 'inside')
+                    }}
                     className={`group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40 ${
                       row.section_id === playing ? 'bg-neutral-800' : ''
+                    } ${dragging === row.section_id ? 'opacity-40' : ''} ${
+                      over?.id === row.section_id && over.where === 'inside'
+                        ? 'bg-neutral-700/60'
+                        : ''
+                    } ${
+                      over?.id === row.section_id && over.where === 'after'
+                        ? 'border-b border-neutral-300'
+                        : ''
                     }`}
                   >
                     <button

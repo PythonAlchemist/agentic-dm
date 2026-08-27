@@ -353,3 +353,84 @@ def resolve_revision(session, *, campaign: str, name: str, focus: str) -> dict |
         RESOLVE_REVISION, {"campaign": campaign, "name": name, "focus": focus}
     ).single()
     return dict(row) if row else None
+
+
+#: The fourth verb. `generate` makes, `read` shows, `revise` rewrites -- and
+#: none of them could MOVE anything, so a DM who could see their encounter
+#: sitting in the wrong place had to reach for a mouse to say so.
+#:
+#: ONE TOOL FOR BOTH AXES, because a person says "put the encounter inside the
+#: sea battle" and "put it after the ambush" in the same breath and does not
+#: think of them as different operations. The graph keeps them apart --
+#: `PART_OF` is containment and the chain is sequence -- and this is the seam
+#: where one sentence becomes whichever of them was meant.
+ARRANGE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "arrange_running_order",
+        "description": (
+            "Move something in the running order: put it inside another thing, "
+            "or after another thing, or both. Use when the DM says a scene is "
+            "in the wrong place, belongs inside something, should come before "
+            "or after something, or should be pulled out to the top level. "
+            "Only their own material can be moved; the book's own sections "
+            "stay where the book put them."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "what": {
+                    "type": "string",
+                    "description": (
+                        "The thing to move, by name. Omit to move what they "
+                        "are reading."
+                    ),
+                },
+                "inside": {
+                    "type": "string",
+                    "description": (
+                        "What it should sit INSIDE, by name. Pass an empty "
+                        "string to pull it out to the top level. Omit to leave "
+                        "its parent alone."
+                    ),
+                },
+                "after": {
+                    "type": "string",
+                    "description": (
+                        "What it should come immediately AFTER, by name. Omit "
+                        "to leave its position alone."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+
+BY_HEADING = """
+MATCH (s:Section)
+WHERE (s.plane = 'canon' OR s.campaign = $campaign)
+  AND toLower(s.heading) = toLower($heading)
+RETURN s.id AS id, s.heading AS heading, s.plane AS plane, s.kind AS kind,
+       s.depth AS depth
+ORDER BY s.plane DESC
+LIMIT 1
+"""
+
+
+def section_by_name(session, campaign: str, heading: str) -> dict | None:
+    """One section by what it is CALLED, across both planes.
+
+    A DM says "the sea battle", not `hb:p13-home:the-sea-battle#0`, and every
+    list they have been shown is a list of headings.
+
+    THEIR OWN WINS A TIE. `ORDER BY s.plane DESC` puts `campaign` above
+    `canon`, so a scene they wrote and named after a section of the book
+    resolves to theirs -- which is the one they can actually move, and the one
+    they meant.
+    """
+    row = session.run(
+        BY_HEADING, {"campaign": campaign, "heading": heading}
+    ).single()
+    return dict(row) if row else None
