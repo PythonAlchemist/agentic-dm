@@ -42,3 +42,6 @@ htmlcov/
 
 # Scratch worktrees created by subagent runs — one per dispatched agent.
 .claude/worktrees/
+
+# Playwright MCP scratch (snapshots, console logs)
+.playwright-mcp/
