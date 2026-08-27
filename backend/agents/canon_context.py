@@ -309,6 +309,21 @@ def suggest_anchor(retrieval: Retrieval) -> tuple[str, tuple[str, ...]]:
     resolved name is a fact about what the scene is about; a keyword hit is a
     guess, and a guess is a weaker claim about where something belongs.
 
+    IT ANSWERS "WHICH SECTION DOES THE SUBJECT NAME MOST", NOT "WHICH BEAT IS
+    THIS", and those come apart on any scene about getting somewhere. A sea
+    battle on the voyage to Revel's End scores `Revel's End` at seven mentions
+    and `Trek to the Prison` -- the voyage itself -- at two, so the suggestion
+    lands after they have arrived. Nothing available reorders that: `voyage`
+    matches no heading, and taking the earliest retrieved passage instead
+    proposes `Varrin's Proposition`, the job offer, which is early by as much
+    as the other is late.
+
+    So this stays a first guess and the CARD shows the shortlist beside it --
+    the eight passages the generation was written against, which is where the
+    scene plausibly goes and among which a DM knows the beat they mean.
+    Measured on four subjects: two right, one a beat late, one preferring a
+    LORE section over the road the ambush happens on.
+
     It always proposes something rather than nothing: a suggestion a DM can
     override beats a list of 546 they have to search.
     """

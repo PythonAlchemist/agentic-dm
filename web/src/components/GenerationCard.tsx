@@ -188,6 +188,27 @@ export function GenerationCard({
               className="mt-1 w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200"
             >
               <option value="">Nowhere in particular</option>
+              {/* THE PASSAGES THIS WAS WRITTEN AGAINST, first and by
+                  themselves. `suggest_anchor` picks one of these and picks it
+                  by score, which answers "which section does the subject name
+                  most" rather than "which beat is this". For a sea battle on
+                  the voyage that is `Revel's End` at seven mentions, not `Trek
+                  to the Prison` at two -- the destination rather than the
+                  journey, so the scene lands after they have arrived.
+                  Nothing available reorders those scores into the right
+                  answer: "voyage" matches no heading. So the shortlist is
+                  shown instead of a better guess being faked. These eight are
+                  where the scene plausibly goes, and the DM knows which beat
+                  they mean. */}
+              {writtenAgainst(card, order).length > 0 && (
+                <optgroup label="○ Written against">
+                  {writtenAgainst(card, order).map((row) => (
+                    <option key={`src-${row.section_id}`} value={row.section_id}>
+                      after {row.heading}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               {/* GROUPED BY ADVENTURE, WITH THIS SCENE'S OWN FIRST. A flat
                   list offered a museum room from an unrelated heist as
                   readily as the voyage the scene is about -- 546 options
@@ -243,6 +264,24 @@ export function GenerationCard({
       )}
     </div>
   )
+}
+
+/**
+ * The sections this generation actually cited, as anchor options.
+ *
+ * Filtered against the running order rather than rendered from `sources`
+ * directly: an anchor has to BE in the DM's chain to be a place to insert
+ * after, and a citation can point at a section they have skipped.
+ */
+function writtenAgainst(card: GeneratedReply, order: OrderRow[]) {
+  const inOrder = new Map(
+    order.filter((r) => r.origin === 'canon' && !r.skipped).map((r) => [r.section_id, r]),
+  )
+  const seen = new Set<string>()
+  return (card.sources ?? [])
+    .filter((s) => s.type === 'canon' && !seen.has(s.source) && seen.add(s.source))
+    .map((s) => inOrder.get(s.source))
+    .filter((row): row is OrderRow => Boolean(row))
 }
 
 /**
