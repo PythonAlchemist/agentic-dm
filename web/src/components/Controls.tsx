@@ -1,7 +1,7 @@
 'use client'
 
 import type { BookInfo, CampaignInfo, Depth, ModelInfo } from '@/lib/api'
-import { Card, Slider } from './ui'
+import { Card, Explain, Slider } from './ui'
 
 /**
  * Model and context depth: the two things this lab exists to vary.
@@ -67,12 +67,6 @@ export function Controls({
             </button>
           ))}
         </div>
-        {/* Said plainly, because the transcript vanishing is otherwise
-            indistinguishable from a bug. */}
-        <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-neutral-500">
-          Switching campaigns starts a new conversation. A session reads one
-          book, so what the agent is holding onto has to go with it.
-        </p>
       </Card>
 
       {/* SEPARATE FROM THE BOOK, because they answer different questions: the
@@ -110,10 +104,7 @@ export function Controls({
             </button>
           ))}
         </div>
-        <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-neutral-500">
-          Your own material rides alongside canon and is always labelled as
-          yours. Switching tables starts a new conversation.
-        </p>
+
       </Card>
 
       <Card title="Model">
@@ -145,11 +136,10 @@ export function Controls({
             to be spent. What must never happen is showing it as though it had
             been checked. */}
         {chosen && !chosen.last_verified && (
-          <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-neutral-400">
-            This rate has never been verified by a human. Costs are arithmetic
-            on an unchecked number — correct{' '}
-            <code className="text-neutral-300">backend/core/pricing.yaml</code> and
-            set <code className="text-neutral-300">last_verified</code>.
+          <p className="border-t border-neutral-800 px-3 py-2 text-xs text-neutral-500">
+            <Explain text="Costs are arithmetic on an unchecked number. Correct backend/core/pricing.yaml and set last_verified.">
+              rate unverified
+            </Explain>
           </p>
         )}
       </Card>

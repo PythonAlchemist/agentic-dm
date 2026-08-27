@@ -46,6 +46,7 @@ export function ChatPane({
   onSpend: (reply: ChatReply) => void
 }) {
   const [debug] = useDebug()
+  const [openHeld, setOpenHeld] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [raisedCards, setRaisedCards] = useState<GeneratedReply[]>([])
 
@@ -109,11 +110,20 @@ export function ChatPane({
   // whole working set, so the newest reply is the current state.
   const held = [...turns].reverse().find((turn) => turn.reply)?.reply?.subgraph ?? null
 
+  // WHAT THE AGENT IS HOLDING, as one line until it is asked for. The panel
+  // took 38% of the screen permanently to answer a question — "did the agent
+  // forget this, or never know it?" — that is only ever asked when an answer
+  // looks wrong. The strip keeps the COUNTS, so an anomaly (nothing held, all
+  // of it guessed, names it never resolved) is still visible without opening
+  // anything; the drag handle and the ledger/graph pair come back untouched
+  // when it is open.
+  const counts = held
+    ? `${held.nodes.length} held · ${held.edges.filter((e) => e.status !== 'accepted').length} guessed`
+    : 'nothing held yet'
+
   return (
-    // A DRAG HANDLE RATHER THAN A TOGGLE. Two hardcoded widths were two guesses
-    // at what somebody wanted to read, and both were wrong.
     <Group orientation="horizontal" className="h-full">
-      <Panel defaultSize="62%" minSize="30%">
+      <Panel defaultSize={openHeld ? '62%' : '100%'} minSize="30%">
         <div className="flex h-full flex-col pr-3">
           <div className="min-h-0 flex-1 space-y-8 overflow-y-auto pr-1">
             {raisedCards.map((card, index) => (
@@ -230,16 +240,28 @@ export function ChatPane({
               Ask
             </button>
           </div>
+
+          <button
+            onClick={() => setOpenHeld((prior) => !prior)}
+            className="mt-2 self-start text-xs text-neutral-600 hover:text-neutral-300"
+          >
+            {openHeld ? '▾' : '▸'} in this conversation — {counts}
+          </button>
         </div>
       </Panel>
 
-      <Separator className="mx-1 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
-
-      <Panel defaultSize="38%" minSize="20%">
-        <div className="h-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/30">
-          <SubgraphPanel view={held} />
-        </div>
-      </Panel>
+      {/* A DRAG HANDLE RATHER THAN A TOGGLE, still: two hardcoded widths were
+          two guesses at what somebody wanted to read, and both were wrong. */}
+      {openHeld && (
+        <>
+          <Separator className="mx-1 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+          <Panel defaultSize="38%" minSize="20%">
+            <div className="h-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/30">
+              <SubgraphPanel view={held} />
+            </div>
+          </Panel>
+        </>
+      )}
     </Group>
   )
 }
