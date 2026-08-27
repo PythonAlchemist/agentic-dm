@@ -475,27 +475,38 @@ function EntityCard({
         </button>
       )}
 
+      {/* WHAT EACH PLACE SAYS, not just that it says something. A list of
+          headings tells a DM where to go looking; the sentences tell them what
+          the thing IS, and they were one hop away the whole time.
+
+          THE BOOK FIRST. Canon is the part they cannot change, and a DM
+          checking what is established wants that before what they invented on
+          top of it. */}
       {entity.named_in.length > 0 && (
-        <div className="mt-3 border-t border-neutral-800 pt-2">
-          <div className="text-[11px] uppercase tracking-wide text-neutral-600">
-            Named in ({entity.named_in.length})
-          </div>
-          <ul className="mt-1 space-y-0.5">
-            {entity.named_in.map((where) => (
-              <li key={where.section_id}>
+        <div className="mt-3 space-y-3 border-t border-neutral-800 pt-2">
+          {[...entity.named_in]
+            .sort((a, b) => Number(a.plane === 'campaign') - Number(b.plane === 'campaign'))
+            .map((where) => (
+              <div key={where.section_id}>
                 <button
                   onClick={() => onRead(where.section_id)}
-                  className={`text-xs hover:underline ${
+                  className={`text-[11px] uppercase tracking-wide hover:underline ${
                     where.plane === 'campaign'
-                      ? 'text-amber-200/90'
-                      : 'text-neutral-400'
+                      ? 'text-amber-300/70'
+                      : 'text-emerald-300/60'
                   }`}
                 >
                   {where.heading}
                 </button>
-              </li>
+                <ul className="mt-0.5 space-y-0.5">
+                  {where.says.map((line, index) => (
+                    <li key={index} className="text-xs leading-relaxed text-neutral-300">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
         </div>
       )}
     </div>

@@ -191,7 +191,13 @@ export interface EntityRead {
   invented: string[]
   labels: string[]
   own_section: string | null
-  named_in: { section_id: string; heading: string; plane: string }[]
+  named_in: {
+    section_id: string
+    heading: string
+    plane: string
+    /** What that section actually says about it, quoted exactly. */
+    says: string[]
+  }[]
 }
 
 export interface CampaignElement {

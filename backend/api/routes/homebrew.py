@@ -658,6 +658,42 @@ def expand_element(request: ExpandRequest) -> dict:
     return stored.as_dict()
 
 
+#: How much either side of a mention to keep when no sentence end is found --
+#: enough to be a claim, short enough to stay a quote.
+_QUOTE_WINDOW = 220
+
+
+def _sentences_at(text: str, offsets: list[int], limit: int = 3) -> list[str]:
+    """The sentences that actually name the thing, quoted exactly.
+
+    A LIST OF HEADINGS IS NOT AN ANSWER. "Named in: Trek to the Prison" tells a
+    DM where to go looking; "directs them to report to a ship called the Jolly
+    Pelican the following dawn" tells them what it IS. The offsets have been
+    stored all along and the difference between the two is one hop.
+
+    QUOTED, NEVER SUMMARISED. Everything else this endpoint returns is the
+    graph's own record; this is the book's words, and a paraphrase here would
+    be the one kind of sentence a DM has no way to check.
+
+    Sentence bounds by punctuation, falling back to a window when a section has
+    none — headings and table rows often do not. A quote that runs on is worse
+    than one that stops early, so the window is small.
+    """
+    found: list[str] = []
+    for offset in offsets[:limit]:
+        if not 0 <= offset < len(text):
+            continue
+        start = text.rfind(".", 0, offset) + 1
+        end = text.find(".", offset)
+        if end == -1 or end - start > _QUOTE_WINDOW * 2:
+            start = max(0, offset - _QUOTE_WINDOW)
+            end = min(len(text), offset + _QUOTE_WINDOW)
+        quote = " ".join(text[start : end + 1].split()).strip()
+        if quote and quote not in found:
+            found.append(quote)
+    return found
+
+
 @router.get("/entity")
 def read_entity(entity_id: str, campaign: str | None = None) -> dict:
     """What the graph holds about one thing, for a reader who clicked its name.
@@ -677,13 +713,16 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
             MATCH (e:Entity {id:$id})
             WHERE e.plane = 'canon' OR e.campaign = $campaign
             OPTIONAL MATCH (own:Section {expands:e.id})
-            OPTIONAL MATCH (e)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(sec:Section)
+            OPTIONAL MATCH (e)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(sec:Section)
             WHERE sec.plane = 'canon' OR sec.campaign = $campaign
             RETURN e.id AS entity_id, e.name AS name, e.kind AS kind,
                    e.plane AS plane, e.role AS role, e.invented AS invented,
                    labels(e) AS labels, own.id AS own_section,
                    collect(DISTINCT {
-                     section_id: sec.id, heading: sec.heading, plane: sec.plane
+                     section_id: sec.id, heading: sec.heading, plane: sec.plane,
+                     // The TEXT and the offsets, so the card can quote what
+                     // each place actually says rather than only naming it.
+                     text: sec.text, offsets: m.offsets
                    }) AS named_in
             """,
             {"id": entity_id, "campaign": campaign},
@@ -692,7 +731,16 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
         raise HTTPException(status_code=404, detail=f"no entity {entity_id!r} here")
     found = dict(row)
     found["invented"] = json.loads(found["invented"]) if found["invented"] else []
-    found["named_in"] = [s for s in found["named_in"] if s.get("section_id")]
+    found["named_in"] = [
+        {
+            "section_id": where["section_id"],
+            "heading": where["heading"],
+            "plane": where["plane"],
+            "says": _sentences_at(where.get("text") or "", where.get("offsets") or []),
+        }
+        for where in found["named_in"]
+        if where.get("section_id")
+    ]
     found["labels"] = [x for x in (found["labels"] or []) if x != "Entity"]
     return found
 
