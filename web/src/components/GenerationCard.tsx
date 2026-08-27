@@ -51,6 +51,12 @@ export function GenerationCard({
   // minting path would raise `AlreadyStored` -- correctly, since a second
   // Captain Saltmarrow is not what "tell me more about him" means.
   const isExpansion = Boolean(card.expands)
+  // A REWRITE REPLACES. `write` would mint a second entity of the same name
+  // and `AlreadyStored` would refuse it -- correctly, since two sea battles is
+  // not what "build this out" means. So storing a revision is an edit of the
+  // section it revises, which is also why it needs no anchor: it already has
+  // the position of the thing it is replacing.
+  const isRevision = Boolean(card.revises)
   // A collision is a question only a person can answer, so it BLOCKS the
   // write rather than resolving itself in either direction.
   const blocked = isCluster && plan !== null && !plan.storable
@@ -83,7 +89,11 @@ export function GenerationCard({
         anchor: anchor || null,
         model: card.model,
       }
-      const result = isExpansion
+      const result = isRevision
+        ? await labAPI
+            .editSection(campaign, card.revises!, body)
+            .then((r) => ({ entity_id: r.section_id }))
+        : isExpansion
         ? await labAPI.expand({ ...common, entity_id: card.expands })
         : isCluster
         ? await labAPI.storeCluster({ ...(clusterBody ?? {}), body })
@@ -225,7 +235,26 @@ export function GenerationCard({
         />
       )}
 
-      {campaign ? (
+      {campaign && isRevision && (
+        <div className="mt-3 border-t border-neutral-800 pt-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={store}
+              disabled={busy || !!stored}
+              className="rounded-md bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-40"
+            >
+              {stored ? 'Replaced' : busy ? 'Replacing…' : 'Replace what you have'}
+            </button>
+            <span className="text-xs text-neutral-500">
+              Rewrites the section in place. It keeps its position, its
+              citations and everything pointing at it.
+            </span>
+          </div>
+          {failed && <p className="mt-2 text-xs text-red-400">{failed}</p>}
+        </div>
+      )}
+
+      {campaign && !isRevision ? (
         <div className="mt-3 border-t border-neutral-800 pt-3">
           <label className="block text-xs text-neutral-400">
             {card.expands
@@ -330,7 +359,7 @@ export function GenerationCard({
           </div>
           {failed && <p className="mt-2 text-xs text-red-400">{failed}</p>}
         </div>
-      ) : (
+      ) : campaign ? null : (
         <p className="mt-3 border-t border-neutral-800 pt-3 text-xs text-neutral-500">
           Pick a table on the left to store this. Canon-only sessions have
           nowhere to put it.

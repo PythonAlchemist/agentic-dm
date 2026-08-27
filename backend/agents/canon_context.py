@@ -285,7 +285,16 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
             f"WHAT THE DM IS READING RIGHT NOW — {open_now.get('heading') or ''}"
             f"{'  ← their own, not the published book' if mine else '  ← the book'}\n"
             "Answer about this unless they clearly mean something else, and do "
-            "not ask them to describe it back to you.\n\n"
+            "not ask them to describe it back to you.\n"
+            # THE RULE GOES WITH THE FACT. Told only in the tool descriptions,
+            # "build out the sea battle, give me a cast of enemies" read as
+            # make-me-something and minted a second scene beside the one on
+            # screen. Here it sits next to the thing being talked about.
+            "IF THEY ASK TO CHANGE, EXTEND, BUILD OUT, ADD TO OR SHORTEN THIS, "
+            "that is `revise_my_material` and never `generate_homebrew` -- "
+            "generating would leave them with two of it. Only reach for "
+            "`generate_homebrew` when what they want is a SEPARATE thing that "
+            "did not exist before.\n\n"
             f"{open_now.get('text') or ''}"
         )
 

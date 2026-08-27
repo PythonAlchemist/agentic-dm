@@ -618,6 +618,17 @@ class DMAgent:
                     if self.canon
                     else retrieval
                 )
+                # A REWRITE CARRIES THE TEXT IT IS REPLACING. Without it the
+                # model is being asked to "build this out" with no `this`, and
+                # writes a second thing that happens to share a subject.
+                previous = ""
+                if request.revises:
+                    with read_only_session() as session:
+                        row = session.run(
+                            "MATCH (s:Section {id:$id}) RETURN s.text AS text",
+                            {"id": request.revises},
+                        ).single()
+                        previous = (dict(row)["text"] if row else "") or ""
                 drafted = await generator.generate(
                     self.openai,
                     kind=request.kind,
@@ -626,7 +637,11 @@ class DMAgent:
                     depth=self.depth,
                     model=self.model,
                     context=context,
+                    previous=previous,
+                    note=request.note if request.revises else "",
                 )
+                if request.revises:
+                    drafted = replace(drafted, revises=request.revises)
                 # A QUEST OR A SCENE CONTAINS THINGS; an NPC or a monster IS
                 # one. Only the first two are annotated, so the second call is
                 # spent where there is something to declare.
@@ -717,7 +732,11 @@ class DMAgent:
                     # Only where there IS a campaign. Offering "read my
                     # material" to a canon-only session invites a tool call
                     # that can only ever come back empty.
-                    *([homebrew_tool.READ_SCHEMA] if self.canon.campaign else []),
+                    *(
+                        [homebrew_tool.READ_SCHEMA, homebrew_tool.REVISE_SCHEMA]
+                        if self.canon.campaign
+                        else []
+                    ),
                 ],
                 **self._sampling,
             )
@@ -781,6 +800,41 @@ class DMAgent:
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(payload, default=str),
                 }
+            if name == homebrew_tool.REVISE_SCHEMA["function"]["name"]:
+                # RESOLVED HERE, AGAINST THE GRAPH, and defaulting to whatever
+                # is open. A model asked to rewrite "this" means the thing on
+                # the DM's screen, and making it name that thing would be
+                # asking it to guess at something already known.
+                with read_only_session() as session:
+                    target = homebrew_tool.resolve_revision(
+                        session,
+                        campaign=self.canon.campaign or "",
+                        name=str(arguments.get("name") or ""),
+                        focus=self.focus,
+                    )
+                if target is None:
+                    payload = {
+                        "error": "nothing here by that name, and nothing open to rewrite"
+                    }
+                else:
+                    self._requested_generations.append(
+                        homebrew_tool.Request(
+                            kind=target["kind"] or "scene",
+                            subject=target["name"],
+                            note=str(arguments.get("note") or ""),
+                            revises=target["section_id"],
+                        )
+                    )
+                    payload = {
+                        "recorded": f"a rewrite of {target['name']!r} is being drafted",
+                        "for_review": True,
+                    }
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(payload, default=str),
+                }
+
             if name == homebrew_tool.READ_SCHEMA["function"]["name"]:
                 # RUN HERE AND ANSWERED HERE, unlike generation. This reads
                 # back words the DM already wrote and approved, so there is no

@@ -12,6 +12,7 @@ import {
 import { GenerationCard } from './GenerationCard'
 import { CallMeter, MissReason, RetrievalPanel } from './Meters'
 import { useDebug } from '@/lib/debug'
+import { PaneHeader } from './ui'
 import { SubgraphPanel } from './SubgraphPanel'
 
 
@@ -130,9 +131,24 @@ export function ChatPane({
     : 'nothing held yet'
 
   return (
-    <Group orientation="horizontal" className="h-full">
+    // VERTICAL NOW THAT CHAT IS A COLUMN. Splitting an 833px column
+    // horizontally gave the ledger 313px, which is narrower than the entity
+    // names in it. Opening downward is what the shape of the pane wants.
+    <Group orientation="vertical" className="h-full">
       <Panel defaultSize={openHeld ? '62%' : '100%'} minSize="30%">
-        <div className="flex h-full flex-col pr-3">
+        <div className="flex h-full flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/20">
+          <PaneHeader title="Chat" subtitle={focus ? focus.label : undefined}>
+            {focus && (
+              <button
+                onClick={onClearFocus}
+                title="Ask about the whole book instead"
+                className="text-neutral-600 hover:text-neutral-300"
+              >
+                unfocus
+              </button>
+            )}
+          </PaneHeader>
+          <div className="flex min-h-0 flex-1 flex-col p-3">
           <div className="min-h-0 flex-1 space-y-8 overflow-y-auto pr-1">
             {raisedCards.map((card, index) => (
               <div key={`raised-${index}`} className="mb-4">
@@ -259,26 +275,13 @@ export function ChatPane({
             </button>
           </div>
 
-          {focus && (
-            <div className="mt-2 flex items-baseline gap-2 text-xs">
-              <span className="text-neutral-600">reading</span>
-              <span className="min-w-0 truncate text-neutral-300">{focus.label}</span>
-              <button
-                onClick={onClearFocus}
-                title="Ask about the whole book instead"
-                className="shrink-0 text-neutral-600 hover:text-neutral-300"
-              >
-                ×
-              </button>
-            </div>
-          )}
-
           <button
             onClick={() => setOpenHeld((prior) => !prior)}
             className="mt-2 self-start text-xs text-neutral-600 hover:text-neutral-300"
           >
             {openHeld ? '▾' : '▸'} in this conversation — {counts}
           </button>
+          </div>
         </div>
       </Panel>
 
@@ -286,7 +289,7 @@ export function ChatPane({
           two guesses at what somebody wanted to read, and both were wrong. */}
       {openHeld && (
         <>
-          <Separator className="mx-1 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+          <Separator className="my-1 h-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
           <Panel defaultSize="38%" minSize="20%">
             <div className="h-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/30">
               <SubgraphPanel view={held} />

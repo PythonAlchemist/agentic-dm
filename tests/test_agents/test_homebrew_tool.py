@@ -171,3 +171,48 @@ class TestReadingWhatTheTableAlreadyMade:
 
     def test_another_campaign_sees_none_of_it(self, table):
         assert homebrew_tool.read(table, "someone-elses")["found"] == []
+
+
+class TestRewritingSomethingThatExists:
+    """A DM looking at their own one-sentence scene and asking to build it out
+    got a SECOND scene beside the first. `generate_homebrew` makes new things
+    and `read_my_material` shows them; neither could change one."""
+
+    def test_what_is_open_is_what_gets_rewritten(self, table):
+        """A model asked to rewrite "this" means the thing on screen. Making it
+        name that thing would be asking it to guess at something known."""
+        found = homebrew_tool.resolve_revision(
+            table, campaign=SLUG, name="",
+            focus=f"hb:{SLUG}:pytest-night-watch#0",
+        )
+        assert found["name"] == "Pytest Night Watch"
+        assert found["section_id"] == f"hb:{SLUG}:pytest-night-watch#0"
+
+    def test_the_entity_id_works_as_well_as_the_section_id(self):
+        """Focus follows the entity, so it may be either. Both mean the same
+        thing to a person."""
+        assert "$focus STARTS WITH e.id" in homebrew_tool.RESOLVE_REVISION
+
+    def test_a_name_can_be_given_instead(self, table):
+        found = homebrew_tool.resolve_revision(
+            table, campaign=SLUG, name="pytest night watch", focus="",
+        )
+        assert found["section_id"].endswith("#0")
+
+    def test_a_stub_has_nothing_to_rewrite(self, table):
+        """Something with only a role resolves to None -- that is what `expand`
+        is for. The DM is told, rather than handed a "revision" of a blank
+        page."""
+        table.run(
+            "MATCH (c:Campaign {slug:$s}) CREATE (e:Entity {id:$i, plane:'campaign', "
+            "campaign:$s, name:'Pytest Stub', kind:'npc', role:'a name only'})",
+            {"s": SLUG, "i": f"hb:{SLUG}:pytest-stub"},
+        )
+        assert homebrew_tool.resolve_revision(
+            table, campaign=SLUG, name="Pytest Stub", focus=""
+        ) is None
+
+    def test_another_campaign_cannot_reach_it(self, table):
+        assert homebrew_tool.resolve_revision(
+            table, campaign="someone-elses", name="pytest night watch", focus=""
+        ) is None

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChatPane } from '@/components/ChatPane'
 import { RunningOrder } from '@/components/RunningOrder'
+import { Group, Panel, Separator } from 'react-resizable-panels'
+
 import { SectionReader } from '@/components/SectionReader'
 import { Setup } from '@/components/Setup'
 import { useDebug } from '@/lib/debug'
 import { YourMaterial } from '@/components/YourMaterial'
-import { GeneratePane } from '@/components/GeneratePane'
 import { SpendChip, type Running } from '@/components/Meters'
-import { TabBar, TooltipProvider } from '@/components/ui'
+import { TooltipProvider } from '@/components/ui'
 import {
   labAPI,
   type CampaignInfo,
@@ -77,7 +78,6 @@ export default function Lab() {
   const [focus, setFocus] = useState<{ id: string; label: string } | null>(null)
   const [debug, setDebug] = useDebug()
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
-  const [tab, setTab] = useState<'chat' | 'generate'>('chat')
   const [running, setRunning] = useState<Running>(ZERO)
 
   useEffect(() => {
@@ -162,69 +162,65 @@ export default function Lab() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 gap-6 p-6">
-          {/* WHAT A DM WORKS IN, and nothing else. Running order first: it is
-              where they are in the session. */}
-          <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-hidden">
-            <RunningOrder
-              campaign={campaign}
-              refreshKey={orderVersion}
-              onRead={setReading}
-            />
-            <YourMaterial
-              campaign={campaign}
-              refreshKey={orderVersion}
-              onDraft={setRaised}
-              onRead={setReading}
-            />
-          </aside>
+        {/* THREE PANES, NOT A TAB BAR. A DM does the same three things all
+            session -- find something, read it, ask about it -- and tabbing
+            between them made two of the three invisible while doing the
+            third. Explorer, viewer, chat: what an editor would do, because
+            the shape of the work is the same shape.
 
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="mb-4 shrink-0">
-              <TabBar
-                tabs={[
-                  { id: 'chat' as const, label: 'Setting chat' },
-                  { id: 'generate' as const, label: 'Generate' },
-                ]}
-                active={tab}
-                onChange={setTab}
+            RESIZABLE, for the reason the chat/subgraph split already is: two
+            hardcoded widths are two guesses about what somebody wants to
+            read, and both are wrong. */}
+        <Group orientation="horizontal" className="min-h-0 flex-1 p-4">
+          <Panel defaultSize="20%" minSize="14%">
+            <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden">
+              <RunningOrder
+                campaign={campaign}
+                refreshKey={orderVersion}
+                onRead={setReading}
+              />
+              <YourMaterial
+                campaign={campaign}
+                refreshKey={orderVersion}
+                onDraft={setRaised}
+                onRead={setReading}
               />
             </div>
+          </Panel>
 
-            {/* Both panes stay MOUNTED. Switching tabs must not throw away a
-                conversation or a generated NPC -- comparing two settings means
-                going back and forth. */}
-            <div className={tab === 'chat' ? 'min-h-0 flex-1' : 'hidden'}>
-              <ChatPane
-                key={`${book}:${campaign ?? 'canon'}`}
-                book={book}
-                campaign={campaign}
-                onChainChanged={noteChainChanged}
-                focus={focus}
-                onClearFocus={() => setFocus(null)}
-                raised={raised}
-                onRaisedHandled={() => setRaised(null)}
-                suggestion={here?.examples.ask ?? ''}
-                model={model}
-                depth={depth}
-                sessionId={SESSION_ID}
-                onSpend={spend}
-              />
-            </div>
-            <div className={tab === 'generate' ? 'min-h-0 flex-1' : 'hidden'}>
-              <GeneratePane
-                key={`${book}:${campaign ?? 'canon'}`}
-                book={book}
-                campaign={campaign}
-                onChainChanged={noteChainChanged}
-                examples={here?.examples ?? {}}
-                model={model}
-                depth={depth}
-                onSpend={spend}
-              />
-            </div>
-          </main>
-        </div>
+          <Separator className="mx-1.5 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+
+          <Panel defaultSize="46%" minSize="24%">
+            <SectionReader
+              sectionId={reading}
+              campaign={campaign}
+              onClose={() => setReading(null)}
+              onEdited={noteChainChanged}
+              onJump={setReading}
+              onFocus={setFocus}
+            />
+          </Panel>
+
+          <Separator className="mx-1.5 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+
+          <Panel defaultSize="34%" minSize="22%">
+            <ChatPane
+              key={`${book}:${campaign ?? 'canon'}`}
+              book={book}
+              campaign={campaign}
+              onChainChanged={noteChainChanged}
+              focus={focus}
+              onClearFocus={() => setFocus(null)}
+              raised={raised}
+              onRaisedHandled={() => setRaised(null)}
+              suggestion={here?.examples.ask ?? ''}
+              model={model}
+              depth={depth}
+              sessionId={SESSION_ID}
+              onSpend={spend}
+            />
+          </Panel>
+        </Group>
       </div>
 
       <Setup
@@ -244,14 +240,6 @@ export default function Lab() {
         debug={debug}
       />
 
-      <SectionReader
-        sectionId={reading}
-        campaign={campaign}
-        onClose={() => setReading(null)}
-        onEdited={noteChainChanged}
-        onJump={setReading}
-        onFocus={setFocus}
-      />
     </TooltipProvider>
   )
 }

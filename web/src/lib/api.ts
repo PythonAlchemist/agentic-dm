@@ -127,6 +127,9 @@ export interface GeneratedReply {
   body: string
   from_canon: { claim: string; cite: string }[]
   from_yours?: { claim: string; cite: string }[]
+  /** The section this REPLACES, when the DM asked to change something that
+   *  already exists. Storing it rewrites rather than mints. */
+  revises?: string
   invented: string[]
   /** The third source: what came from the conversation rather than the book or
    *  the model. Present only when chat handed context over. */

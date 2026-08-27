@@ -37,7 +37,7 @@ SCHEMA = {
     "function": {
         "name": "generate_homebrew",
         "description": (
-            "Draft new material for the DM to review -- a quest, NPC, monster, "
+            "Draft NEW material for the DM to review -- a quest, NPC, monster, "
             "or a scene inserted into the adventure's running order. Use when "
             "the DM asks you to make something up, not to answer questions "
             "about the book. Returns nothing you can quote: the draft goes to "
@@ -113,6 +113,11 @@ class Request:
     context_entity_ids: tuple[str, ...] = ()
     insert_after: str = ""
     note: str = ""
+    #: The section this REPLACES rather than sits beside. Set when the DM asked
+    #: to change something that already exists, which is a different act from
+    #: making a new thing and has to reach the card as one -- otherwise
+    #: "build out the sea battle" mints a second sea battle beside the first.
+    revises: str = ""
     #: Ids the model named that the conversation does not hold, and section ids
     #: it never saw. Reported back to it rather than silently dropped: a model
     #: that cannot see its mistake makes it again next round.
@@ -228,6 +233,54 @@ READ_SCHEMA = {
 }
 
 
+#: The third verb. `generate_homebrew` makes something new and
+#: `read_my_material` shows what exists; neither could CHANGE it, so a DM
+#: looking at their own one-sentence scene and asking to build it out got a
+#: second scene beside the first.
+#:
+#: IT IS NOT `expand`. That turns a stub with no prose into prose. This rewrites
+#: prose that is already there, keeping what nobody objected to -- the same
+#: revision path the card offers, reached by asking instead of by typing in a
+#: box.
+REVISE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "revise_my_material",
+        "description": (
+            "Rewrite something the DM already has, keeping what they did not "
+            "ask you to change. Use when they say build this out, add to it, "
+            "make it longer, change X about it, or otherwise talk about "
+            "altering a thing that exists -- especially the one named at the "
+            "top of the context as what they are reading. Do NOT use "
+            "generate_homebrew for that: it would make a second copy beside "
+            "the first. Returns nothing you can quote; the rewrite goes to the "
+            "DM as a card they approve."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "What to rewrite, as it appears in EVERYTHING THIS "
+                        "TABLE HAS MADE. Omit to rewrite what they are reading."
+                    ),
+                },
+                "note": {
+                    "type": "string",
+                    "description": (
+                        "The change they asked for, in their own words: "
+                        "'build out the enemies', 'make her older', 'cut the "
+                        "storm'."
+                    ),
+                },
+            },
+            "required": ["note"],
+        },
+    },
+}
+
+
 READ = """
 MATCH (e:Entity {plane:'campaign', campaign:$campaign})
 WHERE $name IS NULL OR toLower(e.name) = toLower($name)
@@ -274,3 +327,29 @@ def read(session, campaign: str, name: str = "") -> dict:
             for r in rows
         ]
     }
+
+
+RESOLVE_REVISION = """
+MATCH (e:Entity {plane:'campaign', campaign:$campaign})
+WHERE ($name <> '' AND toLower(e.name) = toLower($name))
+   OR ($name = '' AND ($focus = e.id OR $focus STARTS WITH e.id + '#'))
+MATCH (s:Section {expands: e.id})
+RETURN e.name AS name, e.kind AS kind, s.id AS section_id, s.text AS text
+LIMIT 1
+"""
+
+
+def resolve_revision(session, *, campaign: str, name: str, focus: str) -> dict | None:
+    """Which stored thing a rewrite is about, by name or by what is open.
+
+    REQUIRES PROSE. Something with only a role has nothing to rewrite -- that
+    is what `expand` is for -- so a stub resolves to None here and the DM is
+    told, rather than getting a "revision" of a blank page.
+
+    The focus may be an entity id or the id of its section; both mean the same
+    thing to a person, so both are accepted.
+    """
+    row = session.run(
+        RESOLVE_REVISION, {"campaign": campaign, "name": name, "focus": focus}
+    ).single()
+    return dict(row) if row else None

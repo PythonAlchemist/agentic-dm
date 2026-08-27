@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { EntityRead, SectionRead } from '@/lib/api'
 import { labAPI } from '@/lib/api'
+import { PaneHeader } from './ui'
 
 /**
  * The prose behind a heading, for a person to read at a table.
@@ -119,31 +120,27 @@ export function SectionReader({
     }
   }
 
-  if (!sectionId) return null
   // Only shown once it is the CURRENT section's content.
   const shown = loadedFor === sectionId ? section : null
   const yours = shown?.plane === 'campaign'
 
+  // A PANE NOW, NOT A DRAWER. It was an overlay because the screen had one
+  // column to spare; with three it is the middle one, and reading no longer
+  // covers up the list you found it in or the conversation about it.
+  if (!sectionId) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-lg border border-neutral-800/60 bg-neutral-900/20">
+        <p className="max-w-xs px-6 text-center text-xs leading-relaxed text-neutral-600">
+          Pick a section or something you have made. It opens here, and the
+          chat leans on whatever is open.
+        </p>
+      </div>
+    )
+  }
+
   return (
-    <div
-      className="fixed inset-0 z-40 flex justify-end bg-black/50"
-      // A click on the backdrop does not discard a rewrite either, for the
-      // reason Escape does not.
-      onClick={() => draft === null && onClose()}
-    >
-      <div
-        className="h-full w-full max-w-2xl overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-5"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="mb-3 flex items-baseline justify-between gap-4">
-          <h2
-            className={`text-base font-medium ${
-              yours ? 'text-amber-200' : 'text-neutral-200'
-            }`}
-          >
-            {shown?.heading ?? 'Loading…'}
-          </h2>
-          <div className="flex shrink-0 items-baseline gap-3 text-xs">
+    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/20">
+      <PaneHeader title="Viewer" subtitle={shown?.heading ?? 'Loading…'}>
             {/* ONLY YOUR OWN. The book is not editable and the server refuses
                 it either way; offering the button would be a lie the backend
                 then has to tell you about. */}
@@ -155,14 +152,22 @@ export function SectionReader({
                 edit
               </button>
             )}
-            <button
-              onClick={onClose}
-              className="text-neutral-500 hover:text-neutral-300"
-            >
-              close (esc)
-            </button>
-          </div>
-        </div>
+        <button
+          onClick={onClose}
+          className="text-neutral-600 hover:text-neutral-300"
+        >
+          close
+        </button>
+      </PaneHeader>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <h2
+          className={`mb-2 text-base font-medium ${
+            yours ? 'text-amber-200' : 'text-neutral-200'
+          }`}
+        >
+          {shown?.heading ?? 'Loading…'}
+        </h2>
 
         {/* WHOSE WORD IT IS, said before the prose rather than after it. The
             whole project rests on a DM being able to tell, and a drawer that

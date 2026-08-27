@@ -146,3 +146,36 @@ export function TabBar<T extends string>({
     </div>
   )
 }
+
+
+/**
+ * The strip at the top of a pane: what it is, and what you can do to it.
+ *
+ * The explorer's cards have carried one of these all along; the viewer and the
+ * chat did not, so two thirds of the screen read as loose regions beside a
+ * sidebar rather than as panes of one thing. Same type, same height, same
+ * casing — the sameness is the point.
+ */
+export function PaneHeader({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex shrink-0 items-baseline gap-3 border-b border-neutral-800 px-3 py-2">
+      <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+        {title}
+      </span>
+      {subtitle && (
+        <span className="min-w-0 truncate text-xs text-neutral-400">{subtitle}</span>
+      )}
+      <span className="ml-auto flex shrink-0 items-baseline gap-3 text-xs">
+        {children}
+      </span>
+    </div>
+  )
+}

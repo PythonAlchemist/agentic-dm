@@ -354,6 +354,10 @@ class Generated:
     #: to the plane of the passage it points at, which is a check rather than a
     #: request the model can decline.
     from_yours: tuple[dict, ...] = ()
+    #: The section this REPLACES. Set when the DM asked to change something
+    #: that exists, and the reason the card stores by rewriting rather than by
+    #: minting -- otherwise "build out the sea battle" leaves two sea battles.
+    revises: str = ""
     #: What this generation says it contains, each with its own provenance
     #: split, and the relationships it declares between them. Empty for a
     #: single-artifact generation, which is every one that existed before
@@ -383,6 +387,7 @@ class Generated:
             "invented": list(self.invented),
             "from_context": list(self.from_context),
             "from_yours": list(self.from_yours),
+            "revises": self.revises,
             "elements": list(self.elements),
             "edges": list(self.edges),
             "manifest_dropped": dict(self.manifest_dropped),
