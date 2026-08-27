@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.agents import canon_context, generator
+from backend.agents import canon_context, dm_agent, generator
+from backend.campaign import homebrew
 from backend.canon.retrieval import PATH_GRAPH, Passage, Retrieval
 
 
@@ -517,3 +518,35 @@ class TestAskingForTheSameThingAgain:
 
     def test_whitespace_is_not_a_note(self):
         assert "WHAT TO CHANGE" not in self._messages(previous="A draft.", note="   ")
+
+
+class TestAnEncounterIsItsOwnKind:
+    """"Give me a cast of enemies in a table" came back as a `monster` — one
+    prose blob about several enemies, with nothing minted and no roster. The
+    kind decides whether the DM gets a cast or a paragraph, and nothing had
+    told the model that."""
+
+    def test_it_is_askable_and_contains_things(self):
+        assert "encounter" in generator.KINDS
+        assert "encounter" in dm_agent.CLUSTER_KINDS, "its enemies are elements"
+
+    def test_it_asks_for_a_roster_rather_than_a_narrative(self):
+        """A scene says what happens; an encounter says who you are fighting.
+        If the shape stops asking for counts and behaviour, this is a scene
+        wearing another name."""
+        shape = generator.SHAPES["encounter"]
+        assert "roster" in shape
+        assert "how many" in shape
+        assert "element" in shape, "the enemies are minted, not just described"
+
+    def test_it_is_an_event_like_a_scene(self):
+        """It happens at a point in the running order, so it wears the label
+        canon already uses for one."""
+        assert homebrew.LABELS["encounter"] == "EVENT"
+
+    def test_the_vocabulary_narrows_to_what_it_can_contain(self):
+        """Same rule as every other kind: a relationship whose endpoints this
+        generation could never mint is not offered."""
+        assert set(generator.homebrew_vocabulary("encounter")) <= set(
+            generator.homebrew_vocabulary()
+        )

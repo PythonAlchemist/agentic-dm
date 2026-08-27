@@ -84,7 +84,7 @@ class DMResponse(BaseModel):
 #: Kinds that CONTAIN other things, and so are worth a second call to declare
 #: what they contain. An npc or a monster is one thing; annotating it would
 #: spend a call to be told so.
-CLUSTER_KINDS = frozenset({"quest", "scene"})
+CLUSTER_KINDS = frozenset({"quest", "scene", "encounter"})
 
 
 class DMAgent:

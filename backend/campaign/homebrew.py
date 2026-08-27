@@ -74,6 +74,9 @@ LABELS = {
     "monster": "MONSTER",
     "quest": "QUEST",
     "scene": "EVENT",
+    # An encounter is an episode like a scene -- it happens at a point in the
+    # running order -- so it wears the label canon already uses for one.
+    "encounter": "EVENT",
     "location": "LOCATION",
     "item": "ITEM",
     "lore": "LORE",

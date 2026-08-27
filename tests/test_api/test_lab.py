@@ -103,7 +103,11 @@ class TestConfig:
 
     def test_it_offers_the_generation_kinds(self, client):
         assert set(client.get("/api/lab/config").json()["kinds"]) == {
-            "quest", "npc", "monster", "scene"
+            "quest",
+            "npc",
+            "monster",
+            "scene",
+            "encounter",
         }
 
 

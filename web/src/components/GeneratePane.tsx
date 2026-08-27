@@ -8,8 +8,13 @@ import { CallMeter, RetrievalPanel } from './Meters'
 // Labels only. The PLACEHOLDERS come from the selected book's seed, because
 // they name things -- and three Barovia examples stayed put when the lab
 // switched to a heist anthology.
+//: `scene` is deliberately absent and `encounter` is not. A scene is defined
+//  by WHERE it goes in the running order, which is a thing you place from the
+//  chat while talking about the journey it interrupts; an encounter is a thing
+//  you sit down and build. Both mint their cast as separate entries.
 const KINDS = [
   { id: 'quest', label: 'Quest' },
+  { id: 'encounter', label: 'Encounter' },
   { id: 'npc', label: 'NPC' },
   { id: 'monster', label: 'Monster' },
 ]

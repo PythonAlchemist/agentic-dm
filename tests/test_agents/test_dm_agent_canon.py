@@ -528,7 +528,9 @@ class TestOnlyContainerKindsAreAnnotated:
     def test_quest_and_scene_cluster(self):
         from backend.agents.dm_agent import CLUSTER_KINDS
 
-        assert CLUSTER_KINDS == {"quest", "scene"}
+        # An encounter contains its opposition the way a scene contains its
+        # cast, so it is annotated too. An npc or a monster IS one thing.
+        assert CLUSTER_KINDS == {"quest", "scene", "encounter"}
 
     def test_npc_and_monster_do_not(self):
         from backend.agents.dm_agent import CLUSTER_KINDS

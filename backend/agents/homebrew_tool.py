@@ -51,8 +51,22 @@ SCHEMA = {
                     "type": "string",
                     "enum": list(KINDS),
                     "description": (
-                        "`scene` for an episode inserted at a point in the "
-                        "adventure, such as an encounter during a journey."
+                        "WHAT IT IS DECIDES WHETHER THE DM GETS A CAST OR A "
+                        "PARAGRAPH. `scene` and `quest` CONTAIN things: every "
+                        "person, place and object they name is pulled out "
+                        "afterwards and stored as its own entry the DM can "
+                        "review one by one. `npc` and `monster` ARE one thing "
+                        "and produce a single write-up.\n"
+                        "So: `scene` for an episode at a point in the "
+                        "adventure — an encounter during a journey, an ambush, "
+                        "a confrontation — and for ANY request naming several "
+                        "things at once: a cast, a crew, a group of enemies, "
+                        "'a table of', 'who is aboard'. `encounter` when what "
+                        "they want is a FIGHT they can run — enemies with "
+                        "counts, tactics and terrain — rather than a narrative "
+                        "beat. `quest` for a job "
+                        "somebody is given. `npc` or `monster` only when the "
+                        "DM wants exactly one creature or person described."
                     ),
                 },
                 "subject": {

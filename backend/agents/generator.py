@@ -40,7 +40,7 @@ from backend.core.pricing import Usage, estimate
 
 #: What can be generated. A closed set, checked before anything reaches a model:
 #: an unknown kind would otherwise become an unconstrained prompt.
-KINDS = ("quest", "npc", "monster", "scene")
+KINDS = ("quest", "npc", "monster", "scene", "encounter")
 
 #: What a CLUSTER may declare as a member. A separate closed set from `KINDS`,
 #: because these are different questions: `KINDS` is what a DM may ask for on
@@ -76,6 +76,22 @@ SHAPES = {
     "scene": "an episode that happens at a point in the adventure: what "
              "occurs, where it interrupts the journey or the plan, who "
              "appears, how it can play out, and what it changes afterwards",
+    # A SCENE SAYS WHAT HAPPENS; AN ENCOUNTER SAYS WHO YOU ARE FIGHTING. Asked
+    # for "a cast of enemies in a table", the closest kind was `scene`, which
+    # produced good prose about a fight and left the DM to pull the opposition
+    # out of it by hand at the table. What a DM needs mid-combat is a roster:
+    # how many of each, what each one does in the fight, and what ends it.
+    #
+    # The elements are the ENEMIES, so each arrives as its own entity the DM
+    # reviews and stores -- which is the whole reason this is its own kind
+    # rather than a phrasing of `scene`.
+    "encounter": "a combat encounter, written to be RUN: the opposition as a "
+                 "roster -- how many of each kind, what each does in the "
+                 "fight, and which is the dangerous one -- then the terrain "
+                 "and hazards that shape it, what the enemies want (which is "
+                 "rarely 'fight to the death'), and what makes them break off "
+                 "or surrender. Name every enemy group as an element; put "
+                 "counts and battlefield behaviour in its role",
     # THE THREE BELOW EXIST TO FLESH OUT AN ELEMENT, not to be asked for cold.
     # A cluster mints a location, an item or a piece of lore as a name and a
     # role; these are the shapes for turning one of those stubs into something
