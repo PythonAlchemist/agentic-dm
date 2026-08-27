@@ -382,16 +382,44 @@ def delete(tx, *, slug: str, entity_id: str, log_path: Path | None = None) -> di
             )
             spliced = result["changed"]
 
+    # THE ALIAS NODE IS SHARED AND MUST NOT BE DELETED WITH THE ENTITY. This
+    # said `DETACH DELETE m, a, e`, which destroys the `:Alias` itself -- and
+    # `Alias.name` carries a GLOBAL uniqueness constraint, so there is exactly
+    # one node per spelling across every plane and book. Deleting a scene
+    # called "The Sea Battle" therefore deleted the alias a DIFFERENT campaign's
+    # scene of that name resolved through, and it did: a test fixture using the
+    # same title took the real campaign's alias with it, and "revisit the sea
+    # battle" stopped resolving to a scene that was still sitting in the graph.
+    # The same shape reaches canon, where a homebrew element named after
+    # somebody in the book would have made the BOOK's name unresolvable.
+    #
+    # So the EDGE goes, and the node goes only if nothing else points through
+    # it. That is what `write` already assumes: it merges onto an existing
+    # spelling `ON CREATE SET`, precisely so it can share one.
+    orphaned = [
+        r["name"]
+        for r in tx.run(
+            """
+            MATCH (a:Alias)-[r:ALIAS_OF]->(:Entity {id:$id, plane:$plane})
+            DELETE r
+            WITH a WHERE NOT (a)-[:ALIAS_OF]->()
+            RETURN a.name AS name
+            """,
+            {"id": entity_id, "plane": CAMPAIGN_PLANE},
+        )
+    ]
     removed = tx.run(
         """
         MATCH (e:Entity {id:$id, plane:$plane})
         OPTIONAL MATCH (m:Mention)-[:REFERS_TO]->(e)
-        OPTIONAL MATCH (a:Alias)-[:ALIAS_OF]->(e)
-        DETACH DELETE m, a, e
+        DETACH DELETE m, e
         RETURN count(e) AS c
         """,
         {"id": entity_id, "plane": CAMPAIGN_PLANE},
     ).single()["c"]
+    if orphaned:
+        tx.run("MATCH (a:Alias) WHERE a.name IN $names DETACH DELETE a",
+               {"names": orphaned})
 
     if section_id:
         tx.run(

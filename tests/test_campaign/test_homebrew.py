@@ -24,7 +24,7 @@ ANCHOR = SECTIONS[2]
 PAYLOAD = dict(
     slug=SLUG,
     kind="scene",
-    title="The Sea Battle",
+    title="Pytest Sea Battle",
     body="Pirates board the prison barge two days out.",
     generated_body="Pirates board the prison barge two days out.",
     from_canon=[{"claim": "the voyage takes eight days", "cite": "[1]"}],
@@ -100,7 +100,7 @@ class TestWhatGetsWritten:
             "MATCH (a:Alias)-[:ALIAS_OF]->(:Entity {id:$id}) RETURN a.name AS name",
             {"id": stored.entity_id},
         ).single()
-        assert dict(found)["name"] == "The Sea Battle"
+        assert dict(found)["name"] == "Pytest Sea Battle"
 
     def test_the_prose_is_a_section_so_it_can_be_retrieved(self, table):
         stored = _store(table, anchor=ANCHOR)
@@ -236,7 +236,7 @@ class TestCanonIsBlindToAllOfIt:
     def test_a_stored_scene_is_not_a_canon_entity(self, table):
         _store(table, anchor=ANCHOR)
         found = table.run(
-            "MATCH (e:Entity {plane:'canon'}) WHERE e.name = 'The Sea Battle' RETURN count(e) AS c"
+            "MATCH (e:Entity {plane:'canon'}) WHERE e.name = 'Pytest Sea Battle' RETURN count(e) AS c"
         ).single()["c"]
         assert found == 0
 
@@ -244,14 +244,14 @@ class TestCanonIsBlindToAllOfIt:
         """Alias resolution is the front door to retrieval."""
         _store(table, anchor=ANCHOR)
         found = table.run(
-            "MATCH (a:Alias {plane:'canon'}) WHERE a.name = 'The Sea Battle' RETURN count(a) AS c"
+            "MATCH (a:Alias {plane:'canon'}) WHERE a.name = 'Pytest Sea Battle' RETURN count(a) AS c"
         ).single()["c"]
         assert found == 0
 
     def test_a_canon_retriever_never_returns_it(self, table):
         """The end-to-end version, through the real retriever."""
         _store(table, anchor=ANCHOR)
-        result = CanonRetriever(book="cos", limit=8).retrieve("the sea battle with pirates")
+        result = CanonRetriever(book="cos", limit=8).retrieve("the pytest sea battle with pirates")
         assert not any("hb:" in p.section_id for p in result.passages)
         assert not any("hb:" in a.entity_id for a in result.anchors)
 
@@ -286,32 +286,32 @@ class TestAnAliasThatAlreadyExistsDoesNotCrash:
 
     def test_storing_under_an_existing_alias_succeeds(self, table):
         table.run(
-            "CREATE (:Alias {name:'The Sea Battle', normalized:'the sea battle', "
+            "CREATE (:Alias {name:'Pytest Sea Battle', normalized:'pytest sea battle', "
             "plane:'canon'})"
         )
         try:
             stored = _store(table, anchor=ANCHOR)
             assert stored.entity_id.startswith("hb:")
         finally:
-            table.run("MATCH (a:Alias {name:'The Sea Battle'}) DETACH DELETE a")
+            table.run("MATCH (a:Alias {name:'Pytest Sea Battle'}) DETACH DELETE a")
 
     def test_and_the_existing_alias_is_not_rewritten(self, table):
         """The canon-never-mutated rule reaching one node further than
         entities: an alias the book owns keeps its plane."""
         table.run(
-            "CREATE (:Alias {name:'The Sea Battle', normalized:'the sea battle', "
+            "CREATE (:Alias {name:'Pytest Sea Battle', normalized:'pytest sea battle', "
             "plane:'canon'})"
         )
         try:
             _store(table, anchor=ANCHOR)
             row = dict(
                 table.run(
-                    "MATCH (a:Alias {name:'The Sea Battle'}) RETURN a.plane AS plane"
+                    "MATCH (a:Alias {name:'Pytest Sea Battle'}) RETURN a.plane AS plane"
                 ).single()
             )
             assert row["plane"] == "canon"
         finally:
-            table.run("MATCH (a:Alias {name:'The Sea Battle'}) DETACH DELETE a")
+            table.run("MATCH (a:Alias {name:'Pytest Sea Battle'}) DETACH DELETE a")
 
 
 class TestWritingACluster:
@@ -988,3 +988,47 @@ class TestChangingWhatAStubSaysItIs:
                 )
             )
         table.run("MATCH (e:Entity {id:'pytest-canon:x'}) DETACH DELETE e")
+
+
+class TestDeletingOneThingDoesNotUnnameAnother:
+    """`Alias.name` carries a GLOBAL uniqueness constraint -- one node per
+    spelling across every plane and book -- and `write` merges onto an existing
+    one deliberately. `delete` was destroying that shared node, so removing a
+    scene called X made a DIFFERENT campaign's X unresolvable. It happened: a
+    fixture using a real campaign's title took its alias, and "revisit the sea
+    battle" stopped finding a scene still sitting in the graph."""
+
+    def test_a_name_two_things_share_survives_deleting_one(self, table):
+        mine = _store(table, anchor=None, title="Pytest Shared Name", body="a",
+                      generated_body="a")
+        table.run(
+            """
+            MATCH (a:Alias {name:'Pytest Shared Name'})
+            CREATE (other:Entity {id:'hb:other-table:pytest-shared-name',
+                                  plane:'campaign', campaign:'other-table',
+                                  name:'Pytest Shared Name'})
+            CREATE (a)-[:ALIAS_OF]->(other)
+            """
+        )
+        table.execute_write(
+            lambda tx: homebrew.delete(tx, slug=SLUG, entity_id=mine.entity_id)
+        )
+        still = table.run(
+            "MATCH (:Alias {name:'Pytest Shared Name'})-[:ALIAS_OF]->(e) "
+            "RETURN collect(e.id) AS ids"
+        ).single()["ids"]
+        assert still == ["hb:other-table:pytest-shared-name"]
+        table.run("MATCH (e:Entity {id:'hb:other-table:pytest-shared-name'}) DETACH DELETE e")
+        table.run("MATCH (a:Alias {name:'Pytest Shared Name'}) DETACH DELETE a")
+
+    def test_an_alias_nothing_else_uses_is_still_removed(self, table):
+        """The node goes when it is genuinely orphaned -- this is a narrowing,
+        not an amnesty for dead aliases."""
+        stored = _store(table, anchor=None, title="Pytest Sole Owner", body="a",
+                        generated_body="a")
+        table.execute_write(
+            lambda tx: homebrew.delete(tx, slug=SLUG, entity_id=stored.entity_id)
+        )
+        assert table.run(
+            "MATCH (a:Alias {name:'Pytest Sole Owner'}) RETURN count(a) AS n"
+        ).single()["n"] == 0

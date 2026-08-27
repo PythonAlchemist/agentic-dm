@@ -13,6 +13,7 @@ from backend.agents import canon_context
 from backend.campaign import homebrew, store
 from backend.campaign.chain import seed_plan
 from backend.campaign.model import CAMPAIGN_PLANE, Campaign
+from backend.campaign.model import is_campaign_id
 from backend.canon.retrieval import CanonRetriever
 from backend.core.database import neo4j_session
 
@@ -407,3 +408,55 @@ class TestLinkingACanonEntityIntoAScene:
             if not p.section_id.startswith("hb:")
         ]
         assert with_campaign == without
+
+
+class TestYourOwnNamesAreMatchedCaseFolded:
+    """The two-pass case rule is all-or-nothing: a strict match anywhere means
+    the folded pass never runs. So "lets revisit the homebrew content about the
+    sea battle from prisoner 13" resolved `Prisoner 13` and never saw `the sea
+    battle` -- a scene the DM had written and named. The chat had no idea it
+    existed and offered to write one."""
+
+    def test_a_lower_case_mention_of_your_own_scene_resolves(self, overlaid):
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "lets revisit the corsair boarding"
+        )
+        assert any(is_campaign_id(a.entity_id) for a in result.anchors)
+
+    def test_it_resolves_even_when_a_canon_name_matched_strictly(self, overlaid):
+        """The exact case reported: a canon name anchoring the question used to
+        mean the DM's own name was never looked for at all, because the folded
+        pass only ran when the strict one found NOTHING."""
+        overlaid.run(
+            """
+            CREATE (e:Entity {id:$id, name:'Pytest Warden Kessel', plane:'canon'})
+            CREATE (a:Alias {name:'Pytest Warden Kessel',
+                             normalized:'pytest warden kessel', plane:'canon'})
+            CREATE (a)-[:ALIAS_OF]->(e)
+            """,
+            {"id": f"{BOOK}:pytest-warden-kessel"},
+        )
+        try:
+            result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+                "what does Pytest Warden Kessel know about the corsair boarding"
+            )
+            ids = [a.entity_id for a in result.anchors]
+            assert any(is_campaign_id(i) for i in ids), "the DM's own name resolved"
+            assert any(not is_campaign_id(i) for i in ids), "canon still resolves too"
+        finally:
+            # The entity goes with the book prefix on teardown; the alias is
+            # canon-plane, so the fixture's orphan sweep does not reach it.
+            overlaid.run(
+                "MATCH (a:Alias {name:$n}) DETACH DELETE a",
+                {"n": "Pytest Warden Kessel"},
+            )
+
+    def test_it_does_not_make_the_answer_loose(self, overlaid):
+        """`loose` says the weaker rule rescued a question that would otherwise
+        have found nothing. Folding case for a campaign name is the normal
+        rule now, not a rescue, and labelling it as one would teach a reader to
+        distrust an answer that is fine."""
+        result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "lets revisit the corsair boarding"
+        )
+        assert not result.loose

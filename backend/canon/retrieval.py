@@ -914,7 +914,8 @@ class CanonRetriever:
             # about what may anchor a QUESTION and not about what the graph
             # holds. A prop named in a section is still a fact about that
             # section, and the scan and the edges go on using it.
-            forms = anchorable_forms(self._rows(session, ALL_ALIASES))
+            rows = self._rows(session, ALL_ALIASES)
+            forms = anchorable_forms(rows)
             # Two passes, and the order is the whole point. The first is the
             # scan's own rule, so a question that spells names the way the book
             # does resolves exactly as the graph was built. Only when that finds
@@ -928,6 +929,32 @@ class CanonRetriever:
             # loose match becomes the default without anyone deciding it should.
             named = find_names(question, forms)
             loose = False
+            # YOUR OWN MATERIAL IS ALWAYS MATCHED CASE-FOLDED, and not as a
+            # fallback. The two-pass rule above is all-or-nothing: "lets revisit
+            # the homebrew content about the sea battle from prisoner 13"
+            # resolved `Prisoner 13` on the strict pass, so the loose pass never
+            # ran, so `the sea battle` -- a scene the DM wrote and named -- was
+            # never seen. The chat had no idea it existed and offered to write
+            # one.
+            #
+            # The case rule earns its keep over 2,000-odd canon names where a
+            # capital is the only thing separating the LORE entity `Light` from
+            # a lit torch. A campaign holds a few dozen names, all authored by
+            # the person asking, and they refer to them the way people refer to
+            # their own things: in lower case, mid-sentence. Folding case there
+            # risks almost nothing and rescues the question a DM is most likely
+            # to ask about their own work.
+            mine = [
+                form
+                for form in anchorable_forms(
+                    [r for r in rows if is_campaign_id(r["entity_id"])]
+                )
+                if form not in named
+            ]
+            named = named + [
+                found for found in find_names(question, mine, fold_case=True)
+                if found not in named
+            ]
             if not named:
                 named = find_names(question, forms, fold_case=True)
                 loose = bool(named)
