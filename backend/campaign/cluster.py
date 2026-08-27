@@ -215,6 +215,13 @@ def plan_cluster(
     collisions: list[Collision] = []
     links: list[tuple[str, str]] = []
     minted: set[str] = set()
+    # THE GENERATION'S OWN ID, so an element cannot claim it. `write_cluster`
+    # creates the root first and then the elements, so a member sharing the
+    # root's name mints an id that already exists and dies on the uniqueness
+    # constraint -- taking the whole transaction with it. Latent for any
+    # element, and reachable the moment `quest` joined `ELEMENT_KINDS`, since
+    # a quest generation naming its own job is the obvious thing to do.
+    root_id = mint_id(campaign, slugify(root_name)) if root_name else ""
 
     for element in elements:
         name = str(element.get("name") or "").strip()
@@ -231,6 +238,9 @@ def plan_cluster(
             continue
 
         entity_id = mint_id(campaign, slug)
+        if entity_id == root_id:
+            drop("this is the generation itself, not something it contains")
+            continue
         if entity_id in existing_ids:
             # The campaign already holds this. Refused rather than merged, the
             # rule `AlreadyStored` states, checked here so the card can say so

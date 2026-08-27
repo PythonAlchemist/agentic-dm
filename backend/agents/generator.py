@@ -48,7 +48,18 @@ KINDS = ("quest", "npc", "monster", "scene")
 #: location, an item and a piece of lore are worth minting when a quest names
 #: them and are not worth a generator of their own -- nobody asks the chat for
 #: a bare LORE node.
-ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore")
+#:
+#: `quest` IS HERE BECAUSE A SCENE OFTEN CONTAINS ONE, and leaving it out was
+#: the largest single cause of a declared edge being thrown away. A scene whose
+#: point is "someone offers the party a job" holds a job; without a QUEST to
+#: mint, `GAVE_QUEST` had nothing to point at, and the model aimed it at the
+#: nearest NPC or ITEM every time -- three of nine type failures in a
+#: ten-subject run. Narrowing the vocabulary hid that; this is the cause.
+#:
+#: `scene` IS STILL NOT HERE. A scene inside a scene is a structural claim
+#: about the running order, and the running order is a linked list a DM
+#: arranges -- not something a generation gets to assert about itself.
+ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore", "quest")
 
 SHAPES = {
     "quest": "a quest hook: who gives it, what it asks, what stands in the way, "
@@ -223,11 +234,17 @@ def homebrew_vocabulary(root_kind: str = "") -> tuple[str, ...]:
 _CLUSTER_RULE = """
 {n}. LIST WHAT THIS CONTAINS. Anything the material names that a DM would want
    as its own thing -- a place, a person, a creature, an object, a piece of
-   lore -- goes in `elements`, each with its OWN three provenance lists, split
-   by the same rule as above. Relationships between them go in `edges`.
+   lore, a job the party is given -- goes in `elements`, each with its OWN
+   three provenance lists, split by the same rule as above. Relationships
+   between them go in `edges`.
    Name an element by its `name`; name something from the CANON passages by
    the id shown beside it, and never by an id you were not shown.
    An element you would only mention in passing is scenery -- leave it out.
+
+   IF AN EDGE NEEDS A THING, LIST THE THING. `GAVE_QUEST` needs a `quest`
+   element to point at; `LOCATED_IN` needs the place. Declare it in `elements`
+   first, or leave the edge out -- naming something only in the edge does not
+   create it.
 
    AN EDGE MAY ONLY JOIN TWO THINGS ON THIS CARD -- an element you just listed,
    or the material itself by its title. An edge naming anything else, including
@@ -240,7 +257,7 @@ _CLUSTER_RULE = """
 {vocabulary}"""
 
 _CLUSTER_FIELD = """,
-  "elements": [{{"kind": "npc|monster|location|item|lore", "name": "...",
+  "elements": [{{"kind": "npc|monster|location|item|lore|quest", "name": "...",
                 "role": "what it is here in one line",
                 "from_canon": [], "invented": ["..."]}}],
   "edges": [{{"source": "...", "target": "...", "rel_type": "LOCATED_IN",

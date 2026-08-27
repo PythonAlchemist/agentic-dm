@@ -358,3 +358,43 @@ class TestAnEdgeWrittenBackwards:
         assert plan.edges_reversible == ()
         assert plan.edges == ()
         assert plan.edges_dropped == {"CONNECTED_TO: both": 1}
+
+
+class TestAClusterMayContainAJob:
+    """`quest` joined `ELEMENT_KINDS` because a scene often holds one, and
+    leaving it out was the largest single cause of a declared edge being lost:
+    `GAVE_QUEST` had nothing to point at, so the model aimed it at the nearest
+    NPC every time."""
+
+    def test_a_quest_element_mints_like_any_other(self):
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("Find the Child", kind="quest")],
+            root_name="The Search", root_kind="scene",
+        )
+        assert [e.kind for e in plan.elements] == ["quest"]
+
+    def test_gave_quest_now_has_somewhere_to_point(self):
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("Freek"), element("Find the Child", kind="quest")],
+            edges=[{"source": "Freek", "target": "Find the Child",
+                    "rel_type": "GAVE_QUEST"}],
+            root_name="The Search", root_kind="scene",
+        )
+        assert plan.edges == (("Freek", "Find the Child", "GAVE_QUEST"),)
+
+    def test_an_element_may_not_be_the_generation_itself(self):
+        """`write_cluster` creates the root first, so a member sharing its name
+        mints an id that already exists and dies on the uniqueness constraint,
+        taking the whole transaction with it. Latent for any element, and
+        reachable as soon as a quest generation could name its own job."""
+        plan = plan_cluster(
+            campaign=CAMPAIGN,
+            elements=[element("The Search", kind="quest"), element("Freek")],
+            root_name="The Search", root_kind="quest",
+        )
+        assert [e.name for e in plan.elements] == ["Freek"]
+        assert plan.dropped == {
+            "this is the generation itself, not something it contains": 1
+        }
