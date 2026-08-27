@@ -775,6 +775,41 @@ class NotEditable(Exception):
         self.section_id = section_id
 
 
+def rename_role(tx, *, slug: str, entity_id: str, role: str) -> dict:
+    """Change what a stub SAYS it is.
+
+    A cluster mints an element with a name and one line of role, and for four
+    of eleven things in a real campaign that line is the whole content -- it is
+    what the panel prints, what `CAMPAIGN_ENTITY_FACTS` hands the model when a
+    fresh session asks, and the only description that exists until somebody
+    fleshes it out. It was set once at mint and never again, so a role the
+    model got slightly wrong was a permanent property of the campaign.
+
+    NOT AN EDIT OF PROSE. `edit` changes a section and re-derives whether the
+    text still matches what the model wrote; this changes a property of an
+    entity, which has no generated counterpart to be compared against. Two
+    different things, kept apart rather than folded into one endpoint that
+    branches.
+
+    THE NAME IS NOT CHANGEABLE HERE, and deliberately. A name is the alias, the
+    id, the mention surface and half of every edge key -- renaming it is a
+    graph-wide operation with its own failure modes, not a text field. A DM who
+    wants a different name has `delete` and a fresh write, which is honest
+    about the cost.
+    """
+    row = tx.run(
+        """
+        MATCH (e:Entity {id:$id, plane:$plane, campaign:$slug})
+        SET e.role = $role
+        RETURN e.id AS id, e.role AS role
+        """,
+        {"id": entity_id, "plane": CAMPAIGN_PLANE, "slug": slug, "role": role.strip()},
+    ).single()
+    if row is None:
+        raise NotStored(entity_id)
+    return {"entity_id": dict(row)["id"], "role": dict(row)["role"]}
+
+
 def edit(tx, *, slug: str, section_id: str, body: str) -> dict:
     """Change the prose of something already stored.
 

@@ -101,6 +101,8 @@ export function YourMaterial({
             busy={busy === element.entity_id}
             onDraft={() => draft(element)}
             onRead={onRead}
+            campaign={campaign}
+            onChanged={load}
           />
         ))}
         {written.length > 0 && (
@@ -109,7 +111,14 @@ export function YourMaterial({
           </p>
         )}
         {written.map((element) => (
-          <Row key={element.entity_id} element={element} busy={false} onRead={onRead} />
+          <Row
+            key={element.entity_id}
+            element={element}
+            busy={false}
+            onRead={onRead}
+            campaign={campaign}
+            onChanged={load}
+          />
         ))}
       </div>
     </Card>
@@ -121,18 +130,55 @@ function Row({
   busy,
   onDraft,
   onRead,
+  campaign,
+  onChanged,
 }: {
   element: CampaignElement
   busy: boolean
   onDraft?: () => void
   onRead: (sectionId: string) => void
+  campaign: string
+  onChanged: () => void
 }) {
+  //: The role, while it is being rewritten. `null` is reading, which is what
+  //  this panel is for -- the edit is the occasional thing.
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (draft === null || saving) return
+    setSaving(true)
+    try {
+      await labAPI.setRole(campaign, element.entity_id, draft)
+      setDraft(null)
+      onChanged()
+    } finally {
+      setSaving(false)
+    }
+  }
+
   // Only something WITH prose opens. A stub has nothing to show, and a door
   // onto an empty room is worse than no door -- the "flesh out" beside it is
   // the action that stub actually offers.
   const readable = element.own_section
   return (
     <div className="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40">
+      {draft !== null ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={save}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') save()
+            // ESCAPE ABANDONS, and it has to: this input sits over the only
+            // description a stub has, and a reflex keystroke must not be able
+            // to commit half a rewrite.
+            if (event.key === 'Escape') setDraft(null)
+          }}
+          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-1 text-xs text-neutral-200 outline-none"
+        />
+      ) : (
       <button
         disabled={!readable}
         onClick={() => readable && onRead(readable)}
@@ -148,10 +194,19 @@ function Row({
           <span className="text-neutral-600"> · {element.role}</span>
         )}
       </button>
+      )}
       <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-600">
         {element.kind}
       </span>
-      {onDraft && (
+      {draft === null && (
+        <button
+          onClick={() => setDraft(element.role || '')}
+          className="shrink-0 text-[10px] text-neutral-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300"
+        >
+          role
+        </button>
+      )}
+      {onDraft && draft === null && (
         <button
           onClick={onDraft}
           disabled={busy}

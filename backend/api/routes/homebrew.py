@@ -640,6 +640,29 @@ def expand_element(request: ExpandRequest) -> dict:
     return stored.as_dict()
 
 
+class RoleRequest(BaseModel):
+    campaign: str
+    entity_id: str
+    role: str
+
+
+@router.post("/role")
+def set_role(request: RoleRequest) -> dict:
+    """Change the one line a stub is made of."""
+    with neo4j_session() as session:
+        try:
+            return session.execute_write(
+                lambda tx: homebrew.rename_role(
+                    tx,
+                    slug=request.campaign,
+                    entity_id=request.entity_id,
+                    role=request.role,
+                )
+            )
+        except homebrew.NotStored as refused:
+            raise HTTPException(status_code=404, detail=str(refused)) from refused
+
+
 class RescanRequest(BaseModel):
     campaign: str
 

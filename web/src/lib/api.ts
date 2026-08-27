@@ -383,6 +383,15 @@ export const labAPI = {
     )
   },
 
+  /** Change the one line a stub is made of. */
+  setRole(campaign: string, entityId: string, role: string) {
+    return postTo<{ entity_id: string; role: string }>('/homebrew/role', {
+      campaign,
+      entity_id: entityId,
+      role,
+    })
+  },
+
   elements(campaign: string): Promise<{ elements: CampaignElement[]; unwritten: number }> {
     return getJSON(`/homebrew/elements?campaign=${encodeURIComponent(campaign)}`)
   },

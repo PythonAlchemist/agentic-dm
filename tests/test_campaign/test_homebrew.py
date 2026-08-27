@@ -941,3 +941,50 @@ class TestTheProseIsRead:
             "MATCH (m:Mention {id:$m}) RETURN count(m) AS n",
             {"m": f"declared@{stored.section_id}"},
         ).single()["n"] == 1
+
+
+class TestChangingWhatAStubSaysItIs:
+    """A cluster mints an element with a name and one line of role, and for a
+    stub that line is the whole content -- what the panel prints, and what a
+    fresh session is told when it asks. It was set once at mint and never
+    again, so a role the model got slightly wrong was permanent."""
+
+    def _stub(self, table):
+        stored = _store(table, anchor=None, title="Pytest Bosun", body="x",
+                        generated_body="x")
+        table.run("MATCH (e:Entity {id:$i}) SET e.role = 'a deckhand'",
+                  {"i": stored.entity_id})
+        return stored.entity_id
+
+    def test_the_role_changes(self, table):
+        entity_id = self._stub(table)
+        result = table.execute_write(
+            lambda tx: homebrew.rename_role(
+                tx, slug=SLUG, entity_id=entity_id, role="the bosun, and a liar"
+            )
+        )
+        assert result["role"] == "the bosun, and a liar"
+        assert table.run(
+            "MATCH (e:Entity {id:$i}) RETURN e.role AS r", {"i": entity_id}
+        ).single()["r"] == "the bosun, and a liar"
+
+    def test_another_campaigns_entity_is_refused(self, table):
+        entity_id = self._stub(table)
+        with pytest.raises(homebrew.NotStored):
+            table.execute_write(
+                lambda tx: homebrew.rename_role(
+                    tx, slug="someone-elses", entity_id=entity_id, role="mine now"
+                )
+            )
+
+    def test_a_canon_entity_is_refused(self, table):
+        """The plane check is in the MATCH, so there is no path that reads a
+        canon entity and then decides."""
+        table.run("CREATE (:Entity {id:'pytest-canon:x', plane:'canon', name:'X'})")
+        with pytest.raises(homebrew.NotStored):
+            table.execute_write(
+                lambda tx: homebrew.rename_role(
+                    tx, slug=SLUG, entity_id="pytest-canon:x", role="nope"
+                )
+            )
+        table.run("MATCH (e:Entity {id:'pytest-canon:x'}) DETACH DELETE e")
