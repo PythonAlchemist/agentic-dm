@@ -273,6 +273,22 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
     # about it, and without this the model answered "the canon does not cover
     # any specific details about Captain Saltmarrow" about a character the DM
     # had invented an hour earlier.
+    # WHAT THEY ARE LOOKING AT, ABOVE EVERYTHING. Whole, under its own
+    # heading, and NOT among the numbered passages: it is not competing for a
+    # retrieval slot, it is here because the DM has it open. Without this they
+    # have to re-describe in a chat box the thing already on screen in front of
+    # them, which is the complaint that started this.
+    if retrieval.focus_prose:
+        open_now = retrieval.focus_prose
+        mine = open_now.get("plane") == "campaign"
+        parts.append(
+            f"WHAT THE DM IS READING RIGHT NOW — {open_now.get('heading') or ''}"
+            f"{'  ← their own, not the published book' if mine else '  ← the book'}\n"
+            "Answer about this unless they clearly mean something else, and do "
+            "not ask them to describe it back to you.\n\n"
+            f"{open_now.get('text') or ''}"
+        )
+
     # THE ROSTER FIRST AND UNCONDITIONALLY, then the detail for whatever the
     # question actually named. One says what exists at this table, the other
     # says what the graph holds about the thing being discussed, and a model

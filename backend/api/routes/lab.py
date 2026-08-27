@@ -67,6 +67,14 @@ class ChatRequest(BaseModel):
     #: and means canon only -- the same default the evaluation harnesses use.
     campaign: str | None = None
     depth: Depth = Field(default_factory=Depth)
+    #: WHAT THE DM HAS OPEN: a section id or an entity id, or empty.
+    #:
+    #: A PRIOR, NOT A FILTER. Retrieval still reads the whole graph; this only
+    #: fills anchor slots the question itself did not, so nothing typed can be
+    #: outvoted by what happens to be on screen. Passages that arrive this way
+    #: are labelled `focus`, because a bias nobody can see is indistinguishable
+    #: from the tool quietly getting worse.
+    focus: str = ""
     #: Off by default. The campaign RAG pipeline needs a populated vector store
     #: and answers about the campaign plane; this lab is about canon.
     use_rag: bool = False
@@ -169,6 +177,11 @@ async def chat(request: ChatRequest) -> dict:
     model = request.model or settings.openai_model
     depth = request.depth.to_domain()
     agent = _agent_for(request.session_id, model, depth, request.book, request.campaign)
+    # SET PER TURN, not per session. The DM clicks through from a scene to
+    # somebody in it while the conversation carries on, and the focus has to
+    # follow them -- a session-lifetime value would go stale the moment they
+    # moved, which is the failure mode this design was warned about.
+    agent.focus = request.focus
 
     try:
         result: DMResponse = await agent.process_message(

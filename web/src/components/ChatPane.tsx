@@ -28,6 +28,8 @@ export function ChatPane({
   depth,
   sessionId,
   onSpend,
+  focus,
+  onClearFocus,
 }: {
   /** From the selected book's seed -- a Barovia tavern used to sit in this box
    *  while the lab answered out of a heist anthology. Empty means no chip. */
@@ -44,6 +46,10 @@ export function ChatPane({
   depth: Depth
   sessionId: string
   onSpend: (reply: ChatReply) => void
+  /** What the DM has open. A prior on retrieval, shown so it can be argued
+   *  with — an invisible bias reads as the tool getting quietly worse. */
+  focus: { id: string; label: string } | null
+  onClearFocus: () => void
 }) {
   const [debug] = useDebug()
   const [openHeld, setOpenHeld] = useState(false)
@@ -95,7 +101,9 @@ export function ChatPane({
     setBusy(true)
     setTurns((t) => [...t, { question }])
     try {
-      const reply = await labAPI.chat(question, model, depth, sessionId, book, campaign)
+      const reply = await labAPI.chat(
+        question, model, depth, sessionId, book, campaign, focus?.id ?? '',
+      )
       setTurns((t) => t.map((turn, i) => (i === t.length - 1 ? { ...turn, reply } : turn)))
       onSpend(reply)
     } catch (error) {
@@ -174,6 +182,16 @@ export function ChatPane({
                             {s.path === 'text' && (
                               <span className="text-neutral-500"> · keyword match</span>
                             )}
+                            {/* THE PRIOR, MADE VISIBLE. A passage here because
+                                of what is open — not because the question named
+                                it — has to say so, or a DM watches answers drift
+                                toward whatever they last clicked with no way to
+                                know why. */}
+                            {s.path === 'focus' && (
+                              <span className="text-neutral-500">
+                                {' '}· from what you’re reading
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -240,6 +258,20 @@ export function ChatPane({
               Ask
             </button>
           </div>
+
+          {focus && (
+            <div className="mt-2 flex items-baseline gap-2 text-xs">
+              <span className="text-neutral-600">reading</span>
+              <span className="min-w-0 truncate text-neutral-300">{focus.label}</span>
+              <button
+                onClick={onClearFocus}
+                title="Ask about the whole book instead"
+                className="shrink-0 text-neutral-600 hover:text-neutral-300"
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           <button
             onClick={() => setOpenHeld((prior) => !prior)}

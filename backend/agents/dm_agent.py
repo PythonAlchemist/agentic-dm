@@ -134,6 +134,11 @@ class DMAgent:
         #: each one. Per-turn rather than per-session: a card the DM has
         #: already been shown must not be re-generated on the next question.
         self._requested_generations: list = []
+        #: What the DM has open, if anything: a section id or an entity id.
+        #: A PRIOR AND NOT A FILTER -- retrieval still reads the whole graph,
+        #: and anything the question itself resolves keeps its place ahead of
+        #: this. Set per turn by the caller, because it changes as they click.
+        self.focus = ""
         #: Section ids this session has actually put in front of the model.
         #: The anchor a generation may name is checked against it, so a model
         #: cannot place a scene into a chapter nobody has opened.
@@ -445,7 +450,7 @@ class DMAgent:
             # the Blood of the Vine Tavern is no use while the eight sections
             # in front of the model are `Tyger, Tyger` and `Crypt 10`.
             carry = [held.id for held in self.subgraph.subjects()]
-            return self.canon.retrieve(user_input, carry=carry)
+            return self.canon.retrieve(user_input, carry=carry, focus=self.focus)
         except Exception:  # noqa: BLE001 - degraded answer beats a crash mid-session
             logger.warning("canon retrieval failed; answering without it", exc_info=True)
             return Retrieval(question=user_input)
@@ -604,7 +609,15 @@ class DMAgent:
                 # being asked to make, and the conversation is the ADDITIONAL
                 # context on top -- which is the division the two panes exist
                 # to express.
-                own = self.canon.retrieve(request.subject) if self.canon else retrieval
+                # THE SAME FOCUS THE CHAT HAD. A DM reading Captain
+                # Saltmarrow and asking for a crew means his crew; handing the
+                # generator a bare subject would throw away the one piece of
+                # context the question was leaning on.
+                own = (
+                    self.canon.retrieve(request.subject, focus=self.focus)
+                    if self.canon
+                    else retrieval
+                )
                 drafted = await generator.generate(
                     self.openai,
                     kind=request.kind,

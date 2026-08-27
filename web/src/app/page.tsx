@@ -70,6 +70,11 @@ export default function Lab() {
   //  Switching book or table RESETS the conversation anyway, so there is no
   //  mid-session cost to putting them one click away.
   const [setupOpen, setSetupOpen] = useState(false)
+  //: WHAT THE DM IS LOOKING AT, biasing what the chat retrieves. Held here
+  //  rather than in the reader because it must OUTLIVE the drawer: they open a
+  //  scene, close it, and go on asking about it. Cleared explicitly, never by
+  //  a component unmounting.
+  const [focus, setFocus] = useState<{ id: string; label: string } | null>(null)
   const [debug, setDebug] = useDebug()
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
   const [tab, setTab] = useState<'chat' | 'generate'>('chat')
@@ -195,6 +200,8 @@ export default function Lab() {
                 book={book}
                 campaign={campaign}
                 onChainChanged={noteChainChanged}
+                focus={focus}
+                onClearFocus={() => setFocus(null)}
                 raised={raised}
                 onRaisedHandled={() => setRaised(null)}
                 suggestion={here?.examples.ask ?? ''}
@@ -243,6 +250,7 @@ export default function Lab() {
         onClose={() => setReading(null)}
         onEdited={noteChainChanged}
         onJump={setReading}
+        onFocus={setFocus}
       />
     </TooltipProvider>
   )

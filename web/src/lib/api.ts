@@ -344,9 +344,13 @@ export const labAPI = {
     sessionId: string,
     book: string,
     campaign: string | null,
+    /** A section or entity id the DM has open. Biases retrieval; never
+     *  narrows it. */
+    focus = '',
   ) {
     return post<ChatReply>('/chat', {
       message, model, depth, session_id: sessionId, book, campaign,
+      focus,
     })
   },
 

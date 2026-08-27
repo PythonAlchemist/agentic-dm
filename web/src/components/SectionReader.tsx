@@ -22,6 +22,7 @@ export function SectionReader({
   onClose,
   onEdited,
   onJump,
+  onFocus,
 }: {
   sectionId: string | null
   campaign: string | null
@@ -29,6 +30,10 @@ export function SectionReader({
   onEdited?: () => void
   /** Follow a name to another section, without closing the drawer. */
   onJump: (sectionId: string) => void
+  /** What the DM is now looking at, so the chat can lean on it. FOLLOWS THE
+   *  ENTITY: clicking a name in the prose moves the focus onto that name,
+   *  because "give me a crew for this" then means his crew. */
+  onFocus: (focus: { id: string; label: string }) => void
 }) {
   const [section, setSection] = useState<SectionRead | null>(null)
   const [failed, setFailed] = useState('')
@@ -45,7 +50,9 @@ export function SectionReader({
 
   const openEntity = async (entityId: string) => {
     try {
-      setEntity(await labAPI.entity(entityId, campaign))
+      const found = await labAPI.entity(entityId, campaign)
+      setEntity(found)
+      onFocus({ id: found.entity_id, label: found.name })
     } catch (error) {
       setFailed(error instanceof Error ? error.message : String(error))
     }
@@ -67,6 +74,7 @@ export function SectionReader({
         setLoadedFor(sectionId)
         setDraft(null)
         setEntity(null)
+        onFocus({ id: found.section_id, label: found.heading })
         setFailed('')
       })
       .catch((error) => {
@@ -75,7 +83,7 @@ export function SectionReader({
     return () => {
       cancelled = true
     }
-  }, [sectionId, campaign])
+  }, [sectionId, campaign, onFocus])
 
   // Escape closes it, because a drawer that traps you is worse than no
   // drawer. It backs out of EDITING first rather than out of the drawer: a

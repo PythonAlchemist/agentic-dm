@@ -186,6 +186,46 @@ RETURN e.id AS id, e.name AS name, e.kind AS kind, e.role AS role,
 ORDER BY e.kind, e.name
 """
 
+#: What the DM is looking at, and what sits next to it.
+#:
+#: CO-MENTION, NOT TYPED EDGES, and that is a measured choice rather than a
+#: shortcut. Campaign entities had no typed edges at all until they started
+#: being written this morning, so `Captain Saltmarrow` -- minted weeks
+#: earlier -- has none: a neighbourhood built on relationships would be empty
+#: for every piece of material that already exists. Two things named in one
+#: section is a fact the graph has held all along, and it is the same evidence
+#: `CO_OCCURS_WITH` is derived from.
+#:
+#: The focus may be a SECTION or an ENTITY. A DM reading a scene and a DM who
+#: has clicked through to somebody in it are pointing at different things, and
+#: both are answered the same way: find the sections involved, then everything
+#: else those sections name.
+FOCUS_NEIGHBOURHOOD = """
+MATCH (focus) WHERE focus.id = $focus
+OPTIONAL MATCH (focus)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(named:Section)
+WITH focus, collect(DISTINCT named) AS named_in
+WITH focus,
+     CASE WHEN focus:Section THEN [focus] ELSE named_in END AS here
+UNWIND here AS sec
+MATCH (:Mention)-[:IN_SECTION]->(sec)
+MATCH (m:Mention)-[:IN_SECTION]->(sec)
+MATCH (m)-[:REFERS_TO]->(e:Entity)
+WHERE e.id <> $focus
+  AND (e.plane = 'canon' OR e.campaign = $campaign)
+RETURN DISTINCT e.id AS id
+"""
+
+#: The prose of whatever is open, to travel as its own block rather than as a
+#: retrieved passage. A DM should not have to re-describe the thing on screen.
+FOCUS_PROSE = """
+MATCH (n) WHERE n.id = $focus
+OPTIONAL MATCH (own:Section {expands: n.id})
+WITH CASE WHEN n:Section THEN n ELSE own END AS sec, n
+WHERE sec IS NOT NULL
+RETURN sec.id AS section_id, sec.heading AS heading, sec.text AS text,
+       sec.plane AS plane
+"""
+
 #: Sections this campaign has cut. Retrieved all the same -- the chain is the
 #: running order, not the knowledge scope, and "what was in the bit I skipped"
 #: is a real question -- but marked, so nothing reads as in play that is not.
@@ -245,6 +285,15 @@ SECTION_MAX = 4000
 #: make the fallback look like an improvement to the graph.
 PATH_GRAPH = "graph"
 PATH_TEXT = "text"
+#: Here because of what the DM has open, not because the question named it.
+#:
+#: A THIRD LABEL RATHER THAN A SILENT TILT. The focus is a prior on retrieval,
+#: and a prior nobody can see is indistinguishable from the tool getting
+#: quietly worse -- the DM would watch answers drift toward whatever they last
+#: clicked and have no way to know why. Everything else here is labelled by how
+#: it was found for exactly this reason, and a bias is more in need of the
+#: label than a keyword hit, not less.
+PATH_FOCUS = "focus"
 PATH_NONE = ""
 
 #: What one matched question word is worth against one naming of an anchor, when
@@ -343,6 +392,11 @@ class Anchor:
     rung: str | None
     surface: str
     node_status: str | None = None
+    #: How this anchor got here: `PATH_GRAPH` when the question named it,
+    #: `PATH_FOCUS` when it came from whatever the DM has open. Carried so a
+    #: reader can tell a thing they asked about from a thing they were looking
+    #: at -- the same reason a passage carries one.
+    path: str = PATH_GRAPH
 
 
 @dataclass(frozen=True)
@@ -442,6 +496,11 @@ class Retrieval:
     #: Everything this table has made, named or not: the roster the chat needs
     #: to know what exists before it offers to invent it again.
     campaign_roster: tuple[dict, ...] = ()
+    #: The prose of whatever the DM has open, carried whole and separately from
+    #: the ranked passages. A DM should not have to re-describe the thing on
+    #: screen, and it is not competing with the retrieval for a slot -- it is
+    #: there because they are looking at it.
+    focus_prose: dict | None = None
     #: The DM's own record for campaign entities this question named: kind,
     #: role, what was invented, and where they were introduced. Carried apart
     #: from `passages` because it is not prose -- it is what the graph holds
@@ -729,6 +788,10 @@ class CanonRetriever:
         self.limit = limit
         self.passage_width = passage_width
         self.book = book
+        #: Set per `retrieve` call; see the note there. Initialised so a
+        #: retriever that is read before it is asked anything is not a
+        #: crash waiting for the first campaign session.
+        self._focus = ""
         self.campaign = campaign
         self._title: str | None = None
 
@@ -738,6 +801,7 @@ class CanonRetriever:
         *,
         limit: int | None = None,
         carry: Sequence[str] = (),
+        focus: str = "",
     ) -> Retrieval:
         """Canon for a question, plus this table's own material when it has any.
 
@@ -751,8 +815,12 @@ class CanonRetriever:
         questions cannot see a DM's material no matter what is in the graph --
         by construction, not by discipline.
         """
+        # Stashed rather than threaded: `_with_campaign` is called from one
+        # place and needs one more fact, and widening its signature to carry it
+        # through would touch every campaign test for no gain.
+        self._focus = focus
         found = replace(
-            self._retrieve(question, limit=limit, carry=carry),
+            self._retrieve(question, limit=limit, carry=carry, focus=focus),
             book_title=self.title,
         )
         if not self.campaign:
@@ -806,6 +874,18 @@ class CanonRetriever:
                                 entity_ids=(),
                                 origin="campaign",
                                 chain_status="in-chain",
+                                # WHOLE-SET, because these arrive per anchor-id
+                                # and the row does not say which one produced
+                                # it. When every anchor came from the focus,
+                                # every passage they produced did too -- and
+                                # when any was typed, calling these context
+                                # would understate them.
+                                path=(
+                                    PATH_FOCUS
+                                    if found.anchors
+                                    and all(a.path == PATH_FOCUS for a in found.anchors)
+                                    else PATH_GRAPH
+                                ),
                             )
                         )
                         by_id[row["section_id"]] = named[-1]
@@ -834,6 +914,11 @@ class CanonRetriever:
 
         with self._session() as session:
             roster = self._rows(session, CAMPAIGN_ROSTER)
+            open_now = (
+                self._rows(session, FOCUS_PROSE, {"focus": self._focus})
+                if self._focus
+                else []
+            )
 
         facts: list[dict] = []
         if campaign_ids:
@@ -860,6 +945,7 @@ class CanonRetriever:
             found,
             passages=tuple(leading + labelled + following + riders),
             campaign_roster=tuple(roster),
+            focus_prose=open_now[0] if open_now else None,
             campaign_entities=tuple(facts),
             dropped=found.dropped + cut,
         )
@@ -917,6 +1003,7 @@ class CanonRetriever:
         *,
         limit: int | None = None,
         carry: Sequence[str] = (),
+        focus: str = "",
     ) -> Retrieval:
         """Canon for a question, optionally anchored on what came before.
 
@@ -986,6 +1073,18 @@ class CanonRetriever:
                 named = find_names(question, forms, fold_case=True)
                 loose = bool(named)
             carried = False
+            # THE FOCUS IS TRIED BEFORE THE CONVERSATION AND BEFORE THE TEXT
+            # FALLBACK, because it is better evidence than either. What the DM
+            # is looking at right now beats what they were talking about three
+            # turns ago, and both beat guessing at keywords across the whole
+            # book. "Give me a cast of enemies" names nothing, so it fell
+            # straight to Lucene and came back with nine hits from six
+            # unrelated heists -- and that is precisely the question a DM asks
+            # with the scene open in front of them.
+            if not named and focus:
+                anchors = self._focus_anchors(session, focus)
+                if anchors:
+                    return self._from_anchors(session, question, anchors, limit)
             if not named and carry:
                 # The conversation's own subjects, as ids rather than as
                 # spellings: no matching to do, no pronoun rule, no guess. A
@@ -1016,6 +1115,19 @@ class CanonRetriever:
                         )
                     )
 
+            # THE FOCUS GOES LAST, AND THAT IS THE WHOLE RULE. What the DM
+            # TYPED resolves first and keeps its place; what they happen to
+            # have open fills what is left. So nothing they ask can be
+            # outvoted by what is on screen -- the bias reaches only the
+            # questions the question itself did not answer, which is exactly
+            # the case it exists for.
+            if focus:
+                held = {a.entity_id for a in anchors}
+                anchors += [
+                    a for a in self._focus_anchors(session, focus)
+                    if a.entity_id not in held
+                ]
+
             if not anchors:
                 # A recorded spelling that names nothing is a broken graph, not
                 # a descriptive question, so this does NOT fall through to text.
@@ -1036,6 +1148,43 @@ class CanonRetriever:
             )
 
     # -- internals ---------------------------------------------------------
+
+    def _focus_anchors(self, session, focus: str) -> list[Anchor]:
+        """Anchors for whatever sits beside the thing the DM has open.
+
+        BOTH PLANES, unlike `_anchors_by_id`: a DM reading their own scene is
+        surrounded by their own cast AND the book's ship, and the neighbourhood
+        is worthless if it can only see one of them.
+
+        Every one is marked `PATH_FOCUS`, so a passage that arrives through
+        this route can say it did.
+        """
+        ids = [row["id"] for row in self._rows(session, FOCUS_NEIGHBOURHOOD, {"focus": focus})]
+        if not ids:
+            return []
+        rows = self._rows(
+            session,
+            """
+            MATCH (e:Entity) WHERE e.id IN $ids
+              AND (e.plane = 'canon' OR e.campaign = $campaign)
+            RETURN e.id AS id, e.name AS name, labels(e) AS labels,
+                   e.status AS node_status
+            ORDER BY e.id
+            """,
+            {"ids": ids},
+        )
+        return [
+            Anchor(
+                entity_id=row["id"],
+                name=row["name"],
+                labels=tuple(type_labels(row["labels"])),
+                rung=rung_of(row["labels"]),
+                surface="",
+                node_status=row["node_status"],
+                path=PATH_FOCUS,
+            )
+            for row in rows
+        ]
 
     def _anchors_by_id(self, session, ids: Sequence[str]) -> list[Anchor]:
         """Anchors for entity ids the conversation already holds.
@@ -1093,7 +1242,12 @@ class CanonRetriever:
         # demote.
         anchor_words = {word for a in anchors for word in a.surface.lower().split()}
         terms = [t for t in content_terms(question) if t not in anchor_words]
-        passages = self._passages(session, ids, terms)
+        passages = self._passages(
+            session,
+            ids,
+            terms,
+            frozenset(a.entity_id for a in anchors if a.path == PATH_FOCUS),
+        )
 
         # The text path runs even though a name resolved, and this is the
         # change that matters most. Anchoring is not the same as anchoring
@@ -1240,7 +1394,13 @@ class CanonRetriever:
             ),
         )
 
-    def _passages(self, session, ids: list[str], terms: list[str]) -> list[Passage]:
+    def _passages(
+        self,
+        session,
+        ids: list[str],
+        terms: list[str],
+        from_focus: frozenset[str] = frozenset(),
+    ) -> list[Passage]:
         """One passage per SECTION, ranked.
 
         Per section rather than per mention: two anchors named in one section is
@@ -1322,6 +1482,16 @@ class CanonRetriever:
                 aliases=tuple(sorted(set(slot["aliases"]))),
                 term_hits=terms_present(slot["text"], terms),
                 home_chapter=slot["chapter"] in home_chapters,
+                # A PASSAGE IS `focus` ONLY IF NOTHING THE DM TYPED PUT IT
+                # THERE. One that a named anchor also reaches is a genuine
+                # answer to the question, and labelling it as context would
+                # understate it -- the label exists to mark what arrived
+                # because of the screen rather than because of the ask.
+                path=(
+                    PATH_FOCUS
+                    if from_focus and set(slot["entity_ids"]) <= from_focus
+                    else PATH_GRAPH
+                ),
             )
             for slot in merged.values()
         ]

@@ -14,7 +14,7 @@ from backend.campaign import homebrew, store
 from backend.campaign.chain import seed_plan
 from backend.campaign.model import CAMPAIGN_PLANE, Campaign
 from backend.campaign.model import is_campaign_id
-from backend.canon.retrieval import CanonRetriever
+from backend.canon.retrieval import PATH_FOCUS, CanonRetriever
 from backend.core.database import neo4j_session
 
 SLUG = "pytest-overlay"
@@ -99,6 +99,9 @@ def overlaid(tmp_path):
 
 
 QUESTION = "what happens during the Vrakanth crossing"
+
+#: The scene the fixture chains after ANCHOR, as a focus target.
+SCENE_SECTION = f"hb:{SLUG}:corsair-boarding#0"
 
 
 def _passages(campaign):
@@ -460,3 +463,52 @@ class TestYourOwnNamesAreMatchedCaseFolded:
             "lets revisit the corsair boarding"
         )
         assert not result.loose
+
+
+class TestWhatTheDMHasOpenBiasesRetrieval:
+    """A PRIOR, NOT A FILTER. The whole graph is still read; the focus only
+    fills anchor slots the question itself did not, so nothing typed can be
+    outvoted by whatever happens to be on screen."""
+
+    def test_a_question_that_names_nothing_leans_on_the_focus(self, overlaid):
+        """"give me a cast of enemies" resolves no name and fell straight to
+        Lucene, returning hits from unrelated adventures — and it is exactly
+        the question a DM asks with the scene open in front of them."""
+        r = CanonRetriever(book=BOOK, limit=6, campaign=SLUG)
+        blind = r.retrieve("give me a cast of enemies")
+        led = r.retrieve("give me a cast of enemies", focus=SCENE_SECTION)
+        assert not any(a.path == PATH_FOCUS for a in blind.anchors)
+        assert any(a.path == PATH_FOCUS for a in led.anchors)
+
+    def test_what_the_question_names_keeps_its_place(self, overlaid):
+        """The rule is lexicographic. A focus anchor can only be appended
+        after everything the DM actually typed has resolved."""
+        led = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "tell me about Corsair Boarding", focus=SCENE_SECTION
+        )
+        typed = [a for a in led.anchors if a.path != PATH_FOCUS]
+        assert typed, "the named anchor survived"
+        assert led.anchors[0].path != PATH_FOCUS, "and it is still first"
+
+    def test_a_focus_only_passage_says_so(self, overlaid):
+        """An invisible bias is indistinguishable from the tool quietly
+        getting worse. A passage here because of the screen carries its own
+        label, exactly as a keyword hit does."""
+        led = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "give me a cast of enemies", focus=SCENE_SECTION
+        )
+        assert any(p.path == PATH_FOCUS for p in led.passages)
+
+    def test_the_open_prose_travels_whole_and_apart(self, overlaid):
+        """Not among the ranked passages — it is not competing for a slot, it
+        is here because they are looking at it."""
+        led = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
+            "what happens next", focus=SCENE_SECTION
+        )
+        assert led.focus_prose is not None
+        assert led.focus_prose["section_id"] == SCENE_SECTION
+
+    def test_no_focus_is_the_behaviour_that_came_before(self, overlaid):
+        blind = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(QUESTION)
+        assert blind.focus_prose is None
+        assert not any(p.path == PATH_FOCUS for p in blind.passages)
