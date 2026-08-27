@@ -37,6 +37,16 @@ export function GeneratePane({
   const [kind, setKind] = useState('npc')
   const [subject, setSubject] = useState('')
   const [result, setResult] = useState<GeneratedReply | null>(null)
+  //: Bumped per draft, and used as the card's `key`. A REVISION returns a new
+  //  card to the same mounted component, and `GenerationCard` holds the
+  //  editable body in `useState(card.body)` -- which initialises once and
+  //  never again. So "make him honest" came back with the smuggling gone from
+  //  the provenance lists and still there in the prose: a DM reading a card
+  //  whose two halves disagreed. Remounting is the right answer rather than
+  //  syncing one field, because everything else the card holds -- the anchor,
+  //  whether it was stored, a half-resolved cluster plan -- belongs to the
+  //  draft that is being replaced.
+  const [draftNumber, setDraftNumber] = useState(0)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [order, setOrder] = useState<OrderRow[]>([])
@@ -70,6 +80,7 @@ export function GeneratePane({
         kind, subject.trim(), model, depth, book, campaign, revision,
       )
       setResult(reply)
+      setDraftNumber((n) => n + 1)
       onSpend(reply)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -145,6 +156,7 @@ export function GeneratePane({
                 forgot a provenance list. The split rendering lives in the card
                 so both entry points cannot disagree about it. */}
             <GenerationCard
+              key={draftNumber}
               card={result}
               campaign={campaign}
               order={order}
