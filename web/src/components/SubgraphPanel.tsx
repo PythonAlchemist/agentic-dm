@@ -149,7 +149,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                 onClick={() => setMode(id)}
                 className={`px-2 py-0.5 text-[11px] first:rounded-l-md last:rounded-r-md ${
                   mode === id
-                    ? 'bg-amber-500/15 text-amber-200'
+                    ? 'bg-neutral-800 text-neutral-100'
                     : 'text-neutral-500 hover:bg-neutral-800/60'
                 }`}
               >
@@ -208,7 +208,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                           : 'Touched this turn, so pinned: the current subject cannot be evicted to make room for itself.'
                       }
                     >
-                      <span className={stale ? 'text-amber-600/80' : 'text-neutral-600'}>
+                      <span className={stale ? 'text-neutral-400' : 'text-neutral-600'}>
                         t{n.turn}
                       </span>
                     </Explain>

@@ -43,11 +43,11 @@ export function Slider({
         className="relative flex h-5 w-full touch-none select-none items-center"
       >
         <RadixSlider.Track className="relative h-1 grow rounded-full bg-neutral-800">
-          <RadixSlider.Range className="absolute h-full rounded-full bg-amber-600" />
+          <RadixSlider.Range className="absolute h-full rounded-full bg-neutral-500" />
         </RadixSlider.Track>
         <RadixSlider.Thumb
           aria-label={label}
-          className="block h-4 w-4 rounded-full bg-amber-500 shadow transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          className="block h-4 w-4 rounded-full bg-neutral-200 shadow transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
         />
       </RadixSlider.Root>
       {hint && <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">{hint}</p>}
@@ -136,7 +136,7 @@ export function TabBar<T extends string>({
           onClick={() => onChange(tab.id)}
           className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
             tab.id === active
-              ? 'bg-amber-500/15 text-amber-200'
+              ? 'bg-neutral-800 text-neutral-100'
               : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-200'
           }`}
         >

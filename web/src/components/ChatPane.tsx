@@ -138,7 +138,7 @@ export function ChatPane({
 
             {turns.map((turn, i) => (
               <div key={i} className="space-y-2">
-                <p className="text-sm font-medium text-amber-300/90">{turn.question}</p>
+                <p className="text-sm font-medium text-neutral-100">{turn.question}</p>
 
                 {turn.error && (
                   <p className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-400">
@@ -162,7 +162,7 @@ export function ChatPane({
                                 QUESTION resolved credited the graph for
                                 answers a keyword match earned. */}
                             {s.path === 'text' && (
-                              <span className="text-amber-500/70"> · keyword match</span>
+                              <span className="text-neutral-500"> · keyword match</span>
                             )}
                           </li>
                         ))}
@@ -220,12 +220,12 @@ export function ChatPane({
                 }
               }}
               placeholder={suggestion}
-              className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-amber-600/60"
+              className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-500"
             />
             <button
               onClick={ask}
               disabled={busy || !draft.trim()}
-              className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-neutral-950 transition-opacity disabled:opacity-30"
+              className="rounded-md bg-neutral-200 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white transition-opacity disabled:opacity-30"
             >
               Ask
             </button>
@@ -233,7 +233,7 @@ export function ChatPane({
         </div>
       </Panel>
 
-      <Separator className="mx-1 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-amber-600/60" />
+      <Separator className="mx-1 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
 
       <Panel defaultSize="38%" minSize="20%">
         <div className="h-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/30">

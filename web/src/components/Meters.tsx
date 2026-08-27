@@ -21,7 +21,7 @@ export function CallMeter({ usage, cost }: { usage: Usage; cost: Cost }) {
       <span className="tabular-nums">{money(cost)}</span>
       {age(cost) && (
         <Explain text="Every rate is a claim about the outside world this repository cannot check. An unverified one is arithmetic on a number nobody has confirmed — correct it in backend/core/pricing.yaml and set last_verified.">
-          <span className={cost.verified ? '' : 'text-amber-500/80'}>{age(cost)}</span>
+          <span className={cost.verified ? '' : 'text-neutral-400'}>{age(cost)}</span>
         </Explain>
       )}
     </div>
@@ -39,7 +39,7 @@ export function CallMeter({ usage, cost }: { usage: Usage; cost: Cost }) {
 export function MissReason({ report }: { report: RetrievalReport | null }) {
   if (!report?.miss_reason) return null
   return (
-    <p className="mt-2 text-xs text-amber-400/80">{report.miss_reason}</p>
+    <p className="mt-2 text-xs text-neutral-400">{report.miss_reason}</p>
   )
 }
 
@@ -66,7 +66,7 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
                 : 'Retrieval returned nothing at all.'
           }
         >
-          <span className={byText ? 'text-amber-400' : report.path ? 'text-emerald-400' : 'text-neutral-500'}>
+          <span className={byText ? 'text-neutral-400' : report.path ? 'text-neutral-200' : 'text-neutral-500'}>
             {byText ? 'keyword match' : report.path ? 'by name' : 'nothing'}
           </span>
         </Explain>
@@ -105,7 +105,7 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
         {report.proposed_withheld && ' (withheld)'}
       </p>
       {report.miss_reason && (
-        <p className="mt-1 text-amber-400/80">{report.miss_reason}</p>
+        <p className="mt-1 text-neutral-400">{report.miss_reason}</p>
       )}
     </div>
   )
@@ -164,7 +164,7 @@ export function SessionMeter({
       {/* A total built partly from unchecked rates has to say so, or the
           number reads as though somebody confirmed it. */}
       {running.unverified && running.calls > 0 && (
-        <p className="border-t border-neutral-800 px-3 py-2 text-xs text-amber-500/90">
+        <p className="border-t border-neutral-800 px-3 py-2 text-xs text-neutral-400">
           Includes rates nobody has verified.
         </p>
       )}
@@ -199,7 +199,7 @@ export function SpendChip({
         ${running.usd.toFixed(4)}
         {running.unverified && (
           <Explain text="Some of this used a rate nobody has verified. Correct backend/core/pricing.yaml and set last_verified.">
-            <span className="ml-1 text-amber-500/80">⚠</span>
+            <span className="ml-1 text-neutral-400">⚠</span>
           </Explain>
         )}
       </span>

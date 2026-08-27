@@ -98,7 +98,7 @@ export function GeneratePane({
             onClick={() => setKind(k.id)}
             className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
               kind === k.id
-                ? 'bg-amber-500/15 text-amber-200'
+                ? 'bg-neutral-800 text-neutral-100'
                 : 'text-neutral-400 hover:bg-neutral-800/60'
             }`}
           >
@@ -120,12 +120,12 @@ export function GeneratePane({
             }
           }}
           placeholder={placeholder}
-          className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-amber-600/60"
+          className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-500"
         />
         <button
           onClick={() => run()}
           disabled={busy || !subject.trim()}
-          className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-30"
+          className="rounded-md bg-neutral-200 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white disabled:opacity-30"
         >
           {busy ? '…' : 'Generate'}
         </button>
@@ -171,7 +171,7 @@ export function GeneratePane({
                   <li key={i}>
                     {s.citation} {s.section ?? s.source}
                     {s.path === 'text' && (
-                      <span className="text-amber-500/70"> · keyword match</span>
+                      <span className="text-neutral-500"> · keyword match</span>
                     )}
                   </li>
                 ))}

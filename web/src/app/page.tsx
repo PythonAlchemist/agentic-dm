@@ -149,7 +149,7 @@ export default function Lab() {
             <SpendChip running={running} onReset={resetSession} debug={debug} />
             <button
               onClick={() => setDebug(!debug)}
-              className={`text-xs ${debug ? 'text-amber-300' : 'text-neutral-700 hover:text-neutral-500'}`}
+              className={`text-xs ${debug ? 'text-neutral-100' : 'text-neutral-700 hover:text-neutral-500'}`}
               title="Show how answers were produced (⌘.)"
             >
               debug

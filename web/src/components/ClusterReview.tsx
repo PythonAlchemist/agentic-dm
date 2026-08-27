@@ -111,14 +111,14 @@ export function ClusterReview({
               key={element.name}
               className={`rounded border px-2 py-1.5 ${
                 collision
-                  ? 'border-amber-700/60 bg-amber-500/5'
+                  ? 'border-neutral-600 bg-neutral-800/60'
                   : 'border-neutral-800/80'
               }`}
             >
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  className="accent-amber-500"
+                  className="accent-neutral-400"
                   checked={!out}
                   onChange={() =>
                     setRejected((prior) => {
@@ -150,7 +150,7 @@ export function ClusterReview({
                   leave two things answering to one name. */}
               {collision && (
                 <div className="ml-6 mt-1 text-[11px]">
-                  <span className="text-amber-400">
+                  <span className="text-neutral-200">
                     {collision.canon_id} already has this name.
                   </span>
                   <div className="mt-1 flex gap-2">
@@ -210,7 +210,7 @@ export function ClusterReview({
           shape as the name collisions above. */}
       {plan && plan.edges_reversible.length > 0 && (
         <div className="mt-2 border-t border-neutral-800 pt-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-amber-400/80">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
             Written backwards ({plan.edges_reversible.length})
           </div>
           <ul className="mt-1 space-y-1 text-[11px] text-neutral-400">

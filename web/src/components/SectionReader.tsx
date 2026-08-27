@@ -124,7 +124,7 @@ export function SectionReader({
             {yours && draft === null && (
               <button
                 onClick={() => setDraft(shown?.text ?? '')}
-                className="text-neutral-500 hover:text-amber-300"
+                className="text-neutral-500 hover:text-neutral-200"
               >
                 edit
               </button>
@@ -175,13 +175,13 @@ export function SectionReader({
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   rows={16}
-                  className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-amber-600/60"
+                  className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-neutral-500"
                 />
                 <div className="mt-2 flex items-center gap-3 text-xs">
                   <button
                     onClick={save}
                     disabled={saving}
-                    className="rounded-md bg-amber-600/90 px-3 py-1.5 font-medium text-neutral-950 hover:bg-amber-500 disabled:opacity-40"
+                    className="rounded-md bg-neutral-200 px-3 py-1.5 font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-40"
                   >
                     {saving ? 'Saving…' : 'Save'}
                   </button>
@@ -200,7 +200,7 @@ export function SectionReader({
             )}
 
             {shown.edited && (
-              <p className="mt-3 text-xs text-amber-500/80">
+              <p className="mt-3 text-xs text-neutral-400">
                 You edited this after it was drafted. The provenance below
                 describes the original text and was not re-checked.
               </p>

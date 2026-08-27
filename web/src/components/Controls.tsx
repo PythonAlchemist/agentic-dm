@@ -56,7 +56,7 @@ export function Controls({
               onClick={() => onBook(b.slug)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
                 b.slug === book
-                  ? 'border-amber-600/60 bg-amber-500/10'
+                  ? 'border-neutral-600 bg-neutral-800'
                   : 'border-transparent hover:bg-neutral-800/50'
               }`}
             >
@@ -84,7 +84,7 @@ export function Controls({
             onClick={() => onCampaign(null)}
             className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
               campaign === null
-                ? 'border-amber-600/60 bg-amber-500/10'
+                ? 'border-neutral-600 bg-neutral-800'
                 : 'border-transparent hover:bg-neutral-800/50'
             }`}
           >
@@ -99,7 +99,7 @@ export function Controls({
               onClick={() => onCampaign(c.slug)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
                 c.slug === campaign
-                  ? 'border-amber-600/60 bg-amber-500/10'
+                  ? 'border-neutral-600 bg-neutral-800'
                   : 'border-transparent hover:bg-neutral-800/50'
               }`}
             >
@@ -124,7 +124,7 @@ export function Controls({
               onClick={() => onModel(m.id)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
                 m.id === model
-                  ? 'border-amber-600/60 bg-amber-500/10'
+                  ? 'border-neutral-600 bg-neutral-800'
                   : 'border-transparent hover:bg-neutral-800/50'
               }`}
             >
@@ -145,11 +145,11 @@ export function Controls({
             to be spent. What must never happen is showing it as though it had
             been checked. */}
         {chosen && !chosen.last_verified && (
-          <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-amber-500/90">
+          <p className="border-t border-neutral-800 px-3 py-2 text-xs leading-relaxed text-neutral-400">
             This rate has never been verified by a human. Costs are arithmetic
             on an unchecked number — correct{' '}
-            <code className="text-amber-300">backend/core/pricing.yaml</code> and
-            set <code className="text-amber-300">last_verified</code>.
+            <code className="text-neutral-300">backend/core/pricing.yaml</code> and
+            set <code className="text-neutral-300">last_verified</code>.
           </p>
         )}
       </Card>
@@ -182,7 +182,7 @@ export function Controls({
                   onClick={() => onDepth({ ...depth, passage_width: w })}
                   className={`rounded px-3 py-1 text-xs transition-colors ${
                     depth.passage_width === w
-                      ? 'bg-amber-500/15 text-amber-200'
+                      ? 'bg-neutral-800 text-neutral-100'
                       : 'text-neutral-400 hover:bg-neutral-800/60'
                   }`}
                 >
@@ -200,7 +200,7 @@ export function Controls({
           <label className="flex cursor-pointer items-start gap-2">
             <input
               type="checkbox"
-              className="mt-1 accent-amber-500"
+              className="mt-1 accent-neutral-400"
               checked={depth.include_proposed}
               onChange={(e) => onDepth({ ...depth, include_proposed: e.target.checked })}
             />

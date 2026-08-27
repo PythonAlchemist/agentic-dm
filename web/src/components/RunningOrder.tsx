@@ -109,7 +109,7 @@ export function RunningOrder({
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
           placeholder="find a scene…"
-          className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-amber-600/60"
+          className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-neutral-500"
         />
         <span className="shrink-0 text-xs tabular-nums text-neutral-600">
           {shown.length === rows.length

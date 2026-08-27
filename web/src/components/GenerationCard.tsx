@@ -133,7 +133,7 @@ export function GenerationCard({
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={7}
-        className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-amber-600/60"
+        className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-neutral-500"
       />
       {onRevise && (
         <div className="mt-2 flex items-center gap-2">
@@ -147,7 +147,7 @@ export function GenerationCard({
               }
             }}
             placeholder="Same again, but… (make her older, lose the storm)"
-            className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-amber-600/60"
+            className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-neutral-500"
           />
           <button
             onClick={() => {
@@ -166,7 +166,7 @@ export function GenerationCard({
       {/* Said plainly, because nothing re-checks a body after a person edits
           it -- the citations below still claim what the model claimed. */}
       {edited && (
-        <p className="mt-1 text-xs text-amber-500/80">
+        <p className="mt-1 text-xs text-neutral-400">
           Edited. The citations below were made about the original text and are
           not re-checked.
         </p>
@@ -286,7 +286,7 @@ export function GenerationCard({
             <button
               onClick={store}
               disabled={busy || !!stored || blocked}
-              className="rounded-md bg-amber-600/90 px-3 py-1.5 text-xs font-medium text-neutral-950 transition-colors hover:bg-amber-500 disabled:opacity-40"
+              className="rounded-md bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-40"
             >
               {stored ? 'Stored' : busy ? 'Storing…' : 'Store in my campaign'}
             </button>
@@ -298,7 +298,7 @@ export function GenerationCard({
             {/* Named, not merely disabled: a greyed button with no reason
                 beside it is a dead end rather than a decision. */}
             {blocked && (
-              <span className="text-xs text-amber-500/90">
+              <span className="text-xs text-neutral-300">
                 Resolve the name{plan!.collisions.length === 1 ? '' : 's'} above first.
               </span>
             )}
