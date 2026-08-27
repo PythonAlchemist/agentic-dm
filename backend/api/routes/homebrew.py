@@ -543,6 +543,8 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             OPTIONAL MATCH (s)-[:DERIVED_FROM]->(cited:Section)
             OPTIONAL MATCH (m:Mention)-[:IN_SECTION]->(s)
             OPTIONAL MATCH (m)-[:REFERS_TO]->(named:Entity)
+            OPTIONAL MATCH (named)-[edge]->(far:Entity)
+            WHERE far.plane = 'canon' OR far.campaign = $campaign
             RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
                    s.plane AS plane, s.kind AS kind, s.invented AS invented,
                    s.from_canon AS from_canon, s.from_yours AS from_yours,
@@ -563,7 +565,16 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
                      entity_id: named.id, name: named.name, kind: named.kind,
                      plane: named.plane,
                      surface: coalesce(m.display_name, m.surface, named.name)
-                   }) AS mentions
+                   }) AS mentions,
+                   // ONE HOP OUT, for reference while reading. Everything this
+                   // section names is already underlined in the prose; this is
+                   // what those things are CONNECTED to, which the prose does
+                   // not say and the graph does. A DM reading a scene wants
+                   // "what else is this touching" without leaving it.
+                   collect(DISTINCT {
+                     from: named.name, rel: type(edge), to: far.name,
+                     to_id: far.id, plane: far.plane, status: edge.status
+                   }) AS connections
             """,
             {"id": section_id, "campaign": campaign},
         ).single()
@@ -578,6 +589,9 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
         found[field] = json.loads(raw) if raw else []
     found["cites"] = [c for c in found["cites"] if c]
     found["mentions"] = [m for m in found["mentions"] if m.get("entity_id")]
+    found["connections"] = [
+        c for c in found["connections"] if c.get("rel") and c.get("to")
+    ]
     return found
 
 

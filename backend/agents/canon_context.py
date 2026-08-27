@@ -250,7 +250,7 @@ def _authored(edge: dict) -> bool:
     return edge.get("status") == "authored"
 
 
-def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
+def render(retrieval: Retrieval, *, max_edges: int = 12, for_chat: bool = True) -> str:
     """The context block, or a statement that there is none.
 
     `max_edges` bounds each relationship list. A heavily-mentioned anchor such
@@ -278,7 +278,7 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
     # retrieval slot, it is here because the DM has it open. Without this they
     # have to re-describe in a chat box the thing already on screen in front of
     # them, which is the complaint that started this.
-    if retrieval.focus_prose:
+    if retrieval.focus_prose and for_chat:
         open_now = retrieval.focus_prose
         mine = open_now.get("plane") == "campaign"
         parts.append(
@@ -290,7 +290,17 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
             # "build out the sea battle, give me a cast of enemies" read as
             # make-me-something and minted a second scene beside the one on
             # screen. Here it sits next to the thing being talked about.
-            "IF THEY ASK TO CHANGE, EXTEND, BUILD OUT, ADD TO OR SHORTEN THIS, "
+            # WHAT "THIS" MEANS, stated rather than left to be inferred.
+            # Asked to "flesh out this character" with Captain Saltmarrow open,
+            # the model drafted A Bent Turnkey -- a different NPC, picked from
+            # the roster because it was marked as having no prose yet. "This",
+            # "him", "her" and "it" are the thing named on this line and
+            # nothing else.
+            "WHEN THEY SAY this, it, him, her, this character, this scene -- "
+            "they mean the thing named on the line above, not something else "
+            "from the list below that seems to fit better.\n"
+            "IF THEY ASK TO CHANGE, EXTEND, BUILD OUT, ADD TO, FLESH OUT OR "
+            "SHORTEN THIS, "
             "that is `revise_my_material` and never `generate_homebrew` -- "
             "generating would leave them with two of it. Only reach for "
             "`generate_homebrew` when what they want is a SEPARATE thing that "
@@ -303,7 +313,14 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
     # says what the graph holds about the thing being discussed, and a model
     # that only ever got the second could not tell "you have not made that"
     # from "you did not mention it".
-    if retrieval.campaign_roster:
+    # THE ROSTER IS A CHAT CONCERN AND NOT A GENERATOR'S. It exists so the
+    # model knows what already EXISTS before it offers to invent it again --
+    # a question only the chat is asked. Handed to a generator writing about a
+    # named subject it is a menu of other names, and it behaved like one: told
+    # to write up Captain Saltmarrow, it returned "A Bent Turnkey" in three
+    # runs out of four, on both model tiers. The subject was right in the user
+    # message the whole time; the system message was offering alternatives.
+    if retrieval.campaign_roster and for_chat:
         parts.append(_roster(retrieval.campaign_roster))
     if retrieval.campaign_entities:
         parts.append(_your_material(retrieval.campaign_entities))

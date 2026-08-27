@@ -139,6 +139,9 @@ class DMAgent:
         #: and anything the question itself resolves keeps its place ahead of
         #: this. Set per turn by the caller, because it changes as they click.
         self.focus = ""
+        #: What the DM actually typed this turn, so a tool argument can be
+        #: checked against it rather than taken on trust.
+        self._last_message = ""
         #: Section ids this session has actually put in front of the model.
         #: The anchor a generation may name is checked against it, so a model
         #: cannot place a scene into a chapter nobody has opened.
@@ -217,6 +220,7 @@ class DMAgent:
         # re-generate on the next question.
         self._requested_generations = []
 
+        self._last_message = user_input
         retrieval = self._retrieve_canon(user_input) if use_canon else None
         if retrieval is not None:
             seed_subgraph(self.subgraph, retrieval)
@@ -590,6 +594,33 @@ class DMAgent:
         evidence about the prompt, and swallowing it leaves a DM wondering
         whether they asked for the wrong thing.
         """
+        # ONE ASK, ONE DRAFT. A model handed both `revise_my_material` and
+        # `generate_homebrew` sometimes calls both for a single sentence --
+        # rewriting the thing on screen AND minting something new -- and the
+        # DM gets two cards for one request, one of which they never asked
+        # for. A request that TARGETS something existing is the one they
+        # meant: they were pointing at it.
+        targeted = [
+            r for r in self._requested_generations if r.revises or r.expands
+        ]
+        if targeted and len(targeted) != len(self._requested_generations):
+            dropped = len(self._requested_generations) - len(targeted)
+            logger.info("dropped %d speculative generation(s) beside a rewrite", dropped)
+            self._requested_generations = targeted
+        # AND IF IT AIMED AT TWO EXISTING THINGS, the one the DM NAMED is the
+        # one they meant: asked to build out the corsair ambush while reading
+        # Captain Saltmarrow, it drafted both, and only one of those was asked
+        # for. The name in their own words is the tie-break, for the same
+        # reason it settles the target in the first place.
+        if len(self._requested_generations) > 1:
+            named = [
+                r
+                for r in self._requested_generations
+                if homebrew_tool.named_by_the_dm(r.subject, self._last_message)
+            ]
+            if named:
+                self._requested_generations = named[:1]
+
         if not self._requested_generations:
             return []
 
@@ -642,6 +673,8 @@ class DMAgent:
                 )
                 if request.revises:
                     drafted = replace(drafted, revises=request.revises)
+                if request.expands:
+                    drafted = replace(drafted, expands=request.expands)
                 # A QUEST OR A SCENE CONTAINS THINGS; an NPC or a monster IS
                 # one. Only the first two are annotated, so the second call is
                 # spent where there is something to declare.
@@ -821,11 +854,21 @@ class DMAgent:
                 # is open. A model asked to rewrite "this" means the thing on
                 # the DM's screen, and making it name that thing would be
                 # asking it to guess at something already known.
+                # A NAME THE DM DID NOT SAY IS ONE THE MODEL CHOSE, so it
+                # does not get to override what they are pointing at.
+                asked = str(arguments.get("name") or "")
+                if (
+                    asked
+                    and self.focus
+                    and not homebrew_tool.named_by_the_dm(asked, self._last_message)
+                ):
+                    logger.info("ignoring %r: the DM did not name it", asked)
+                    asked = ""
                 with read_only_session() as session:
                     target = homebrew_tool.resolve_revision(
                         session,
                         campaign=self.canon.campaign or "",
-                        name=str(arguments.get("name") or ""),
+                        name=asked,
                         focus=self.focus,
                     )
                 if target is None:
@@ -833,12 +876,19 @@ class DMAgent:
                         "error": "nothing here by that name, and nothing open to rewrite"
                     }
                 else:
+                    # A STUB IS WRITTEN, NOT REWRITTEN. `expand` gives
+                    # something that is only a name and a role its first
+                    # prose; `revises` would try to replace a section that
+                    # does not exist.
                     self._requested_generations.append(
                         homebrew_tool.Request(
                             kind=target["kind"] or "scene",
                             subject=target["name"],
                             note=str(arguments.get("note") or ""),
-                            revises=target["section_id"],
+                            revises=target["section_id"] or "",
+                            expands=(
+                                "" if target["section_id"] else target["entity_id"]
+                            ),
                         )
                     )
                     payload = {

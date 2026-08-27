@@ -358,6 +358,9 @@ class Generated:
     #: that exists, and the reason the card stores by rewriting rather than by
     #: minting -- otherwise "build out the sea battle" leaves two sea battles.
     revises: str = ""
+    #: The entity this gives its FIRST prose to, when it had only a name and a
+    #: role. The card stores it by expanding rather than by minting a second.
+    expands: str = ""
     #: What this generation says it contains, each with its own provenance
     #: split, and the relationships it declares between them. Empty for a
     #: single-artifact generation, which is every one that existed before
@@ -388,6 +391,7 @@ class Generated:
             "from_context": list(self.from_context),
             "from_yours": list(self.from_yours),
             "revises": self.revises,
+            "expands": self.expands,
             "elements": list(self.elements),
             "edges": list(self.edges),
             "manifest_dropped": dict(self.manifest_dropped),
@@ -447,7 +451,7 @@ def build_messages(
         raise ValueError(f"unknown kind {kind!r}; expected one of {sorted(SHAPES)}")
     shown = canon_context.apply(retrieval, depth)
     carried = context or GenerationContext()
-    system = canon_context.render(shown, max_edges=depth.max_edges)
+    system = canon_context.render(shown, max_edges=depth.max_edges, for_chat=False)
     if not carried.empty:
         system = f"{system}\n\n{carried.render()}"
     return [
@@ -486,6 +490,43 @@ def build_messages(
     ]
 
 
+def _first_object(text: str) -> tuple[dict, str]:
+    """The first complete JSON object in a response, or a reason.
+
+    TOLERANT OF A FENCE, because models wrap JSON in one often enough that
+    failing on it would report a prompt problem as a model problem.
+
+    AND TOLERANT OF WHAT COMES AFTER, which is new and was learned from a stat
+    block: asked for one, the model returned its JSON and then went on to lay
+    the block out in markdown underneath, and `json.loads` on the whole string
+    failed with "Extra data: line 1 column 1867". The object was complete and
+    correct; the draft was thrown away over what followed it.
+
+    Nothing else is forgiven. Text BEFORE the object, or no object at all, is
+    still a rejection -- a response missing `from_canon` or `invented` must not
+    be defaulted to empty, because an empty `invented` reads as "all of this is
+    from the book", the precise claim this module exists to keep honest.
+    """
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3]
+    cleaned = cleaned.strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        # `raw_decode` reads one value and reports where it stopped, which is
+        # exactly the question here: was there a whole object at the front?
+        try:
+            data, _end = json.JSONDecoder().raw_decode(cleaned)
+        except json.JSONDecodeError:
+            return {}, f"response was not JSON: {exc}"
+    if not isinstance(data, dict):
+        return {}, "response was JSON but not an object"
+    return data, ""
+
+
 def parse(
     text: str, *, expect_context: bool = False, expect_cluster: bool = False
 ) -> tuple[dict, str]:
@@ -498,17 +539,9 @@ def parse(
     reads as "all of this is from the book" -- the precise claim this module
     exists to keep honest.
     """
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[-1]
-        if cleaned.rstrip().endswith("```"):
-            cleaned = cleaned.rstrip()[: -3]
-    try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError as exc:
-        return {}, f"response was not JSON: {exc}"
-    if not isinstance(data, dict):
-        return {}, "response was JSON but not an object"
+    data, error = _first_object(text)
+    if error:
+        return {}, error
     required = ["from_canon", "invented"]
     # REQUIRED ONLY WHEN CONTEXT WAS GIVEN, so the contract stays a contract.
     # Demanding it always would make it usually-empty, and a field that is

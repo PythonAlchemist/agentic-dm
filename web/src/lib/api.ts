@@ -174,6 +174,16 @@ export interface SectionRead {
   invented: string[]
   edited: boolean | null
   cites: string[]
+  /** One hop out from everything this prose names: what those things are
+   *  connected to. The prose does not say it; the graph does. */
+  connections: {
+    from: string
+    rel: string
+    to: string
+    to_id: string
+    plane: 'canon' | 'campaign'
+    status: string | null
+  }[]
   /** Which entities this prose names, from the mention triangle — not from
    *  matching strings, so the highlight agrees with what retrieval believes. */
   mentions: {

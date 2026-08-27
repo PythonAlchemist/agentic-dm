@@ -355,3 +355,46 @@ class TestTheAnchorFollowsTheStrongerSignal:
         )
         anchor, _chapters = canon_context.suggest_anchor(shown)
         assert anchor == "cos:canon#1"
+
+
+class TestTheRosterIsForTheChatAndNotTheGenerator:
+    """Told to write up Captain Saltmarrow, the generator returned "A Bent
+    Turnkey" in three runs of four, on both model tiers. The subject was right
+    in the user message the whole time — the SYSTEM message was handing it a
+    list of every other thing the table had made, and it read like a menu."""
+
+    def _shown(self):
+        # A passage, because `render` short-circuits to the no-canon notice
+        # without one and would never reach the blocks under test.
+        return Retrieval(
+            question="q",
+            passages=(passage("cos:x#1", "Somewhere", "Some prose."),),
+            campaign_roster=(
+                {"id": "hb:t:a", "name": "Captain Saltmarrow", "kind": "npc",
+                 "role": "the corsair captain", "written": True},
+                {"id": "hb:t:b", "name": "A Bent Turnkey", "kind": "npc",
+                 "role": "her subordinate", "written": False},
+            ),
+            focus_prose={"section_id": "hb:t:a#0", "heading": "Captain Saltmarrow",
+                         "text": "A seasoned corsair captain.", "plane": "campaign"},
+        )
+
+    def test_the_chat_is_told_what_exists(self):
+        """It has to know, or it offers to invent something that already does."""
+        block = canon_context.render(self._shown(), max_edges=4)
+        assert "EVERYTHING THIS TABLE HAS MADE" in block
+        assert "A Bent Turnkey" in block
+
+    def test_the_generator_is_not(self):
+        """It is writing about one named subject. A list of the others is a
+        decision it should not be making."""
+        block = canon_context.render(self._shown(), max_edges=4, for_chat=False)
+        assert "EVERYTHING THIS TABLE HAS MADE" not in block
+        assert "A Bent Turnkey" not in block
+
+    def test_nor_the_tool_routing_rules(self):
+        """The generator has no tools, so instructions about which to reach
+        for are noise competing with its actual subject."""
+        block = canon_context.render(self._shown(), max_edges=4, for_chat=False)
+        assert "revise_my_material" not in block
+        assert "WHAT THE DM IS READING" not in block

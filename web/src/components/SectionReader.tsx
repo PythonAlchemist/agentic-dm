@@ -283,6 +283,44 @@ export function SectionReader({
               </div>
             )}
 
+            {/* ONE HOP OUT, for reference while reading. Every name in the
+                prose is already a link; this is what those names are
+                CONNECTED to, which the prose does not say. Guessed edges are
+                dimmed rather than hidden -- the extractor is wrong about
+                roughly a third of them, and a DM deciding whether to lean on
+                one needs to see which kind it is. */}
+            {shown.connections.length > 0 && (
+              <div className="mt-5 border-t border-neutral-800 pt-4">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                  Connected ({shown.connections.length})
+                </div>
+                <ul className="mt-1 space-y-0.5 text-xs">
+                  {shown.connections.map((edge, index) => (
+                    <li
+                      key={`${edge.from}-${edge.rel}-${edge.to_id}-${index}`}
+                      className={edge.status === 'accepted' ? '' : 'opacity-60'}
+                    >
+                      <span className="text-neutral-400">{edge.from}</span>{' '}
+                      <span className="text-neutral-600">{edge.rel.toLowerCase().replace(/_/g, ' ')}</span>{' '}
+                      <button
+                        onClick={() => openEntity(edge.to_id)}
+                        className={`hover:underline ${
+                          edge.plane === 'campaign'
+                            ? 'text-amber-200/90'
+                            : 'text-neutral-200'
+                        }`}
+                      >
+                        {edge.to}
+                      </button>
+                      {edge.status !== 'accepted' && (
+                        <span className="text-neutral-600"> · guessed</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {shown.cites.length > 0 && (
               <p className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-600">
                 Built on: {shown.cites.join(', ')}

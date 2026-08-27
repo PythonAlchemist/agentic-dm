@@ -199,18 +199,25 @@ class TestRewritingSomethingThatExists:
         )
         assert found["section_id"].endswith("#0")
 
-    def test_a_stub_has_nothing_to_rewrite(self, table):
-        """Something with only a role resolves to None -- that is what `expand`
-        is for. The DM is told, rather than handed a "revision" of a blank
-        page."""
+    def test_a_stub_resolves_with_no_section_to_rewrite(self, table):
+        """It used to resolve to None, on the reasoning that a rewrite needs
+        something to rewrite. True of the machinery and false of the DM, who
+        says "flesh out this character" without checking whether they ever
+        wrote a paragraph about them -- and the model, having no verb for it,
+        reached for `generate_homebrew` and drafted a different NPC.
+
+        So a stub resolves, with `section_id` empty, and the caller writes the
+        first prose instead of replacing prose that is not there."""
         table.run(
             "MATCH (c:Campaign {slug:$s}) CREATE (e:Entity {id:$i, plane:'campaign', "
             "campaign:$s, name:'Pytest Stub', kind:'npc', role:'a name only'})",
             {"s": SLUG, "i": f"hb:{SLUG}:pytest-stub"},
         )
-        assert homebrew_tool.resolve_revision(
+        found = homebrew_tool.resolve_revision(
             table, campaign=SLUG, name="Pytest Stub", focus=""
-        ) is None
+        )
+        assert found["name"] == "Pytest Stub"
+        assert not found["section_id"], "nothing to replace; write the first one"
 
     def test_another_campaign_cannot_reach_it(self, table):
         assert homebrew_tool.resolve_revision(

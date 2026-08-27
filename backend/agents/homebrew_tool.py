@@ -118,6 +118,9 @@ class Request:
     #: making a new thing and has to reach the card as one -- otherwise
     #: "build out the sea battle" mints a second sea battle beside the first.
     revises: str = ""
+    #: The entity this gives its FIRST prose to. A stub has a name and a role
+    #: and nothing else; "flesh this out" about one is a write, not a rewrite.
+    expands: str = ""
     #: Ids the model named that the conversation does not hold, and section ids
     #: it never saw. Reported back to it rather than silently dropped: a model
     #: that cannot see its mistake makes it again next round.
@@ -247,8 +250,10 @@ REVISE_SCHEMA = {
     "function": {
         "name": "revise_my_material",
         "description": (
-            "Rewrite something the DM already has, keeping what they did not "
-            "ask you to change. Use when they say build this out, add to it, "
+            "Write or rewrite something the DM already has. If it has prose, "
+            "this keeps what they did not ask you to change; if it is only a "
+            "name and a role, this gives it its first write-up. Use when they "
+            "say flesh this out, build this out, add to it, "
             "make it longer, change X about it, or otherwise talk about "
             "altering a thing that exists -- especially the one named at the "
             "top of the context as what they are reading. Do NOT use "
@@ -262,8 +267,15 @@ REVISE_SCHEMA = {
                 "name": {
                     "type": "string",
                     "description": (
-                        "What to rewrite, as it appears in EVERYTHING THIS "
-                        "TABLE HAS MADE. Omit to rewrite what they are reading."
+                        "PASS THE NAME THE DM TYPED, and nothing else. If "
+                        "they wrote a name — 'flesh out A Bent Turnkey' — pass "
+                        "exactly that. If they pointed instead of naming — "
+                        "'this', 'it', 'him', 'her', 'this character', 'this "
+                        "scene' — omit this field entirely and the thing they "
+                        "are reading is used. Never supply a name they did not "
+                        "write: choosing one from the list is how a request to "
+                        "flesh out the character on screen became a draft of a "
+                        "different one."
                     ),
                 },
                 "note": {
@@ -333,18 +345,25 @@ RESOLVE_REVISION = """
 MATCH (e:Entity {plane:'campaign', campaign:$campaign})
 WHERE ($name <> '' AND toLower(e.name) = toLower($name))
    OR ($name = '' AND ($focus = e.id OR $focus STARTS WITH e.id + '#'))
-MATCH (s:Section {expands: e.id})
-RETURN e.name AS name, e.kind AS kind, s.id AS section_id, s.text AS text
+OPTIONAL MATCH (s:Section {expands: e.id})
+RETURN e.id AS entity_id, e.name AS name, e.kind AS kind, e.role AS role,
+       s.id AS section_id, s.text AS text
 LIMIT 1
 """
 
 
 def resolve_revision(session, *, campaign: str, name: str, focus: str) -> dict | None:
-    """Which stored thing a rewrite is about, by name or by what is open.
+    """Which stored thing "flesh this out" is about, and whether it has prose.
 
-    REQUIRES PROSE. Something with only a role has nothing to rewrite -- that
-    is what `expand` is for -- so a stub resolves to None here and the DM is
-    told, rather than getting a "revision" of a blank page.
+    A STUB RESOLVES TOO, and `section_id` comes back empty for it. It used to
+    resolve to nothing on the reasoning that a rewrite needs something to
+    rewrite -- true of the machinery and false of the DM, who says "flesh out
+    this character" without checking first whether they ever wrote a paragraph
+    about them. Asked that of Captain Saltmarrow, the model had no verb for it,
+    reached for `generate_homebrew`, and drafted a different NPC entirely.
+
+    So the caller decides: prose means rewrite it, no prose means write the
+    first one. One act to a person, two writes underneath.
 
     The focus may be an entity id or the id of its section; both mean the same
     thing to a person, so both are accepted.
@@ -434,3 +453,28 @@ def section_by_name(session, campaign: str, heading: str) -> dict | None:
         BY_HEADING, {"campaign": campaign, "heading": heading}
     ).single()
     return dict(row) if row else None
+
+
+def named_by_the_dm(name: str, message: str) -> bool:
+    """Did the DM actually say this name, or did the model choose it?
+
+    A NAME NOBODY TYPED IS A NAME THE MODEL PICKED. Asked to "flesh out this
+    character" with Captain Saltmarrow on screen, it kept answering with `name:
+    "A Bent Turnkey"` -- a different NPC, taken from the roster because that
+    one is marked as having no prose yet and "flesh out" sounds like it. The
+    instruction not to do that is in the context twice and it still happened in
+    two runs out of three.
+
+    So it is checked rather than asked for. The DM's own words are the
+    evidence: if the name is not in what they typed, they were pointing at
+    something, and what they were pointing at is the focus.
+
+    Loose on purpose -- "saltmarrow" should match "Captain Saltmarrow", and a
+    DM writes the short form far more often than the full one. The cost of a
+    false match is using a name they did say; the cost of a false miss is using
+    the thing in front of them. Neither is bad, which is why the loose test is
+    the right one.
+    """
+    words = [w for w in name.casefold().replace("'", "").split() if len(w) > 3]
+    said = message.casefold().replace("'", "")
+    return any(word in said for word in words) if words else name.casefold() in said
