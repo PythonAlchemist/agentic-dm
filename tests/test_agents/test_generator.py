@@ -481,3 +481,39 @@ class TestClustersDoNotChangeWhatExisted:
             json.dumps({"from_canon": [], "invented": []})
         )
         assert error == "" and "elements" not in data
+
+
+class TestAskingForTheSameThingAgain:
+    """A draft that is nearly right had two options: rewrite the prose by hand,
+    or start over and lose the citations. "Same again, but make her older" is
+    the verb that was missing."""
+
+    def _messages(self, **kw):
+        return generator.build_messages(
+            "npc", "a fence", Retrieval(question="x"), canon_context.Depth(), **kw
+        )[1]["content"]
+
+    def test_the_draft_and_the_change_both_reach_the_model(self):
+        text = self._messages(previous="She is young and eager.", note="make her older")
+        assert "She is young and eager." in text
+        assert "WHAT TO CHANGE: make her older" in text
+
+    def test_it_is_its_own_block(self):
+        """Not canon, not context, not an instruction. Folding a discarded
+        draft into any of those three would make the model treat it as
+        evidence about the world."""
+        text = self._messages(previous="A draft.", note="change it")
+        # LAST, after every rule it must not be mistaken for -- the provenance
+        # split above still governs, and the revision is a constraint on the
+        # answer rather than a new source for it.
+        assert text.index("THE DRAFT YOU ARE REPLACING") > text.index("from_canon")
+
+    def test_both_or_neither(self):
+        """A note with no draft is a longer subject; a draft with no note asks
+        for the same thing twice."""
+        assert "WHAT TO CHANGE" not in self._messages(previous="A draft.")
+        assert "WHAT TO CHANGE" not in self._messages(note="make her older")
+        assert "WHAT TO CHANGE" not in self._messages()
+
+    def test_whitespace_is_not_a_note(self):
+        assert "WHAT TO CHANGE" not in self._messages(previous="A draft.", note="   ")

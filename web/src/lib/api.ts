@@ -330,8 +330,19 @@ export const labAPI = {
     depth: Depth,
     book: string,
     campaign: string | null,
+    /** The draft being replaced and the one thing to change. Both or neither. */
+    revision?: { previous: string; note: string },
   ) {
-    return post<GeneratedReply>('/generate', { kind, subject, model, depth, book, campaign })
+    return post<GeneratedReply>('/generate', {
+      kind,
+      subject,
+      model,
+      depth,
+      book,
+      campaign,
+      previous: revision?.previous ?? '',
+      note: revision?.note ?? '',
+    })
   },
 
   campaigns(): Promise<{ campaigns: CampaignInfo[] }> {

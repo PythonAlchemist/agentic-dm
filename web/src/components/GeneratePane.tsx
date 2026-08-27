@@ -57,13 +57,18 @@ export function GeneratePane({
 
   const placeholder = examples[kind] ?? ''
 
-  const run = async () => {
+  const run = async (revision?: { previous: string; note: string }) => {
     if (!subject.trim() || busy) return
     setBusy(true)
     setError('')
-    setResult(null)
+    // THE OLD CARD STAYS ON SCREEN during a revision. Clearing it would take
+    // away the thing the DM is comparing against at the moment they asked for
+    // a comparison, and a blank pane reads as "your draft is gone".
+    if (!revision) setResult(null)
     try {
-      const reply = await labAPI.generate(kind, subject.trim(), model, depth, book, campaign)
+      const reply = await labAPI.generate(
+        kind, subject.trim(), model, depth, book, campaign, revision,
+      )
       setResult(reply)
       onSpend(reply)
     } catch (e) {
@@ -107,7 +112,7 @@ export function GeneratePane({
           className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-amber-600/60"
         />
         <button
-          onClick={run}
+          onClick={() => run()}
           disabled={busy || !subject.trim()}
           className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-30"
         >
@@ -144,6 +149,8 @@ export function GeneratePane({
               campaign={campaign}
               order={order}
               onStored={onChainChanged}
+              busy={busy}
+              onRevise={(note) => run({ previous: result.body, note })}
             />
 
             {result.sources.length > 0 && (

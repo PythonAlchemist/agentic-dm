@@ -379,6 +379,26 @@ class Generated:
         }
 
 
+#: Appended when a DM asks for the same thing again with one change. Its own
+#: block under its own heading, for `_CONTEXT_RULE`'s reason: the previous
+#: draft is not canon, not context and not an instruction, and folding it into
+#: any of those three would make the model treat a discarded attempt as
+#: evidence about the world.
+_REVISE = """
+
+THE DRAFT YOU ARE REPLACING
+
+{previous}
+
+WHAT TO CHANGE: {note}
+
+Write it again from the same passages, changing what was asked and as little
+else as you can. This is a revision, not a second opinion -- keep the parts
+nobody objected to. The provenance split is redone from scratch: a detail you
+carry over is still invented if it was invented before, and still cited if the
+passages still say it."""
+
+
 def build_messages(
     kind: str,
     subject: str,
@@ -386,6 +406,8 @@ def build_messages(
     depth: canon_context.Depth,
     context: GenerationContext | None = None,
     cluster: bool = False,
+    previous: str = "",
+    note: str = "",
 ) -> list[dict]:
     """The exact messages the model will see. Pure, so a test can read them.
 
@@ -433,6 +455,11 @@ def build_messages(
                     else ""
                 ),
                 cluster_field=_CLUSTER_FIELD if cluster else "",
+            )
+            + (
+                _REVISE.format(previous=previous.strip(), note=note.strip())
+                if previous.strip() and note.strip()
+                else ""
             ),
         },
     ]
@@ -659,6 +686,8 @@ async def generate(
     cluster: bool = False,
     max_tokens: int = 1200,
     seed: int | None = None,
+    previous: str = "",
+    note: str = "",
 ) -> Generated:
     """Ask the model, then split what it says into sourced and invented.
 
@@ -667,7 +696,9 @@ async def generate(
     is the required split, not a low temperature.
     """
     carried = context or GenerationContext()
-    messages = build_messages(kind, subject, retrieval, depth, carried, cluster)
+    messages = build_messages(
+        kind, subject, retrieval, depth, carried, cluster, previous, note
+    )
     response = await client.chat.completions.create(
         model=model,
         messages=messages,

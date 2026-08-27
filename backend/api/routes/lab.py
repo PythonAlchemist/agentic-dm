@@ -84,6 +84,13 @@ class GenerateRequest(BaseModel):
     campaign: str | None = None
     model: Optional[str] = None
     depth: Depth = Field(default_factory=Depth)
+    #: The draft being replaced, and the one thing to change about it. Both or
+    #: neither: a note with no draft is just a longer subject, and a draft with
+    #: no note asks for the same thing twice. The retrieval is re-run on the
+    #: same subject, so a revision cites the same passages the first attempt
+    #: did rather than drifting onto different evidence.
+    previous: str = ""
+    note: str = ""
 
     @field_validator("kind")
     @classmethod
@@ -219,6 +226,8 @@ async def generate(request: GenerateRequest) -> dict:
             retrieval=retrieval,
             depth=depth,
             model=model,
+            previous=request.previous,
+            note=request.note,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("lab generate failed")

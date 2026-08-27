@@ -21,11 +21,18 @@ export function GenerationCard({
   campaign,
   order,
   onStored,
+  onRevise,
+  busy: revising,
 }: {
   card: GeneratedReply
   campaign: string | null
   order: OrderRow[]
   onStored?: () => void
+  /** Ask for the same thing again with one change. Absent where revision has
+   *  nowhere to put the answer -- the chat card is a message in a transcript,
+   *  not a pane that can be replaced. */
+  onRevise?: (note: string) => void
+  busy?: boolean
 }) {
   const [body, setBody] = useState(card.body)
   // AN EXPANSION STARTS UNPLACED, matching what `expand` does on the server:
@@ -49,6 +56,10 @@ export function GenerationCard({
   const blocked = isCluster && plan !== null && !plan.storable
 
   const edited = body.trim() !== card.body.trim()
+  //: What to change, while a DM is typing it. A revision keeps the shape and
+  //  changes one thing; editing the prose by hand changes the words and keeps
+  //  the citations, which is a different move for a different moment.
+  const [note, setNote] = useState('')
 
   const store = async () => {
     if (!campaign || busy) return
@@ -124,6 +135,34 @@ export function GenerationCard({
         rows={7}
         className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-amber-600/60"
       />
+      {onRevise && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && note.trim() && !revising) {
+                onRevise(note.trim())
+                setNote('')
+              }
+            }}
+            placeholder="Same again, but… (make her older, lose the storm)"
+            className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-amber-600/60"
+          />
+          <button
+            onClick={() => {
+              if (!note.trim() || revising) return
+              onRevise(note.trim())
+              setNote('')
+            }}
+            disabled={!note.trim() || revising}
+            className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:text-amber-300 disabled:opacity-40"
+          >
+            {revising ? 'writing…' : 'again'}
+          </button>
+        </div>
+      )}
+
       {/* Said plainly, because nothing re-checks a body after a person edits
           it -- the citations below still claim what the model claimed. */}
       {edited && (
