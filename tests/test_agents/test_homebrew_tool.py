@@ -6,7 +6,41 @@ invent an id.
 """
 
 
+import pytest
+
 from backend.agents import homebrew_tool
+from backend.campaign import homebrew, store
+from backend.campaign.model import Campaign
+from backend.core.database import neo4j_session
+
+SLUG = "pytest-read-tool"
+
+
+@pytest.fixture
+def table(tmp_path):
+    """One campaign holding one written-up scene."""
+    with neo4j_session() as session:
+        _wipe(session)
+        session.execute_write(
+            lambda tx: store.create(tx, Campaign(slug=SLUG, name="Read Tool", books=()))
+        )
+        session.execute_write(
+            lambda tx: homebrew.write(
+                tx, slug=SLUG, kind="scene", title="Pytest Night Watch",
+                body="A quiet watch on deck.", generated_body="A quiet watch on deck.",
+                from_canon=[], invented=[], from_context=[], sources=[], anchor=None,
+                log_path=tmp_path / "log.jsonl",
+            )
+        )
+        yield session
+        _wipe(session)
+
+
+def _wipe(session):
+    session.run("MATCH (c:Campaign {slug:$s}) DETACH DELETE c", {"s": SLUG})
+    session.run("MATCH (n) WHERE n.id STARTS WITH $p DETACH DELETE n",
+                {"p": f"hb:{SLUG}:"})
+    session.run("MATCH (a:Alias) WHERE NOT (a)-[:ALIAS_OF]->() DETACH DELETE a")
 
 HELD = frozenset({"kftgv:prisoner-13:varrin-axebreaker", "kftgv:golden-vault"})
 SEEN = frozenset({"kftgv:prisoner-13#7", "kftgv:prisoner-13#8"})
@@ -107,3 +141,33 @@ class TestTheSchema:
     def test_scene_is_offered(self):
         enum = homebrew_tool.SCHEMA["function"]["parameters"]["properties"]["kind"]["enum"]
         assert "scene" in enum
+
+
+class TestReadingWhatTheTableAlreadyMade:
+    """The chat's only actionable tool was `generate_homebrew`, described as
+    "use when the DM asks you to make something up". So "lets revisit the
+    homebrew content about the sea battle" had exactly one place to go, went
+    there, and drafted a new scene over a scene that existed."""
+
+    def test_a_name_returns_the_prose(self, table):
+        found = homebrew_tool.read(table, SLUG, "pytest night watch")["found"]
+        assert found[0]["written"] is True
+        assert "quiet" in found[0]["text"]
+
+    def test_the_name_is_matched_case_folded(self, table):
+        """A DM types "the sea battle", not `hb:p13-home:the-sea-battle`, and
+        the roster they were shown lists names."""
+        assert homebrew_tool.read(table, SLUG, "PYTEST NIGHT WATCH")["found"]
+
+    def test_omitting_the_name_returns_everything(self, table):
+        assert len(homebrew_tool.read(table, SLUG)["found"]) >= 1
+
+    def test_a_name_that_matches_nothing_says_what_there_is(self, table):
+        """An empty result would read as "you have made nothing", which is the
+        failure this whole tool exists to stop."""
+        answer = homebrew_tool.read(table, SLUG, "the kraken")
+        assert answer["found"] is None
+        assert answer["this_table_has"], "it says what the table does have"
+
+    def test_another_campaign_sees_none_of_it(self, table):
+        assert homebrew_tool.read(table, "someone-elses")["found"] == []

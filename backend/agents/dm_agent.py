@@ -698,7 +698,14 @@ class DMAgent:
                 model=self.model,
                 messages=messages,
                 max_tokens=1000,
-                tools=[*graph_tools.SCHEMA, homebrew_tool.SCHEMA],
+                tools=[
+                    *graph_tools.SCHEMA,
+                    homebrew_tool.SCHEMA,
+                    # Only where there IS a campaign. Offering "read my
+                    # material" to a canon-only session invites a tool call
+                    # that can only ever come back empty.
+                    *([homebrew_tool.READ_SCHEMA] if self.canon.campaign else []),
+                ],
                 **self._sampling,
             )
             total = total + Usage.from_response(response)
@@ -756,6 +763,20 @@ class DMAgent:
                 else:
                     self._requested_generations.append(request)
                     payload = request.acknowledgement
+                return {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(payload, default=str),
+                }
+            if name == homebrew_tool.READ_SCHEMA["function"]["name"]:
+                # RUN HERE AND ANSWERED HERE, unlike generation. This reads
+                # back words the DM already wrote and approved, so there is no
+                # invention to keep in an envelope and nothing to gate.
+                with read_only_session() as session:
+                    payload = homebrew_tool.read(
+                        session, self.canon.campaign or "",
+                        str(arguments.get("name") or ""),
+                    )
                 return {
                     "role": "tool",
                     "tool_call_id": tool_call.id,

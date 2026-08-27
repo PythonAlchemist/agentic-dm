@@ -31,9 +31,14 @@ BLOCK_MARK = "CANON \u2014"
 
 
 class FakeRetriever:
-    def __init__(self, result=None, boom=False):
+    #: `campaign` is part of what a retriever IS -- the agent reads it to
+    #: decide whether to offer the read-my-material tool at all. A double
+    #: missing it is an incomplete double, not a reason for the agent to
+    #: defend itself with `getattr`.
+    def __init__(self, result=None, boom=False, campaign=None):
         self.result = result
         self.boom = boom
+        self.campaign = campaign
         self.asked = []
 
     def retrieve(self, question, **kw):

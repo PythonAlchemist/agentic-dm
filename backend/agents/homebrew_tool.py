@@ -171,3 +171,92 @@ def validate(
         ),
         "",
     )
+
+
+#: The other half of the seam: not "make something", but "show me what I made".
+#:
+#: THE CHAT HAD NO WAY TO READ THE CAMPAIGN. Its only actionable tool was
+#: `generate_homebrew`, described as "use when the DM asks you to make
+#: something up" -- so "lets revisit the homebrew content about the sea battle"
+#: had exactly one place to go, and it went there and drafted a new scene. The
+#: roster in the context block fixes knowing WHAT exists; this fixes reading it.
+#:
+#: NAMED, NOT ID'D. A DM says "the sea battle", not `hb:p13-home:the-sea-battle`,
+#: and the roster the model was shown lists names. Resolution is the campaign's
+#: own aliases, case-folded, for the reason retrieval folds them: these are a
+#: few dozen names the person asking wrote themselves.
+READ_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "read_my_material",
+        "description": (
+            "Read what this table has already made -- the DM's own scenes, "
+            "NPCs, quests and places, not the published book. Use whenever "
+            "they ask about something listed under EVERYTHING THIS TABLE HAS "
+            "MADE and its words are not already in the passages above. Use it "
+            "BEFORE offering to write anything: they usually mean the thing "
+            "they already have."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "The name as it appears in that list. Omit to get "
+                        "everything this table has made."
+                    ),
+                }
+            },
+            "required": [],
+        },
+    },
+}
+
+
+READ = """
+MATCH (e:Entity {plane:'campaign', campaign:$campaign})
+WHERE $name IS NULL OR toLower(e.name) = toLower($name)
+OPTIONAL MATCH (s:Section {expands:e.id})
+RETURN e.name AS name, e.kind AS kind, e.role AS role, s.text AS text,
+       s.id AS section_id
+ORDER BY e.kind, e.name
+"""
+
+
+def read(session, campaign: str, name: str = "") -> dict:
+    """What the campaign holds under this name, or all of it.
+
+    RETURNS THE PROSE, unlike `generate_homebrew`, and that asymmetry is the
+    point: this is the DM's own material being read back to them, not invention
+    arriving without an envelope around it. There is nothing to keep apart --
+    every word of it is theirs.
+
+    A NAME THAT MATCHES NOTHING SAYS SO, and says what there is. A tool that
+    returned an empty result would read as "you have made nothing", which is
+    the failure this whole change exists to stop.
+    """
+    rows = [dict(r) for r in session.run(READ, {"campaign": campaign, "name": name or None})]
+    if not rows and name:
+        available = [
+            dict(r)["name"]
+            for r in session.run(READ, {"campaign": campaign, "name": None})
+        ]
+        return {
+            "found": None,
+            "asked_for": name,
+            "note": f"nothing here is called {name!r}",
+            "this_table_has": available,
+        }
+    return {
+        "found": [
+            {
+                "name": r["name"],
+                "kind": r["kind"],
+                "role": r["role"],
+                "text": r["text"],
+                "written": bool(r["text"]),
+            }
+            for r in rows
+        ]
+    }

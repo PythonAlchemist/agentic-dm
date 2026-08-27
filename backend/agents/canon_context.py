@@ -183,6 +183,37 @@ _SKIPPED_MARK = "  ← SKIPPED in this campaign: not in play at this table."
 _RODE_MARK = "  ← in this campaign's running order beside [{}]. Positional, not a keyword match."
 
 
+def _roster(entries: tuple[dict, ...]) -> str:
+    """Everything this table has made, whether or not the question named it.
+
+    THE MODEL HAS TO KNOW WHAT EXISTS BEFORE IT OFFERS TO INVENT IT. Asked to
+    "revisit the homebrew content about the sea battle", it drafted a new
+    scene -- because the only campaign material it ever saw was whatever a
+    question happened to resolve, and that one did not. A DM opens a session to
+    look over what they built; that is the main thing this list is for.
+
+    NAMES AND ROLES, NOT PROSE, and it says so. A roster line is a fact about
+    what is in the graph; the numbered passages are the only place the words
+    themselves appear. Left unlabelled a model will happily paraphrase a role
+    as though it had read the scene.
+    """
+    lines = [
+        "EVERYTHING THIS TABLE HAS MADE — the DM's own, not the published "
+        "book. This is an INDEX, not the text: a line here means the thing "
+        "exists, never that you have read it. When they ask about one, use the "
+        "numbered passages below if it is there, and say you have the name but "
+        "not the words if it is not."
+    ]
+    for entry in entries:
+        role = (entry.get("role") or "").strip()
+        line = f"  {entry['name']} ({entry.get('kind') or 'thing'})"
+        if role:
+            line += f" — {role}"
+        line += "" if entry.get("written") else "  [no prose written yet]"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _your_material(entities: tuple[dict, ...]) -> str:
     """What the DM has made, said as a record rather than as prose.
 
@@ -242,6 +273,13 @@ def render(retrieval: Retrieval, *, max_edges: int = 12) -> str:
     # about it, and without this the model answered "the canon does not cover
     # any specific details about Captain Saltmarrow" about a character the DM
     # had invented an hour earlier.
+    # THE ROSTER FIRST AND UNCONDITIONALLY, then the detail for whatever the
+    # question actually named. One says what exists at this table, the other
+    # says what the graph holds about the thing being discussed, and a model
+    # that only ever got the second could not tell "you have not made that"
+    # from "you did not mention it".
+    if retrieval.campaign_roster:
+        parts.append(_roster(retrieval.campaign_roster))
     if retrieval.campaign_entities:
         parts.append(_your_material(retrieval.campaign_entities))
 

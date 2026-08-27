@@ -166,6 +166,26 @@ RETURN e.id AS id, e.name AS name, e.kind AS kind, e.role AS role,
        collect(DISTINCT s.heading) AS described_in
 """
 
+#: EVERYTHING this table has made, whether the question named it or not.
+#:
+#: `CAMPAIGN_ENTITY_FACTS` answers "what does the graph hold about the thing
+#: they asked about", which is a different question and only fires when a name
+#: resolved. A DM who says "revisit the sea battle" and misspells it, or who
+#: asks "what have I got so far", got nothing -- and worse, a model that has
+#: never been told the scene exists will cheerfully offer to write one. It did.
+#:
+#: Compact on purpose: a name, a kind, a role and whether prose exists. A
+#: campaign holds tens of these, not thousands, so carrying the roster every
+#: turn costs almost nothing and is the difference between an assistant that
+#: knows what is on the table and one that has to be reminded.
+CAMPAIGN_ROSTER = """
+MATCH (e:Entity {plane:'campaign', campaign:$campaign})
+OPTIONAL MATCH (own:Section {expands:e.id})
+RETURN e.id AS id, e.name AS name, e.kind AS kind, e.role AS role,
+       own IS NOT NULL AS written
+ORDER BY e.kind, e.name
+"""
+
 #: Sections this campaign has cut. Retrieved all the same -- the chain is the
 #: running order, not the knowledge scope, and "what was in the bit I skipped"
 #: is a real question -- but marked, so nothing reads as in play that is not.
@@ -419,6 +439,9 @@ class Retrieval:
     #: turns ago is a different kind of answer, and a reader must be able to
     #: see which they got.
     carried: bool = False
+    #: Everything this table has made, named or not: the roster the chat needs
+    #: to know what exists before it offers to invent it again.
+    campaign_roster: tuple[dict, ...] = ()
     #: The DM's own record for campaign entities this question named: kind,
     #: role, what was invented, and where they were introduced. Carried apart
     #: from `passages` because it is not prose -- it is what the graph holds
@@ -809,6 +832,9 @@ class CanonRetriever:
                 if rider is not None:
                     riders.append(replace(rider, rode_with=passage.section_id))
 
+        with self._session() as session:
+            roster = self._rows(session, CAMPAIGN_ROSTER)
+
         facts: list[dict] = []
         if campaign_ids:
             with self._session() as session:
@@ -833,6 +859,7 @@ class CanonRetriever:
         return replace(
             found,
             passages=tuple(leading + labelled + following + riders),
+            campaign_roster=tuple(roster),
             campaign_entities=tuple(facts),
             dropped=found.dropped + cut,
         )
