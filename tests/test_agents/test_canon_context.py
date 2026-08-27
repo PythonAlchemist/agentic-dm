@@ -21,6 +21,7 @@ def passage(section_id: str, section: str, text: str, **kw) -> Passage:
         entity_ids=kw.get("entity_ids", ("cos:ismark-kolyanovich",)),
         score=kw.get("score"),
         path=kw.get("path", PATH_GRAPH),
+        origin=kw.get("origin", "canon"),
     )
 
 
@@ -296,3 +297,61 @@ class TestSuggestingWhereAGenerationFits:
         retrieval = self._sourced(("prisoner-13", "Trek"), path=PATH_TEXT)
         anchor, _ = canon_context.suggest_anchor(retrieval)
         assert anchor
+
+
+class TestTheAnchorFollowsTheStrongerSignal:
+    """`suggest_anchor` weighted a resolved name and a keyword guess the same,
+    so four keyword hits scattered across one chapter outvoted four names the
+    question actually resolved. "A cast of enemies for the sea battle"
+    anchored past the voyage the fight happens on."""
+
+    def test_a_chapter_with_a_resolved_name_beats_one_with_more_guesses(self):
+        shown = graph_retrieval(
+            passage("cos:guessed#1", "Guessed A", "x", chapter="loud", path=PATH_TEXT),
+            passage("cos:guessed#2", "Guessed B", "x", chapter="loud", path=PATH_TEXT),
+            passage("cos:guessed#3", "Guessed C", "x", chapter="loud", path=PATH_TEXT),
+            passage("cos:named#1", "Named", "x", chapter="quiet", path=PATH_GRAPH),
+        )
+        anchor, chapters = canon_context.suggest_anchor(shown)
+        assert chapters[0] == "quiet", "a fact outranks three guesses"
+        assert anchor == "cos:named#1"
+
+    def test_weight_still_decides_between_chapters_that_both_resolved(self):
+        """The rule is lexicographic, not a multiplier: resolution first, then
+        the weighting that was already there. A number would have been a guess
+        about how much more a name is worth."""
+        shown = graph_retrieval(
+            passage("cos:a#1", "A one", "x", chapter="big", path=PATH_GRAPH),
+            passage("cos:a#2", "A two", "x", chapter="big", path=PATH_GRAPH),
+            passage("cos:b#1", "B one", "x", chapter="small", path=PATH_GRAPH),
+        )
+        _anchor, chapters = canon_context.suggest_anchor(shown)
+        assert chapters[0] == "big"
+
+    def test_the_dms_own_material_named_by_the_question_wins_outright(self):
+        """They have already decided where that scene lives, and a thing
+        generated ABOUT it belongs beside it. This is the only signal here
+        that reflects a decision a person actually made."""
+        shown = graph_retrieval(
+            passage("hb:t:the-sea-battle#0", "The Sea Battle", "x",
+                    chapter="t", path=PATH_GRAPH, origin="campaign"),
+            passage("cos:canon#1", "A Canon Section", "x",
+                    chapter="loud", path=PATH_GRAPH),
+            passage("cos:canon#2", "Another", "x", chapter="loud", path=PATH_GRAPH),
+        )
+        anchor, _chapters = canon_context.suggest_anchor(shown)
+        assert anchor == "hb:t:the-sea-battle#0"
+
+    def test_a_campaign_passage_that_only_RODE_ALONG_does_not_win(self):
+        """One rides along positionally beside almost any canon hit. Only a
+        campaign passage the question RESOLVED means the generation is about
+        it -- otherwise every draft would anchor to whatever scene happened to
+        sit near the retrieval."""
+        shown = graph_retrieval(
+            passage("cos:canon#1", "A Canon Section", "x",
+                    chapter="loud", path=PATH_GRAPH),
+            passage("hb:t:rode-along#0", "Rode Along", "x",
+                    chapter="t", path=PATH_TEXT, origin="campaign"),
+        )
+        anchor, _chapters = canon_context.suggest_anchor(shown)
+        assert anchor == "cos:canon#1"

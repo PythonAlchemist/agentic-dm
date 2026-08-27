@@ -343,9 +343,23 @@ def suggest_anchor(retrieval: Retrieval) -> tuple[str, tuple[str, ...]]:
     voyage because one general passage about rival crews scored well, while
     four passages from the adventure itself sat below it.
 
-    A GRAPH PASSAGE IS PREFERRED OVER A TEXT ONE within the chosen chapter. A
-    resolved name is a fact about what the scene is about; a keyword hit is a
-    guess, and a guess is a weaker claim about where something belongs.
+    A GRAPH PASSAGE IS PREFERRED OVER A TEXT ONE -- when the CHAPTER is chosen
+    as well as within it, which it was not, and that was the defect. A resolved
+    name is a fact about what a generation is about; a keyword hit is a guess.
+    Weighting them the same meant four keyword hits scattered across
+    `prisoner-13` outvoted four names the question actually resolved, and
+    "a cast of enemies for the sea battle" anchored after `Revel's End` --
+    past the voyage the fight happens on. Chapters are ordered by whether they
+    hold a resolved name FIRST and by weight second: a lexicographic rule
+    rather than a multiplier, because the number would be a guess and this is
+    not.
+
+    AND IF THE QUESTION NAMED THE DM'S OWN MATERIAL, THAT IS THE ANSWER. They
+    have already decided where that scene lives in the running order, and a
+    thing generated ABOUT it belongs beside it -- "a cast of enemies for the
+    sea battle" goes where The Sea Battle is, not wherever the book talks most
+    about ships. This outranks everything below because it is the only signal
+    here that reflects a decision a person actually made.
 
     IT ANSWERS "WHICH SECTION DOES THE SUBJECT NAME MOST", NOT "WHICH BEAT IS
     THIS", and those come apart on any scene about getting somewhere. A sea
@@ -369,7 +383,17 @@ def suggest_anchor(retrieval: Retrieval) -> tuple[str, tuple[str, ...]]:
     if not shown:
         return "", ()
 
+    # THE DM'S OWN, RESOLVED BY NAME. Not "a campaign passage appeared" -- one
+    # rides along positionally beside almost any canon hit -- but one the
+    # question actually resolved, which means this generation is about it.
+    mine = [
+        s
+        for s in shown
+        if s.get("type") == "campaign" and s.get("path") == PATH_GRAPH
+    ]
+
     weight: dict[str, int] = {}
+    resolved: set[str] = set()
     for rank, source in enumerate(shown):
         chapter = source.get("chapter")
         if not chapter:
@@ -377,8 +401,14 @@ def suggest_anchor(retrieval: Retrieval) -> tuple[str, tuple[str, ...]]:
         # Rank still breaks ties, so a chapter contributing one very good
         # passage beats another contributing one mediocre one.
         weight[chapter] = weight.get(chapter, 0) + (len(shown) - rank)
+        if source.get("path") == PATH_GRAPH:
+            resolved.add(chapter)
 
-    chapters = tuple(sorted(weight, key=lambda c: -weight[c]))
+    chapters = tuple(
+        sorted(weight, key=lambda c: (c not in resolved, -weight[c]))
+    )
+    if mine:
+        return str(mine[0].get("source") or ""), chapters
     home = chapters[0]
     within = [s for s in shown if s.get("chapter") == home]
     by_graph = [s for s in within if s.get("path") == PATH_GRAPH]
