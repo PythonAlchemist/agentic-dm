@@ -5,6 +5,9 @@ import type { OrderRow } from '@/lib/api'
 import { labAPI } from '@/lib/api'
 import { Card } from './ui'
 
+//: Every campaign's "we are here", in one key.
+const PINS = 'agent-lab:playing'
+
 /**
  * What this table actually plays, in order: the book with your cuts and
  * insertions in it.
@@ -32,6 +35,34 @@ export function RunningOrder({
   //  sessions they are browsing rather than searching.
   const [filter, setFilter] = useState('')
   const [openChapters, setOpenChapters] = useState<Set<string>>(new Set())
+  //: WHERE THE TABLE ACTUALLY IS. Everything else in this panel describes the
+  //  book; this is the only thing that describes tonight. Kept in the browser
+  //  rather than the graph deliberately -- it is a fact about a session in
+  //  progress, not about the campaign, and writing it to Neo4j would make
+  //  "where are we" something two DMs at one table could disagree about.
+  //
+  //  ONE LAZY READ of every campaign's pin, rather than an effect that reloads
+  //  when `campaign` changes: an effect setting state on mount cascades a
+  //  second render on every switch, and reading storage during render breaks
+  //  hydration. A map read once and indexed is neither.
+  const [pins, setPins] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      return JSON.parse(window.localStorage.getItem(PINS) || '{}')
+    } catch {
+      return {}
+    }
+  })
+  const playing = campaign ? (pins[campaign] ?? null) : null
+
+  const markPlaying = (sectionId: string) => {
+    if (!campaign) return
+    const next = { ...pins }
+    if (playing === sectionId) delete next[campaign]
+    else next[campaign] = sectionId
+    window.localStorage.setItem(PINS, JSON.stringify(next))
+    setPins(next)
+  }
   const [failed, setFailed] = useState('')
   const [busy, setBusy] = useState('')
 
@@ -154,10 +185,23 @@ export function RunningOrder({
             {(filter !== '' || isOpen(group.chapter)) && (
               <ol>
                 {group.rows.map((row) => (
-          <li
-            key={row.section_id}
-            className="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40"
-          >
+                  <li
+                    key={row.section_id}
+                    className={`group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40 ${
+                      row.section_id === playing ? 'bg-neutral-800' : ''
+                    }`}
+                  >
+                    <button
+                      onClick={() => markPlaying(row.section_id)}
+                      title={row.section_id === playing ? 'not here any more' : 'we are here'}
+                      className={`w-2 shrink-0 text-[10px] ${
+                        row.section_id === playing
+                          ? 'text-neutral-100'
+                          : 'text-transparent group-hover:text-neutral-700'
+                      }`}
+                    >
+                      ▶
+                    </button>
             {/* THE HEADING IS THE DOOR. It listed 547 of these and clicking
                 one did nothing, so reading your own scene meant asking the
                 chat about text sitting one query away. */}
