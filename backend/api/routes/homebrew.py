@@ -22,11 +22,11 @@ from __future__ import annotations
 
 import json
 import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from backend.agents.generator import KINDS, SHAPES
-
 from backend.campaign import homebrew, ontology, store
 from backend.campaign.chain import move_plan, position_for, remove_plan, walk
 from backend.campaign.model import PART_OF
@@ -851,41 +851,60 @@ async def derive_edges(request: DeriveRequest) -> dict:
     cost, and holding a Neo4j transaction open across one would be trading a
     lock for a network round trip.
 
-    IT REUSES `annotate`, the same second pass a cluster gets, rather than the
-    canon extractor. That one was measured: declaring edges WHILE writing put
+    IT ASKS ONLY ABOUT RELATIONSHIPS, and only between names the mention scan
+    already resolved. `annotate` -- the second pass a cluster gets -- was the
+    obvious thing to reuse and was tried first, but it is element-first: it
+    reads prose looking for things to MINT, and edges are what falls out
+    afterwards. Pointed at a section whose things already exist, it proposed
+    nothing and dropped what it did find as an unoffered element kind. The
+    measured lesson behind it still holds -- declaring edges WHILE writing put
     37-51% of them outside the type table, and reading finished prose brought
-    it to 27%. Prose written by hand deserves the better of the two.
+    it to 27% -- so this reads finished prose too. It just asks the narrower
+    question, and one section went from 3 proposals to 7.
 
     What it writes is `proposed`. The DM asserting a relationship and a model
     guessing one from their sentences are different claims, and the second gets
     dimmed and labelled rather than mixed in with the first.
     """
-    from backend.agents import canon_context, generator
-    from backend.canon.retrieval import CanonRetriever
     from openai import AsyncOpenAI
+
+    from backend.agents import generator
+    from backend.graph.schema import IN_SECTION, REFERS_TO
 
     with read_only_session() as session:
         row = session.run(
             "MATCH (s:Section {id:$id, plane:'campaign', campaign:$c}) "
-            "RETURN s.text AS text, s.heading AS heading",
+            "RETURN s.text AS text",
             {"id": request.section_id, "c": request.campaign},
         ).single()
-    if row is None:
-        raise HTTPException(404, f"no section {request.section_id!r} here")
-    body = dict(row)["text"] or ""
+        if row is None:
+            raise HTTPException(404, f"no section {request.section_id!r} here")
+        body = row["text"] or ""
+        # THE NAMES THE SCAN ALREADY FOUND, handed over rather than
+        # rediscovered. They are the closed set the answer may use, which is
+        # both what makes the question narrow enough to answer well and what
+        # makes an out-of-scope edge impossible rather than merely dropped.
+        names = tuple(
+            r["name"]
+            for r in session.run(
+                f"""
+                MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$s}})
+                MATCH (m)-[:{REFERS_TO}]->(e:Entity)
+                RETURN DISTINCT e.name AS name ORDER BY e.name
+                """,
+                {"s": request.section_id},
+            )
+        )
     if not body.strip():
         return {"written": 0, "dropped": {}, "note": "nothing written yet to read"}
 
     model = request.model or settings.openai_model
-    books = _books_for(request.campaign)
-    retrieval = CanonRetriever(
-        book=books[0] if books else "cos", campaign=request.campaign
-    ).retrieve(dict(row)["heading"] or body[:80])
-    _elements, edges, _dropped, error = await generator.annotate(
+    # `read_back` refuses fewer than two names itself, so there is no guard
+    # here to fall out of step with it.
+    edges, error = await generator.read_back(
         AsyncOpenAI(api_key=settings.openai_api_key),
         body=body,
-        retrieval=retrieval,
-        depth=canon_context.Depth(),
+        names=names,
         model=model,
     )
     if error:
@@ -898,18 +917,6 @@ async def derive_edges(request: DeriveRequest) -> dict:
             )
         )
 
-
-def _books_for(campaign: str) -> list[str]:
-    """Which books a campaign draws on, for the retrieval that grounds a read."""
-    with read_only_session() as session:
-        return [
-            r["slug"]
-            for r in session.run(
-                "MATCH (:Campaign {slug:$c})-[:DRAWS_ON]->(b:Book) RETURN b.slug AS slug",
-                {"c": campaign},
-            )
-            if r["slug"]
-        ]
 
 
 class NestRequest(BaseModel):

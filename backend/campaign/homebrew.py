@@ -40,11 +40,11 @@ from pathlib import Path
 
 from backend.campaign import store
 from backend.campaign.chain import insert_plan, remove_plan, walk
-from backend.campaign.model import NEXT
 from backend.campaign.model import (
     AUTHORED,
     CAMPAIGN_PLANE,
     DRAWS_ON,
+    NEXT,
     campaign_prefix,
     mint_id,
 )
@@ -892,7 +892,7 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
             {"s": section_id},
         )
     }
-    written, dropped = 0, {}
+    written, already, dropped = 0, 0, {}
 
     def drop(reason: str) -> None:
         dropped[reason] = dropped.get(reason, 0) + 1
@@ -913,23 +913,39 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
             drop(f"{rel or '(none)'} is not a relationship this graph writes")
             continue
         layer = LAYER_MAP.get(relationship)
-        tx.run(
+        # `r.status IS NULL` IS THE CREATION TEST. MERGE is idempotent and says
+        # nothing about which branch it took, so the ON CREATE clause is also
+        # what marks the edge as new: an edge that already existed came out of
+        # some earlier write with a status set.
+        made = tx.run(
             f"""
             MATCH (a:Entity {{id:$a}}), (b:Entity {{id:$b}})
             MERGE (a)-[r:{relationship.value}]->(b)
-            ON CREATE SET r.plane = $plane, r.campaign = $slug,
-                          r.status = $status, r.layer = $layer
+            WITH r, r.status IS NULL AS made
+            SET r.plane = coalesce(r.plane, $plane),
+                r.campaign = coalesce(r.campaign, $slug),
+                r.status = coalesce(r.status, $status),
+                r.layer = coalesce(r.layer, $layer)
+            RETURN made
             """,
             {
                 "a": named[source], "b": named[target], "plane": CAMPAIGN_PLANE,
                 "slug": slug, "status": PROPOSED,
                 "layer": layer.value if layer else "",
             },
-        )
-        written += 1
-    # ON CREATE ONLY: an edge the DM approved on a card is `authored`, and a
-    # later re-read must not quietly demote it to a guess.
-    return {"written": written, "dropped": dropped}
+        ).single()["made"]
+        if made:
+            written += 1
+        else:
+            already += 1
+    # WRITTEN COUNTS CREATIONS, NOT MERGES. Re-reading a section is the normal
+    # case -- an edit, a second pass, a backfill re-run -- and counting every
+    # MERGE as a write reported three new relationships when the graph gained
+    # none. `already` is the honest name for what those three were.
+    #
+    # COALESCE, NOT ON CREATE: an edge the DM approved on a card is `authored`,
+    # and a re-read must not quietly demote it to a guess.
+    return {"written": written, "already": already, "dropped": dropped}
 
 
 class NotEditable(Exception):

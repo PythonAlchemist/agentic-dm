@@ -661,6 +661,78 @@ Return ONLY JSON:
              "provenance": "canon|invented", "cite": "[1]"}}]}}"""
 
 
+_READ_BACK = """Here is a passage from a Dungeon Master's campaign, and the
+things the graph already knows are named in it.
+
+PASSAGE
+{body}
+
+THE THINGS IT NAMES, and the only names you may use:
+{names}
+
+What RELATIONSHIPS does the passage state between them? Only what it says or
+directly implies -- not what is likely of people like these, and not anything
+about a name that is not on the list.
+
+USE ONLY THESE RELATIONSHIPS, AND ONLY BETWEEN THE TYPES SHOWN. The arrow is
+`source -> target` and the direction matters.
+{vocabulary}
+
+Reply with JSON only:
+{{"edges": [{{"source": "...", "rel_type": "...", "target": "..."}}]}}
+Return an empty list rather than a doubtful edge."""
+
+
+async def read_back(
+    client: Any,
+    *,
+    body: str,
+    names: tuple[str, ...],
+    model: str,
+    temperature: float = 0.0,
+) -> tuple[tuple[dict, ...], str]:
+    """What relationships a stored passage states between things already known.
+
+    NOT `annotate`, AND THE DIFFERENCE MATTERS. That one is element-first: it
+    asks a fresh generation to declare what it CONTAINS, and every name becomes
+    a candidate to mint. Pointed at a section whose entities all already exist
+    it did the only thing it could -- re-declared them as new elements, dropped
+    five of six as kinds it may not mint, and proposed no relationships at all.
+    Run over eight stored sections it found three edges, all in the one section
+    that happened to be a fresh cluster.
+
+    So this asks the narrower question the case actually poses: here is the
+    prose, here are the names the scan已 found in it, what holds between them.
+    Nothing to mint, nothing to classify, one job.
+
+    THE NAMES ARE GIVEN AND CLOSED. An edge naming something outside the list
+    is about a thing this section does not discuss, and saying so up front is
+    cheaper than dropping it afterwards.
+    """
+    # FEWER THAN TWO NAMES CANNOT RELATE TO ANYTHING, and the rule belongs
+    # here rather than in whichever caller remembers it. A passage naming one
+    # thing has no relationship to state, and paying a model to say so is
+    # waste.
+    if len(names) < 2 or not body.strip():
+        return (), ""
+    prompt = _READ_BACK.format(
+        body=body,
+        names="\n".join(f"  - {name}" for name in names),
+        vocabulary=vocabulary_gloss(),
+    )
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=800,
+    )
+    data, error = _first_object(response.choices[0].message.content or "")
+    if error:
+        return (), error
+    edges = [e for e in (data.get("edges") or ()) if isinstance(e, dict)]
+    return tuple(edges), ""
+
+
 async def annotate(
     client: Any,
     *,

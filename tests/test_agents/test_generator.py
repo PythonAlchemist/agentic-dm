@@ -1,5 +1,6 @@
 """Generating material with canon and invention kept apart."""
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -60,7 +61,7 @@ GOOD = json.dumps(
 
 class TestTheMessages:
     def test_the_canon_block_is_the_system_message(self):
-        messages = build = generator.build_messages(
+        messages = generator.build_messages(
             "npc", "a tavern regular", a_retrieval(), canon_context.Depth()
         )
         assert messages[0]["role"] == "system"
@@ -550,3 +551,50 @@ class TestAnEncounterIsItsOwnKind:
         assert set(generator.homebrew_vocabulary("encounter")) <= set(
             generator.homebrew_vocabulary()
         )
+
+
+class TestReadingRelationshipsBackOutOfStoredProse:
+    """`annotate` is element-first: it asks a fresh generation to declare what
+    it CONTAINS, so every name is a candidate to mint. Pointed at a section
+    whose entities all already exist it did the only thing it could — declared
+    them as new elements, dropped five of six as kinds it may not mint, and
+    proposed no relationships at all. Over eight stored sections it found three
+    edges, all in the one that happened to be a fresh cluster."""
+
+    def test_it_asks_only_about_names_it_was_given(self):
+        prompt = generator._READ_BACK.format(
+            body="Skipper sails the Sloop.",
+            names="  - Skipper\n  - Sloop",
+            vocabulary="OWNS: NPC -> ITEM",
+        )
+        assert "the only names you may use" in prompt
+        assert "a name that is not on the list" in prompt
+
+    def test_it_asks_for_nothing_else(self):
+        """No elements, no kinds, no classification — one job. That is the
+        whole difference from `annotate` and the reason it answers."""
+        prompt = generator._READ_BACK.format(body="x", names="  - A", vocabulary="v")
+        assert "elements" not in prompt
+        assert '"edges"' in prompt
+
+    def test_it_prefers_an_empty_list_to_a_doubtful_edge(self):
+        prompt = generator._READ_BACK.format(body="x", names="  - A", vocabulary="v")
+        assert "empty list rather than a doubtful edge" in prompt
+
+    def test_one_name_cannot_relate_to_anything(self):
+        """Short-circuited before the call: a passage naming one thing has no
+        relationship to state, and paying a model to say so is waste. `client`
+        is None on purpose -- if it ever reached the network this would raise
+        rather than quietly pass."""
+        edges, error = asyncio.run(
+            generator.read_back(
+                client=None, body="Some prose.", names=("Only One",), model="m"
+            )
+        )
+        assert edges == () and error == ""
+
+    def test_and_neither_can_empty_prose(self):
+        edges, error = asyncio.run(
+            generator.read_back(client=None, body="   ", names=("A", "B"), model="m")
+        )
+        assert edges == () and error == ""

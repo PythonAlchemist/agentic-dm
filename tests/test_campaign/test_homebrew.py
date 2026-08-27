@@ -236,7 +236,8 @@ class TestCanonIsBlindToAllOfIt:
     def test_a_stored_scene_is_not_a_canon_entity(self, table):
         _store(table, anchor=ANCHOR)
         found = table.run(
-            "MATCH (e:Entity {plane:'canon'}) WHERE e.name = 'Pytest Sea Battle' RETURN count(e) AS c"
+            "MATCH (e:Entity {plane:'canon'}) WHERE e.name = 'Pytest Sea Battle' "
+            "RETURN count(e) AS c"
         ).single()["c"]
         assert found == 0
 
@@ -244,7 +245,8 @@ class TestCanonIsBlindToAllOfIt:
         """Alias resolution is the front door to retrieval."""
         _store(table, anchor=ANCHOR)
         found = table.run(
-            "MATCH (a:Alias {plane:'canon'}) WHERE a.name = 'Pytest Sea Battle' RETURN count(a) AS c"
+            "MATCH (a:Alias {plane:'canon'}) WHERE a.name = 'Pytest Sea Battle' "
+            "RETURN count(a) AS c"
         ).single()["c"]
         assert found == 0
 
@@ -1112,6 +1114,51 @@ class TestRelationshipsReadBackOutOfTheProse:
             "RETURN r.status AS s, r.plane AS p"
         ).single()
         assert dict(status) == {"s": "proposed", "p": "campaign"}
+
+    def test_reading_the_same_section_twice_reports_nothing_new(self, table):
+        """A re-read is the NORMAL case -- an edit, a second pass, a backfill
+        re-run -- and MERGE is idempotent. Counting every merge as a write
+        reported three new relationships on a graph that gained none."""
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        edges = [{"source": "Pytest Skipper", "target": "Pytest Sloop", "rel_type": "OWNS"}]
+        def read():
+            return table.execute_write(
+                lambda tx: homebrew.derive_edges(
+                    tx, slug=SLUG, section_id=section, edges=edges
+                )
+            )
+
+        first, second = read(), read()
+        assert (first["written"], first["already"]) == (1, 0)
+        assert (second["written"], second["already"]) == (0, 1)
+
+    def test_a_re_read_does_not_demote_an_edge_the_dm_approved(self, table):
+        """The DM accepting a card writes `authored`. A model re-reading the
+        same prose must not quietly turn that assertion back into a guess."""
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        table.run(
+            "MATCH (a:Entity {name:'Pytest Skipper'}), (b:Entity {name:'Pytest Sloop'}) "
+            "MERGE (a)-[r:OWNS]->(b) SET r.status = $s, r.plane = 'campaign'",
+            {"s": homebrew.AUTHORED},
+        )
+        table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Sloop",
+                        "rel_type": "OWNS"}],
+            )
+        )
+        status = table.run(
+            "MATCH (:Entity {name:'Pytest Skipper'})-[r:OWNS]->(:Entity {name:'Pytest Sloop'}) "
+            "RETURN r.status AS s"
+        ).single()["s"]
+        assert status == homebrew.AUTHORED
 
     def test_an_endpoint_the_section_does_not_name_is_refused(self, table):
         """The scan has already decided what this prose mentions. An edge
