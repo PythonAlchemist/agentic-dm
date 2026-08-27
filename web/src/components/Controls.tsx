@@ -24,6 +24,7 @@ export function Controls({
   onModel,
   depth,
   onDepth,
+  debug,
 }: {
   campaigns: CampaignInfo[]
   campaign: string | null
@@ -36,6 +37,9 @@ export function Controls({
   onModel: (m: string) => void
   depth: Depth
   onDepth: (d: Depth) => void
+  /** Depth knobs exist "to vary" -- bench posture. At the table they should
+   *  sit at the defaults the harness measured, so they render only here. */
+  debug: boolean
 }) {
   const chosen = models.find((m) => m.id === model)
 
@@ -44,7 +48,7 @@ export function Controls({
       {/* FIRST, above the model: which world the answers come from matters
           more than which model writes them. Every book here is one the graph
           actually holds -- the list is counted, not written down. */}
-      <Card title="Campaign">
+      <Card title="Book">
         <div className="space-y-1 p-2">
           {books.map((b) => (
             <button
@@ -74,7 +78,7 @@ export function Controls({
       {/* SEPARATE FROM THE BOOK, because they answer different questions: the
           book is which world, the table is whose. Canon only is the DEFAULT
           and is what every measurement this project reports is taken with. */}
-      <Card title="Table">
+      <Card title="Table — your campaign">
         <div className="space-y-1 p-2">
           <button
             onClick={() => onCampaign(null)}
@@ -150,7 +154,7 @@ export function Controls({
         )}
       </Card>
 
-      <Card title="Context depth">
+      {debug && <Card title="Context depth">
         <div className="space-y-4 p-3">
           <Slider
             label="Canon passages"
@@ -210,7 +214,7 @@ export function Controls({
             </span>
           </label>
         </div>
-      </Card>
+      </Card>}
     </div>
   )
 }

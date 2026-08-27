@@ -10,7 +10,8 @@ import {
   type OrderRow,
 } from '@/lib/api'
 import { GenerationCard } from './GenerationCard'
-import { CallMeter, RetrievalPanel } from './Meters'
+import { CallMeter, MissReason, RetrievalPanel } from './Meters'
+import { useDebug } from '@/lib/debug'
 import { SubgraphPanel } from './SubgraphPanel'
 
 
@@ -44,6 +45,7 @@ export function ChatPane({
   sessionId: string
   onSpend: (reply: ChatReply) => void
 }) {
+  const [debug] = useDebug()
   const [turns, setTurns] = useState<Turn[]>([])
   const [raisedCards, setRaisedCards] = useState<GeneratedReply[]>([])
 
@@ -182,8 +184,18 @@ export function ChatPane({
                       </div>
                     ))}
 
-                    <CallMeter usage={turn.reply.usage} cost={turn.reply.cost} />
-                    <RetrievalPanel report={turn.reply.retrieval} />
+                    {/* MECHANISM, BEHIND THE FLIP. These ran on every turn,
+                        so a ten-turn conversation carried ten retrieval
+                        reports about questions the DM had already moved past.
+                        The miss reason stays: an answer that retrieved nothing
+                        is a trust event, not a diagnostic. */}
+                    <MissReason report={turn.reply.retrieval} />
+                    {debug && (
+                      <>
+                        <CallMeter usage={turn.reply.usage} cost={turn.reply.cost} />
+                        <RetrievalPanel report={turn.reply.retrieval} />
+                      </>
+                    )}
                   </>
                 )}
 

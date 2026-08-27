@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { ChatPane } from '@/components/ChatPane'
-import { Controls } from '@/components/Controls'
 import { RunningOrder } from '@/components/RunningOrder'
 import { SectionReader } from '@/components/SectionReader'
+import { Setup } from '@/components/Setup'
+import { useDebug } from '@/lib/debug'
 import { YourMaterial } from '@/components/YourMaterial'
 import { GeneratePane } from '@/components/GeneratePane'
-import { SessionMeter, type Running } from '@/components/Meters'
+import { SpendChip, type Running } from '@/components/Meters'
 import { TabBar, TooltipProvider } from '@/components/ui'
 import {
   labAPI,
@@ -63,6 +64,13 @@ export default function Lab() {
   //: Which section a DM is reading. A drawer rather than a route: reading is a
   //  glance mid-conversation, and the chat it interrupts stays behind it.
   const [reading, setReading] = useState<string | null>(null)
+  //: Setup is a once-per-session act. It held 1,512px at the top of a 288px
+  //  rail -- taller than the viewport -- so the two panels a DM actually works
+  //  in could never be on screen at the same time as the pickers above them.
+  //  Switching book or table RESETS the conversation anyway, so there is no
+  //  mid-session cost to putting them one click away.
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [debug, setDebug] = useDebug()
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
   const [tab, setTab] = useState<'chat' | 'generate'>('chat')
   const [running, setRunning] = useState<Running>(ZERO)
@@ -120,42 +128,48 @@ export default function Lab() {
   return (
     <TooltipProvider>
       <div className="flex h-full flex-col">
+        {/* IDENTITY, SPEND, AND THE FLIP -- the three things that are true of
+            the whole screen rather than of any panel on it. The book and table
+            phrase replaces two rail cards: it has to stay VISIBLE (the lab once
+            said "Curse of Strahd" while answering out of a heist anthology) but
+            it does not have to stay EDITABLE. */}
         <header className="flex shrink-0 items-baseline gap-4 border-b border-neutral-800 px-6 py-3">
           <h1 className="text-base font-medium">Agent Lab</h1>
-          {/* COUNTED, never written down -- both the number and the NAME.
-              This read "3 of 25 chapters loaded" long after the whole book was
-              in, in three separate places, and then read "Curse of Strahd"
-              while answering out of a heist anthology. */}
-          <p className="text-xs text-neutral-600">
-            {here ? `${here.title} canon · ${here.chapters} chapters loaded` : 'no books loaded'}
-          </p>
+          <button
+            onClick={() => setSetupOpen(true)}
+            className="text-xs text-neutral-500 hover:text-neutral-300"
+          >
+            {here ? here.title : 'no books loaded'}
+            <span className="text-neutral-700"> · </span>
+            {campaigns.find((c) => c.slug === campaign)?.name ?? 'canon only'}
+            <span className="text-neutral-700"> · </span>
+            {model}
+          </button>
+          <div className="ml-auto flex items-baseline gap-4">
+            <SpendChip running={running} onReset={resetSession} debug={debug} />
+            <button
+              onClick={() => setDebug(!debug)}
+              className={`text-xs ${debug ? 'text-amber-300' : 'text-neutral-700 hover:text-neutral-500'}`}
+              title="Show how answers were produced (⌘.)"
+            >
+              debug
+            </button>
+          </div>
         </header>
 
         <div className="flex min-h-0 flex-1 gap-6 p-6">
-          <aside className="w-72 shrink-0 space-y-4 overflow-y-auto">
-            <Controls
-              campaigns={campaigns}
+          {/* WHAT A DM WORKS IN, and nothing else. Running order first: it is
+              where they are in the session. */}
+          <aside className="flex w-72 shrink-0 flex-col gap-4 overflow-hidden">
+            <RunningOrder
               campaign={campaign}
-              onCampaign={setCampaign}
-              books={config.books}
-              book={book}
-              onBook={setBook}
-              models={config.models}
-              model={model}
-              onModel={setModel}
-              depth={depth}
-              onDepth={setDepth}
+              refreshKey={orderVersion}
+              onRead={setReading}
             />
-            <SessionMeter running={running} onReset={resetSession} />
             <YourMaterial
               campaign={campaign}
               refreshKey={orderVersion}
               onDraft={setRaised}
-              onRead={setReading}
-            />
-            <RunningOrder
-              campaign={campaign}
-              refreshKey={orderVersion}
               onRead={setReading}
             />
           </aside>
@@ -205,6 +219,23 @@ export default function Lab() {
           </main>
         </div>
       </div>
+
+      <Setup
+        open={setupOpen}
+        onClose={() => setSetupOpen(false)}
+        campaigns={campaigns}
+        campaign={campaign}
+        onCampaign={setCampaign}
+        books={config.books}
+        book={book}
+        onBook={setBook}
+        models={config.models}
+        model={model}
+        onModel={setModel}
+        depth={depth}
+        onDepth={setDepth}
+        debug={debug}
+      />
 
       <SectionReader
         sectionId={reading}

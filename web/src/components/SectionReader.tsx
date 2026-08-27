@@ -234,7 +234,7 @@ export function SectionReader({
                 <Split
                   label="Invented"
                   items={shown.invented}
-                  tone="text-amber-300/80"
+                  tone="text-rose-300/80"
                 />
               </div>
             )}

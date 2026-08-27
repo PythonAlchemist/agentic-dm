@@ -28,6 +28,22 @@ export function CallMeter({ usage, cost }: { usage: Usage; cost: Cost }) {
   )
 }
 
+/**
+ * The one line of a retrieval report that is TRUST rather than mechanism.
+ *
+ * An answer that retrieved nothing is not a diagnostic detail -- it is the
+ * difference between a grounded answer and a model talking from memory, which
+ * is the thing this product exists to keep visible. So it survives the debug
+ * flip while the anchors, terms and counts around it do not.
+ */
+export function MissReason({ report }: { report: RetrievalReport | null }) {
+  if (!report?.miss_reason) return null
+  return (
+    <p className="mt-2 text-xs text-amber-400/80">{report.miss_reason}</p>
+  )
+}
+
+
 export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
   if (!report) return null
 
@@ -153,5 +169,54 @@ export function SessionMeter({
         </p>
       )}
     </div>
+  )
+}
+
+
+/**
+ * The session total, as one header chip.
+ *
+ * WAS A RAIL CARD, and cost a rail card's worth of a 288px column to answer a
+ * question asked once an afternoon. The number a DM glances at is the dollar;
+ * the breakdown behind it is bench data, so it goes where bench data goes.
+ *
+ * THE UNVERIFIED MARK STAYS ON THE CHIP AND NOT BEHIND THE FLIP. A number
+ * nobody has checked is not a diagnostic detail -- it is the difference
+ * between a figure and a guess, and money is exactly where that has to show.
+ */
+export function SpendChip({
+  running,
+  onReset,
+  debug,
+}: {
+  running: Running
+  onReset: () => void
+  debug: boolean
+}) {
+  return (
+    <span className="flex items-baseline gap-2 text-xs tabular-nums text-neutral-500">
+      <span>
+        ${running.usd.toFixed(4)}
+        {running.unverified && (
+          <Explain text="Some of this used a rate nobody has verified. Correct backend/core/pricing.yaml and set last_verified.">
+            <span className="ml-1 text-amber-500/80">⚠</span>
+          </Explain>
+        )}
+      </span>
+      {debug && (
+        <span className="text-neutral-600">
+          {running.calls} calls · {running.input.toLocaleString()} in ·{' '}
+          {running.output.toLocaleString()} out
+        </span>
+      )}
+      {running.calls > 0 && (
+        <button
+          onClick={onReset}
+          className="text-neutral-700 underline hover:text-neutral-400"
+        >
+          reset
+        </button>
+      )}
+    </span>
   )
 }

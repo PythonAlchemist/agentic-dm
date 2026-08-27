@@ -173,6 +173,16 @@ export function GenerationCard({
       )}
 
       <div className="mt-3 space-y-2 text-xs">
+        {/* FOUR SOURCES, FOUR HUES, AND NO TWO OF THEM ADJACENT. `From your own
+            material` and `Invented` were amber-200 and amber-300 -- one shade
+            step apart, in the one product whose entire promise is that a DM can
+            tell those two apart at a glance. Sourced-to-something-you-wrote and
+            the-model-made-it-up are the pair MOST worth confusing and were the
+            pair hardest to tell apart.
+
+            Green is the book, amber is yours, blue is the table, rose is
+            invention. Rose because it is the only one with nothing behind it:
+            every other row can be followed somewhere. */}
         <Provenance
           label="From the book"
           hint="Each cites a passage. A pointer for you to check, not a proof."
@@ -199,7 +209,7 @@ export function GenerationCard({
           label="Invented"
           hint="The model supplied these. Nothing in the book says them."
           items={card.invented}
-          tone="text-amber-300/80"
+          tone="text-rose-300/80"
         />
       </div>
 
