@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -835,6 +836,183 @@ def set_role(request: RoleRequest) -> dict:
             )
         except homebrew.NotStored as refused:
             raise HTTPException(status_code=404, detail=str(refused)) from refused
+
+
+#: Words a naming pass may add without having invented anything: the glue a
+#: substitution needs. Everything else it adds is new content in the DM's
+#: prose, which is the one thing this pass is not for.
+_GLUE = frozenset({"the", "a", "an", "of", "to", "and", "s"} | {
+    "he", "she", "it", "they", "him", "her", "them", "his", "its", "their",
+})
+
+
+def drifted(was: str, now: str, names: list[str]) -> list[str]:
+    """Words the rewrite ADDED that are not names and not glue.
+
+    THE PROMPT DOES NOT HOLD THIS AND A STRONGER ONE WOULD NOT EITHER. Told to
+    change nothing but the names, the pass turned "sea creatures or something
+    more sinister" into an encounter with two NPCs from another scene, and
+    "assist the crew" into "assist Captain Saltmarrow" -- who captains the
+    corsairs attacking the barge. Both read fluently and both are false, and a
+    DM skimming a diff of their own prose is exactly who would miss it.
+
+    So the check is mechanical: a substitution replaces a description with a
+    name, so every word the rewrite gained should come from a name it was
+    offered. A word from nowhere is invention, and naming it is what lets the
+    DM see in one line what a paragraph of fluent prose hides.
+    """
+    from collections import Counter
+
+    def words(text: str) -> Counter:
+        return Counter(re.findall(r"[^\W_]+", text.casefold()))
+
+    allowed = set(_GLUE)
+    for name in names:
+        allowed |= set(re.findall(r"[^\W_]+", name.casefold()))
+    gained = words(now) - words(was)
+    return sorted(word for word in gained if word not in allowed)
+
+
+def _without_article(name: str) -> str:
+    """`the red barge` -> `red barge`. Folded, for comparing against prose.
+
+    A sentence writes "her Red Barge" where the entity is "The Red Barge", so
+    an exact comparison says a name never arrived while it sits in the text.
+    """
+    folded = name.casefold().strip()
+    for article in ("the ", "a ", "an "):
+        if folded.startswith(article):
+            return folded[len(article):]
+    return folded
+
+
+@router.post("/name-entities")
+async def name_entities(request: DeriveRequest) -> dict:
+    """Propose the DM's own prose with the things in it called by their names.
+
+    RULE 4 APPLIED BACKWARDS, and only to what is already written. A new
+    generation is told to name what it is about because the mention scan reads
+    the words; prose written before that rule sat in the graph naming nothing.
+    `Captain Saltmarrow` "commands her ship" and expects "loyalty from her
+    crew" -- The Red Barge and the Corsair Crew are both in this graph, and the
+    section reached neither.
+
+    RETURNS A PROPOSAL AND WRITES NOTHING, and after measuring it that is not
+    caution -- it is the only safe setting. Both sections this was built for
+    came back factually wrong, in two different ways:
+
+      * `stormy-waters` turned "sea creatures or something more sinister" into
+        an encounter with two named NPCs from a different scene. `drifted`
+        catches this: the rewrite gained words no name could account for.
+
+      * `captain-saltmarrow` turned "her ship" into "her Red Barge", and the
+        Red Barge is the PRISON barge the party travels on -- Saltmarrow
+        captains the corsairs attacking it. Nothing drifted, because the name
+        was on the list. The substitution is simply wrong.
+
+    The second is the one to remember. A clean `drifted` means no invented
+    PROSE; it does not mean a correct substitution, and nothing mechanical here
+    can tell whose ship is whose. Each candidate is offered with its role --
+    "the prison barge", "the corsair captain" -- and the pass conflated them
+    anyway, so a fuller prompt is not the missing piece.
+
+    Read as a suggestion of where names COULD go, this is useful. Applied
+    without reading, it corrupts the DM's material while reading fluently,
+    which is the worst shape a defect can take in a tool whose whole promise is
+    that you can tell what the book says from what a model made up.
+
+    THE CANDIDATES ARE THIS TABLE'S OWN CAST plus the chapter the section is
+    played in. Offering the whole book would invite a name from a heist this
+    scene has nothing to do with, which is the anthology rule wearing a
+    different hat.
+    """
+    from openai import AsyncOpenAI
+
+    from backend.agents import generator
+
+    with read_only_session() as session:
+        row = session.run(
+            "MATCH (s:Section {id:$id, plane:'campaign', campaign:$c}) RETURN s.text AS text",
+            {"id": request.section_id, "c": request.campaign},
+        ).single()
+        if row is None:
+            raise HTTPException(404, f"no section {request.section_id!r} here")
+        body = row["text"] or ""
+    if not body.strip():
+        return {"note": "nothing written yet to name"}
+
+    with neo4j_session() as session:
+        home = session.execute_read(
+            lambda tx: homebrew._anchor_chapter(tx, request.campaign, request.section_id)
+        )
+    with read_only_session() as session:
+        rows = [
+            dict(r)
+            for r in session.run(
+                """
+                MATCH (e:Entity)
+                WHERE ((e.plane = 'campaign' AND e.campaign = $c)
+                    OR (e.plane = 'canon' AND $home <> '' AND e.chapter_slug = $home))
+                  // NOT THE SECTION'S OWN SUBJECT. A scene is titled after
+                  // itself, and substituting `The Corsair Ambush` into the
+                  // prose of The Corsair Ambush is circular.
+                  AND NOT (e)<-[:DESCRIBES]-(:Section {id:$s})
+                RETURN DISTINCT e.name AS name, e.role AS role,
+                       [l IN labels(e) WHERE l <> 'Entity'][0] AS kind
+                ORDER BY e.name
+                """,
+                {"c": request.campaign, "home": home, "s": request.section_id},
+            )
+            if r["name"]
+        ]
+    # NAME AND WHAT IT IS, tab-separated. Offered the bare names, the pass
+    # wrote "loyalty from her Corsair Skirmisher" for "her crew" -- one kind of
+    # fighter standing in for a whole crew, because the names alone do not say
+    # which is which.
+    candidates = tuple(
+        row["name"] + (f"\t{gloss}" if (gloss := " -- ".join(
+            part for part in (row["kind"], row["role"]) if part
+        )) else "")
+        for row in rows
+    )
+    if not candidates:
+        return {"note": "this table has no cast to name yet"}
+
+    rewritten, error = await generator.name_the_things(
+        AsyncOpenAI(api_key=settings.openai_api_key),
+        body=body,
+        names=candidates,
+        model=request.model or settings.openai_model,
+    )
+    if error:
+        raise HTTPException(502, f"could not name them: {error}")
+    return {
+        "section_id": request.section_id,
+        "was": body,
+        "now": rewritten,
+        # WHICH NAMES ARRIVED, counted rather than described. This is the whole
+        # point of the pass and the number the DM is deciding about.
+        # CASE- AND ARTICLE-INSENSITIVE. The entity is `The Red Barge` and the
+        # sentence says "her Red Barge", so comparing the stored name exactly
+        # reported it as un-introduced while it sat in the rewrite. What the
+        # scan will match on is the name without its leading article, which is
+        # therefore what this counts.
+        "named": sorted(
+            row["name"]
+            for row in rows
+            if (bare := _without_article(row["name"])) in rewritten.casefold()
+            and bare not in body.casefold()
+        ),
+        # A LENGTH THAT MOVED FAR IS A REWRITE, NOT A NAMING. Surfaced rather
+        # than refused, because the DM is reading both bodies anyway and a hard
+        # threshold here would just be a guess wearing a rule's clothes.
+        "was_chars": len(body),
+        "now_chars": len(rewritten),
+        # WORDS THE REWRITE INVENTED. Empty is the only reading that means
+        # "this only named things"; anything here is new prose the DM did not
+        # write, and the pass is not for writing prose.
+        "drifted": drifted(body, rewritten, [row["name"] for row in rows]),
+    }
 
 
 class DeriveRequest(BaseModel):

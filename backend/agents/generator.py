@@ -720,7 +720,7 @@ async def read_back(
     that happened to be a fresh cluster.
 
     So this asks the narrower question the case actually poses: here is the
-    prose, here are the names the scan已 found in it, what holds between them.
+    prose, here are the names the scan already found in it, what holds between them.
     Nothing to mint, nothing to classify, one job.
 
     THE NAMES ARE GIVEN AND CLOSED. An edge naming something outside the list
@@ -749,6 +749,93 @@ async def read_back(
         return (), error
     edges = [e for e in (data.get("edges") or ()) if isinstance(e, dict)]
     return tuple(edges), ""
+
+
+_NAME_THE_THINGS = """Here is a passage from a Dungeon Master's campaign, and
+the things their graph already holds.
+
+PASSAGE
+{body}
+
+THINGS THE GRAPH HOLDS, and the only names you may introduce. Each is given
+with what it IS, because the names alone do not say:
+{names}
+
+Rewrite the passage so that anything on that list is called BY ITS NAME on
+first reference, instead of "the ship", "her crew", "the captain". After the
+first reference pronouns are fine.
+
+CHANGE NOTHING ELSE. Not a fact, not an event, not a number, not the order of
+the sentences, not the tone. You are not improving this passage -- you are
+naming what it is already about, so the rest of the campaign can find it.
+
+IF YOU ARE NOT SURE A DESCRIPTION MEANS A THING ON THE LIST, LEAVE IT ALONE.
+"the crew" might be any crew. A wrong name is worse than no name: it would
+join this passage to something it is not about, and the DM would have no way
+to see that from the prose.
+
+READ WHAT EACH THING IS BEFORE YOU USE ITS NAME. Asked to name "her crew" from
+a list holding both, an earlier pass wrote "loyalty from her Corsair
+Skirmisher" -- which is one kind of fighter, not a crew. Two descriptions that
+sound alike are not interchangeable, and the line beside each name is there to
+tell them apart.
+
+Reply with JSON only:
+{{"body": "the rewritten passage"}}"""
+
+
+async def name_the_things(
+    client: Any,
+    *,
+    body: str,
+    names: tuple[str, ...],
+    model: str,
+    temperature: float = 0.0,
+) -> tuple[str, str]:
+    """Rewrite a passage so the things it is about are called by their names.
+
+    RULE 4 APPLIED BACKWARDS. New generations are told to name what they are
+    about, because the mention scan reads the words and prose that names
+    nothing connects to nothing. That does nothing for prose already written:
+    a bio saying Captain Saltmarrow "commands her ship" names neither The Red
+    Barge nor the Corsair Crew, and 1,967 characters of "the barge", "the
+    crew", "the characters" sat in the graph attached to one entity.
+
+    A PROPOSAL, NEVER AN EDIT. What comes back is the DM's own prose with
+    substitutions made in it, which is exactly the kind of change they have to
+    read before it stands. The caller stores nothing; it hands this to the same
+    accept-or-reject path a generation goes through.
+
+    THE NAME LIST IS CLOSED for the reason it is closed in `read_back`: an
+    invented name would join the passage to nothing, and a name from another
+    table's material would join it to the wrong thing.
+    """
+    if not names or not body.strip():
+        return "", ""
+    # A NAME MAY ARRIVE ALONE OR WITH WHAT IT IS. Callers that know the roles
+    # pass `("Corsair Crew", "NPC -- standard foot soldiers")`; ones that do
+    # not pass the bare string, and the prompt still reads.
+    lines = []
+    for entry in names:
+        name, _, gloss = entry.partition("\t") if isinstance(entry, str) else (entry, "", "")
+        lines.append(f"  - {name}" + (f" -- {gloss}" if gloss else ""))
+    prompt = _NAME_THE_THINGS.format(body=body, names="\n".join(lines))
+    response = await client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        # ROOM FOR THE WHOLE PASSAGE BACK. A truncated rewrite is a silent
+        # deletion of the DM's prose, so the ceiling is generous and the
+        # caller checks the length it got.
+        max_tokens=4000,
+    )
+    data, error = _first_object(response.choices[0].message.content or "")
+    if error:
+        return "", error
+    rewritten = data.get("body")
+    if not isinstance(rewritten, str) or not rewritten.strip():
+        return "", "the rewrite came back without a body"
+    return rewritten, ""
 
 
 async def annotate(
