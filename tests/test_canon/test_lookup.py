@@ -752,6 +752,7 @@ class TestTheProposedLayerIsNeverLaundered:
 
 
 @pytest.mark.neo4j
+@pytest.mark.corpus
 class TestTheRealBook:
     """Two assertions against the book's own canon, not against a fixture.
 

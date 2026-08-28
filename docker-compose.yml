@@ -23,6 +23,35 @@ services:
       timeout: 5s
       retries: 5
 
+  # The one the TEST SUITE writes to, and the reason it exists.
+  #
+  # The suite ran against the development database, beside a real table's
+  # campaign. Its fixtures clean up by hand-written id prefix -- `hb:<slug>:`,
+  # `pytest:` -- and two of them got it wrong: one deleted a campaign by prefix
+  # while its mentions are keyed on `campaign`, another made a mention with no
+  # id for a prefix delete to find. 573 orphans accumulated next to material
+  # nobody can regenerate.
+  #
+  # A SECOND INSTANCE RATHER THAN A SECOND DATABASE, because this is Neo4j
+  # Community and multi-database is an Enterprise feature. Same image, own
+  # port, own volume, and no volume mount for logs it will never be read for.
+  neo4j-test:
+    image: neo4j:5-community
+    container_name: dnd-neo4j-test
+    ports:
+      - "7475:7474"  # HTTP
+      - "7688:7687"  # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/testpassword
+      - NEO4J_PLUGINS=["apoc"]
+    # NO NAMED VOLUME. A test database that survives a restart is a test
+    # database that accumulates, which is the thing this exists to stop.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7474"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ChromaDB Vector Database (optional - can use embedded)
   # Uncomment if you want to run ChromaDB as a separate service
   # chroma:

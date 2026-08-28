@@ -35,6 +35,7 @@ def no_probe_survives():
         session.run(f"MATCH (n:{PROBE}) DETACH DELETE n").consume()
 
 
+@pytest.mark.corpus
 class TestItCanRead:
     def test_a_match_returns_rows(self):
         with read_only_session() as session:

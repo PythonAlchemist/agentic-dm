@@ -62,6 +62,7 @@ select = ["E", "F", "I", "UP"]
 [tool.pytest.ini_options]
 markers = [
     "neo4j: test requires a running Neo4j (docker compose up -d); deselect with -m 'not neo4j'",
+    "corpus: test reads the ingested book and asserts what it says; skipped when the database holds no canon. These only read, so a populated database is safe to point them at.",
 ]
 
 [tool.uv.sources]

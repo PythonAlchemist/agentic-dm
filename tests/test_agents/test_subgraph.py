@@ -247,6 +247,7 @@ class TestWithholdingGuesses:
 
 
 @pytest.mark.neo4j
+@pytest.mark.corpus
 class TestTheFollowUpThatMotivatedThis:
     """Two real turns against the real graph.
 

@@ -15,6 +15,7 @@ from backend.agents.graph_tools import call, expand, passages, resolve
 pytestmark = pytest.mark.neo4j
 
 
+@pytest.mark.corpus
 class TestResolving:
     def test_a_name_returns_the_entity_with_its_labels(self):
         """An id alone cannot be put into the subgraph or said back to a
@@ -45,6 +46,7 @@ class TestResolving:
         assert "Entity" not in labels
 
 
+@pytest.mark.corpus
 class TestExpanding:
     def test_every_edge_carries_its_status(self):
         """THE INVARIANT DEFENDED HARDEST. A third of proposed edges are false,
@@ -78,6 +80,7 @@ class TestExpanding:
         assert expand("cos:no-such-entity").rows == ()
 
 
+@pytest.mark.corpus
 class TestPassages:
     def test_the_loudest_section_comes_first(self):
         rows = passages("cos:rictavio").rows
@@ -98,6 +101,7 @@ class TestPassages:
         assert passages("cos:rictavio").rows[0]["section_id"].startswith("cos:")
 
 
+@pytest.mark.corpus
 class TestBounding:
     """A silent truncation reads as "that is all there is"."""
 
@@ -149,6 +153,7 @@ class TestTheToolsCannotWrite:
         assert all(isinstance(session, ReadOnlySession) for session in seen)
 
 
+@pytest.mark.corpus
 class TestDispatch:
     def test_a_tool_is_callable_by_name(self):
         assert call("resolve", {"name": "Rictavio"}).rows[0]["entity_id"] == "cos:rictavio"

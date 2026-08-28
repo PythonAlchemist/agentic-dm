@@ -93,6 +93,7 @@ class TestTheLabelsAreWellFormed:
 
 
 @pytest.mark.neo4j
+@pytest.mark.corpus
 class TestTheLabelsPointAtRealSections:
     def test_every_gold_section_exists_in_the_graph(self, questions):
         """The structural half of the check that was missing.

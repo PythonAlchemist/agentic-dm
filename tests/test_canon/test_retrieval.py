@@ -808,6 +808,7 @@ class TestRetrievingFromTheGraph:
 
 
 @pytest.mark.neo4j
+@pytest.mark.corpus
 class TestCarryingTheConversation:
     """A question that resolves nothing can still be about something.
 
