@@ -271,10 +271,23 @@ def _apply(tx, merge: Merge, plane: str) -> dict:
     # query traverses the edge; none parses the id) and re-ingest badly, since
     # the correct id is free and gets minted as a second mention beside the
     # stale one. This is where the 628 `--mention-ids` found came from.
+    # NOT ONTO AN ID ALREADY TAKEN. Repointing brings the loser's mention into
+    # a section the survivor may already have one in, and both then want
+    # `survivor@section` -- which `mention_id` forbids. Those are exactly the
+    # doubles, and the fold below collapses them and sets the id then; renaming
+    # here would only race it into a constraint error.
+    #
+    # IT USED TO BE UNREACHABLE. Mentions written by the cluster paths carried
+    # no id at all, and `null <> 'x'` is null, so they were filtered out of this
+    # rename and never collided. Giving every mention the id its own convention
+    # always claimed made them eligible, and the latent case fired at once.
     tally["renamed"] = tx.run(
         """
         MATCH (e:Entity {id:$survivor})<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(sec:Section)
         WHERE m.id <> $survivor + '@' + sec.id
+          AND NOT EXISTS {
+            MATCH (taken:Mention {id: $survivor + '@' + sec.id})
+          }
         SET m.id = $survivor + '@' + sec.id
         RETURN count(m) AS n
         """,

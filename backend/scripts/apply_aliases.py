@@ -27,6 +27,7 @@ to do with. Refused whole, reported by name.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -42,6 +43,16 @@ _BY_NAME = """
 MATCH (e:Entity {plane:$plane}) WHERE e.id STARTS WITH $prefix
 RETURN e.name AS name, collect(e.id) AS ids
 """
+
+
+#: A keyed area, read off the id -- `mint_id` resolves a keyed place to
+#: `(book, chapter, key)`, so `p15-guest-bathroom` carries its map key.
+_KEYED = re.compile(r"^[a-z]{1,2}\d+[a-z]?-")
+
+
+def keyed(entity_id: str) -> bool:
+    """Did the book give this place a key of its own?"""
+    return bool(_KEYED.match(entity_id.rsplit(":", 1)[-1]))
 
 
 def chapter_of(entity_id: str) -> str:
@@ -103,6 +114,23 @@ def plan(groups: list[dict], by_name: dict[str, list[str]]) -> tuple[list[Merge]
 
         survivor = by_name[canonical][0]
         losers = tuple(sorted(by_name[n][0] for n in names if n != canonical))
+        # A KEYED ROOM MAY NOT BE FOLDED AWAY. The book gave `P11` and `P15`
+        # separate keys because they are separate rooms, and a grouping that
+        # makes the main bathroom into the guest one is wrong however alike
+        # the names read. Same for `G19` and `G22` -- a north balcony and a
+        # south balcony -- and for the livery stables disappearing into the
+        # keys that open them.
+        #
+        # THE LOSER SIDE ONLY. A keyed room absorbing an unkeyed spelling of
+        # itself is the thing this script is for: `Reconstructed Shrine` really
+        # is what the section calls `Shrine`.
+        buried = [loser for loser in losers if keyed(loser)]
+        if buried:
+            refused.append(
+                f"{canonical!r}: would fold the keyed {buried!r} away -- "
+                "the book keys separate rooms separately"
+            )
+            continue
         if not losers:
             continue
         merges.append(
@@ -148,7 +176,11 @@ def main() -> int:
         print("\nNothing changed. Re-run with --apply to merge.")
         return 0
 
-    totals = {"mentions": 0, "pairs": 0, "aliases": 0, "typed": 0}
+    # COUNTED BY WHATEVER `_apply` REPORTS, not by a list written out here. It
+    # gained a `renamed` tally and this did not, so every apply died on a
+    # KeyError after doing the merges -- the work landed and the summary
+    # crashed, which is the worst way round.
+    totals: dict[str, int] = defaultdict(int)
     with neo4j_session() as session:
         for merge in merges:
             tally = session.execute_write(_apply, merge, args.plane)
@@ -166,7 +198,8 @@ def main() -> int:
             for row in doubled
         )
     print(
-        f"\nmerged {len(merges)} groups: moved {totals['mentions']} mentions, "
+        f"\nmerged {len(merges)} groups: renamed {totals['renamed']} mentions, "
+        f"moved {totals['mentions']}, "
         f"{totals['pairs']} co-occurrences, {totals['aliases']} aliases, "
         f"{totals['typed']} typed edges"
     )
