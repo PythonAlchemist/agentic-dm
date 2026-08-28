@@ -309,7 +309,11 @@ class TestCanonAliasesForCollisionScanning:
             CREATE (c:Chapter {slug:'pytest-alias-ch', plane:'canon', index:0})
             CREATE (s:Section {id:'pytest-alias-book:ch#0', plane:'canon', index:0})
             CREATE (e:Entity {id:'pytest-alias-book:v', name:'Pytestvarrin', plane:'canon'})
-            CREATE (m:Mention {plane:'canon'})
+            // AN ID, so `clean` can find it. Without one the prefix delete
+            // walked past it while its section and entity went, and every run
+            // left one more orphan in the development database.
+            CREATE (m:Mention {id:'pytest-alias-book:v@pytest-alias-book:ch#0',
+                               plane:'canon'})
             CREATE (a:Alias {name:'Pytestvarrin', normalized:'pytestvarrin', plane:'canon'})
             CREATE (b)-[:HAS_CHAPTER]->(c)
             CREATE (c)-[:HAS_SECTION]->(s)

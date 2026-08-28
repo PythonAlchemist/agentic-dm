@@ -566,11 +566,21 @@ def write_cluster(
         tx.run(
             f"""
             MATCH (e:Entity {{id:$e}}), (s:Section {{id:$s}})
-            CREATE (m:Mention {{plane:$plane, campaign:$slug, surface:$name}})
-            CREATE (m)-[:{REFERS_TO}]->(e)
-            CREATE (m)-[:{IN_SECTION}]->(s)
+            MERGE (m:Mention {{id:$id}})
+            SET m.plane = $plane, m.campaign = $slug,
+                m.display_name = coalesce(m.display_name, $name),
+                m.{DECLARED} = true
+            MERGE (m)-[:{REFERS_TO}]->(e)
+            MERGE (m)-[:{IN_SECTION}]->(s)
             """,
             {
+                # ONE NODE PER (ENTITY, SECTION), which is what `mention_id`
+                # has always meant and what this path alone did not do. A bare
+                # CREATE with no id can never MERGE onto the scanned mention
+                # for the same pair, so a section that DECLARED Corsair Crew
+                # and then NAMED it in its prose held two nodes for one fact
+                # and drew as two circles.
+                "id": f"{element.entity_id}@{root.section_id}",
                 "e": element.entity_id,
                 "s": root.section_id,
                 "plane": CAMPAIGN_PLANE,
@@ -611,7 +621,8 @@ def write_cluster(
             f"""
             MATCH (e:Entity {{id:$e}}), (s:Section {{id:$s}})
             MERGE (m:Mention {{id:$e + '@' + $s}})
-            SET m.plane = $plane, m.campaign = $slug, m.display_name = $name
+            SET m.plane = $plane, m.campaign = $slug, m.display_name = $name,
+                m.{DECLARED} = true
             MERGE (m)-[:{REFERS_TO}]->(e)
             MERGE (m)-[:{IN_SECTION}]->(s)
             """,
@@ -624,11 +635,15 @@ def write_cluster(
         tx.run(
             f"""
             MATCH (e:Entity {{id:$e, plane:'canon'}}), (s:Section {{id:$s}})
-            CREATE (m:Mention {{plane:$plane, campaign:$slug, surface:$name}})
-            CREATE (m)-[:{REFERS_TO}]->(e)
-            CREATE (m)-[:{IN_SECTION}]->(s)
+            MERGE (m:Mention {{id:$id}})
+            SET m.plane = $plane, m.campaign = $slug,
+                m.display_name = coalesce(m.display_name, $name),
+                m.{DECLARED} = true
+            MERGE (m)-[:{REFERS_TO}]->(e)
+            MERGE (m)-[:{IN_SECTION}]->(s)
             """,
-            {"e": canon_id, "s": root.section_id, "plane": CAMPAIGN_PLANE,
+            {"id": f"{canon_id}@{root.section_id}",
+             "e": canon_id, "s": root.section_id, "plane": CAMPAIGN_PLANE,
              "slug": plan.campaign, "name": name},
         )
         linked += 1
@@ -691,6 +706,21 @@ def write_cluster(
 #: being true when the DM deletes the words. One is authored, the other derived,
 #: and a rescan may only overwrite what it wrote.
 SCANNED = "scanned"
+
+#: A declared mention says so too, and now on the SAME node as the scan's.
+#:
+#: The two were separate nodes because `write_cluster` created its mentions
+#: without an id, so nothing could MERGE them onto the scanned one for the same
+#: pair -- and `mention_id` has always meant one node per (entity, section).
+#: A section that declared Corsair Crew and then named it in its prose held two
+#: nodes for one fact and drew as two circles.
+#:
+#: ONE NODE, TWO FLAGS, because they remain two claims. "This scene contains
+#: him" is true whether or not the prose spells his name; "this prose says
+#: `Revel's End`" stops being true when the DM deletes the words. Merging the
+#: nodes must not merge the claims, which is why reconciliation now CLEARS
+#: `scanned` on a declared node rather than deleting it.
+DECLARED = "declared"
 
 
 def rescan(tx, *, slug: str, section_id: str) -> dict:
@@ -831,6 +861,19 @@ def rescan(tx, *, slug: str, section_id: str) -> dict:
         )
         kept.add(mention.id)
 
+    # A NAME THE DM DELETED STOPS BEING A MENTION -- unless the manifest also
+    # declared it, in which case only the SCAN's claim is withdrawn and the
+    # declaration stands. Deleting the node would take both, and one of them is
+    # not the scan's to take back.
+    unscanned = tx.run(
+        f"""
+        MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$section_id}})
+        WHERE m.{SCANNED} = true AND NOT m.id IN $kept AND m.{DECLARED} = true
+        REMOVE m.{SCANNED}
+        RETURN count(m) AS n
+        """,
+        {"section_id": section_id, "kept": list(kept)},
+    ).single()["n"]
     dropped = tx.run(
         f"""
         MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$section_id}})
@@ -840,7 +883,7 @@ def rescan(tx, *, slug: str, section_id: str) -> dict:
         """,
         {"section_id": section_id, "kept": list(kept)},
     ).single()["n"]
-    return {"scanned": len(kept), "dropped": dropped}
+    return {"scanned": len(kept), "dropped": dropped, "unscanned": unscanned}
 
 
 def _anchor_chapter(tx, slug: str, section_id: str) -> str:

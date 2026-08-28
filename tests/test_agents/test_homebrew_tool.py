@@ -40,6 +40,11 @@ def _wipe(session):
     session.run("MATCH (c:Campaign {slug:$s}) DETACH DELETE c", {"s": SLUG})
     session.run("MATCH (n) WHERE n.id STARTS WITH $p DETACH DELETE n",
                 {"p": f"hb:{SLUG}:"})
+    # THE MENTIONS TOO. A mention is keyed on the campaign rather than on an
+    # `hb:` id, so deleting by prefix walked straight past them -- and the
+    # suite runs against the development database, so 431 of them accumulated
+    # beside a real table's material before anybody looked.
+    session.run("MATCH (m:Mention {campaign:$s}) DETACH DELETE m", {"s": SLUG})
     session.run("MATCH (a:Alias) WHERE NOT (a)-[:ALIAS_OF]->() DETACH DELETE a")
 
 HELD = frozenset({"kftgv:prisoner-13:varrin-axebreaker", "kftgv:golden-vault"})

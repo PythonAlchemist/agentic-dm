@@ -1069,6 +1069,84 @@ class TestSomethingTheCampaignAlreadyHoldsStaysInTheCluster:
         assert named >= 1, "the involvement is recorded even though nothing was minted"
 
 
+class TestOneMentionNodePerEntityPerSection:
+    """`mention_id` is `<entity>@<section>` and has always meant one node per
+    pair -- but `write_cluster` created its mentions with no id, so nothing
+    could MERGE them onto the scanned mention for the same pair. A section that
+    declared Corsair Crew and then named it in its prose held two nodes for one
+    fact, and drew as two circles in the graph view."""
+
+    def _scene(self, table, body):
+        stored = _store(table, anchor=None, title="Pytest One Node", body=body,
+                        generated_body=body)
+        return stored.section_id
+
+    def test_declaring_then_naming_makes_one_node(self, table):
+        element = _store(table, anchor=None, kind="npc", title="Pytest Bosun",
+                         body="a", generated_body="a")
+        section = self._scene(table, "Pytest Bosun keeps the watch.")
+        table.run(
+            "MATCH (s:Section {id:$s}), (e:Entity {id:$e}) "
+            "MERGE (m:Mention {id:$e + '@' + $s}) "
+            "SET m.plane='campaign', m.campaign=$c, m.declared=true "
+            "MERGE (m)-[:REFERS_TO]->(e) MERGE (m)-[:IN_SECTION]->(s)",
+            {"s": section, "e": element.entity_id, "c": SLUG},
+        )
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        nodes = table.run(
+            "MATCH (m:Mention)-[:IN_SECTION]->(:Section {id:$s}) "
+            "MATCH (m)-[:REFERS_TO]->(:Entity {id:$e}) "
+            "RETURN count(m) AS n, collect(m.scanned) AS sc, collect(m.declared) AS de",
+            {"s": section, "e": element.entity_id},
+        ).single()
+        assert nodes["n"] == 1, "one pair, one node"
+        assert nodes["sc"] == [True] and nodes["de"] == [True], "both claims on it"
+
+    def test_deleting_the_name_withdraws_only_the_scan(self, table):
+        """The manifest's claim is not the scan's to take back. Deleting the
+        node would take both, and "this scene contains him" is true whether or
+        not the prose ever spells it."""
+        element = _store(table, anchor=None, kind="npc", title="Pytest Bosun",
+                         body="a", generated_body="a")
+        section = self._scene(table, "Pytest Bosun keeps the watch.")
+        table.run(
+            "MATCH (s:Section {id:$s}), (e:Entity {id:$e}) "
+            "MERGE (m:Mention {id:$e + '@' + $s}) "
+            "SET m.plane='campaign', m.campaign=$c, m.declared=true "
+            "MERGE (m)-[:REFERS_TO]->(e) MERGE (m)-[:IN_SECTION]->(s)",
+            {"s": section, "e": element.entity_id, "c": SLUG},
+        )
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        table.execute_write(
+            lambda tx: homebrew.edit(
+                tx, slug=SLUG, section_id=section, body="Nobody is named here."
+            )
+        )
+        row = table.run(
+            "MATCH (m:Mention {id:$id}) RETURN m.scanned AS sc, m.declared AS de",
+            {"id": f"{element.entity_id}@{section}"},
+        ).single()
+        assert row is not None, "the declaration survives"
+        assert row["sc"] is None and row["de"] is True
+
+    def test_a_scan_only_mention_is_still_reconciled_away(self, table):
+        """Nothing above may stop the scan taking back its OWN claim."""
+        _store(table, anchor=None, kind="npc", title="Pytest Lookout", body="a",
+               generated_body="a")
+        section = self._scene(table, "Pytest Lookout is at the rail.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        table.execute_write(
+            lambda tx: homebrew.edit(
+                tx, slug=SLUG, section_id=section, body="The rail is empty."
+            )
+        )
+        left = table.run(
+            "MATCH (m:Mention {scanned:true})-[:IN_SECTION]->(:Section {id:$s}) "
+            "RETURN count(m) AS n", {"s": section},
+        ).single()["n"]
+        assert left == 0
+
+
 class TestRelationshipsReadBackOutOfTheProse:
     """A DM writes "Captain Saltmarrow commands the Red Barge" and the graph
     held the two of them with nothing between. Cluster edges only ever covered
