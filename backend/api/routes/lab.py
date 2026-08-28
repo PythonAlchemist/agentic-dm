@@ -259,6 +259,9 @@ class FindElementsRequest(BaseModel):
 
     body: str
     subject: str
+    #: What the material IS, so the ontology can say which episodes may sit
+    #: inside it. Absent is fine: nothing is refused on containment then.
+    kind: str = ""
     book: str = "cos"
     campaign: str | None = None
     model: str | None = None
@@ -305,6 +308,8 @@ async def find_elements(request: FindElementsRequest) -> dict:
         retrieval=retrieval,
         depth=depth,
         model=model,
+        subject=request.subject,
+        kind=request.kind,
     )
     if error:
         raise HTTPException(status_code=502, detail=f"could not read the cast: {error}")

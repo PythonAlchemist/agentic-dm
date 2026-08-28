@@ -22,6 +22,11 @@ import { ClusterReview } from './ClusterReview'
 //: `dm_agent`, which decides the same thing on the way out.
 const CAN_CONTAIN = new Set(['quest', 'scene', 'encounter'])
 
+//: The kinds that ARE a position in the running order rather than a write-up
+//: about something. A quest is not one: it spans the adventure rather than
+//: happening at a point in it.
+const PLAYS_SOMEWHERE = new Set(['scene', 'encounter'])
+
 
 export function GenerationCard({
   card,
@@ -55,7 +60,14 @@ export function GenerationCard({
   // a character's write-up is not an episode, and defaulting it into the
   // running order would tell the table to play "The Red Barge" as a scene. A
   // DM can still place one deliberately.
-  const [anchor, setAnchor] = useState(card.expands ? '' : (card.anchor ?? ''))
+  //
+  // UNLESS IT IS AN EPISODE. A scene or an encounter IS a position -- that is
+  // what distinguishes it from a write-up -- so fleshing one out and leaving
+  // it nowhere is the one case where the default is wrong. Reachable since
+  // those two became element kinds and a quest could mint them as stubs.
+  const [anchor, setAnchor] = useState(
+    card.expands && !PLAYS_SOMEWHERE.has(card.kind) ? '' : (card.anchor ?? ''),
+  )
   const [busy, setBusy] = useState(false)
   const [stored, setStored] = useState('')
   const [failed, setFailed] = useState('')
@@ -78,7 +90,7 @@ export function GenerationCard({
       // notices the cast is missing they have usually edited the prose, and
       // annotating what the model first wrote would read the wrong scene.
       const cast = await labAPI.findElements(
-        body, shown.subject, book, campaign, card.model ?? '',
+        body, shown.subject, shown.kind, book, campaign, card.model ?? '',
       )
       setFound({ ...card, elements: cast.elements, edges: cast.edges })
       if (!cast.elements?.length) {

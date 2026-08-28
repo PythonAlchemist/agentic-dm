@@ -671,3 +671,66 @@ class TestNamingWhatProseIsAlreadyAbout:
         assert asyncio.run(
             generator.name_the_things(client=None, body="   ", names=("A",), model="m")
         ) == ("", "")
+
+
+class TestWhatAnEpisodeMayContain:
+    """`scene` and `encounter` joined the element kinds so a quest could mint
+    the episodes it contains. That made a new mistake reachable: an encounter
+    listed eleven scenes across four runs -- the siblings it REFERENCES rather
+    than the things it holds -- and a thing listed itself as its own first
+    element on two runs out of two."""
+
+    EPISODES = {
+        "elements": [
+            {"kind": "scene", "name": "Stormy Waters"},
+            {"kind": "encounter", "name": "The Boarding"},
+            {"kind": "npc", "name": "Captain Saltmarrow"},
+        ],
+        "edges": [],
+    }
+
+    def _kept(self, parent):
+        elements, _, dropped = generator.sift_manifest(self.EPISODES, "X", parent)
+        return [e["kind"] for e in elements], dropped
+
+    def test_an_encounter_holds_neither_episode(self):
+        """A fight is where the running order bottoms out."""
+        kept, dropped = self._kept("encounter")
+        assert kept == ["npc"]
+        assert len(dropped) == 2
+
+    def test_a_scene_holds_an_encounter_but_not_a_scene(self):
+        kept, _ = self._kept("scene")
+        assert kept == ["encounter", "npc"]
+
+    def test_a_quest_holds_both(self):
+        """A quest is not a level: it spans the adventure rather than
+        happening at a point in it, so it may name whatever it involves."""
+        kept, dropped = self._kept("quest")
+        assert kept == ["scene", "encounter", "npc"] and dropped == {}
+
+    def test_an_unknown_parent_refuses_nothing(self):
+        """A caller that does not say what it is is no worse off than before
+        this rule existed."""
+        kept, dropped = self._kept("")
+        assert kept == ["scene", "encounter", "npc"] and dropped == {}
+
+    def test_the_refusal_is_the_ontology_s_own_sentence(self):
+        """It reaches a person. "an encounter goes inside a scene, not inside
+        an encounter" is the whole explanation."""
+        _, dropped = self._kept("encounter")
+        assert any("not inside an encounter" in reason for reason in dropped), dropped
+
+    def test_a_thing_is_not_one_of_its_own_parts(self):
+        data = {"elements": [{"kind": "scene", "name": "The Corsair Ambush"}], "edges": []}
+        elements, _, dropped = generator.sift_manifest(data, "the corsair ambush")
+        assert elements == ()
+        assert dropped == {"the material itself is not one of its parts": 1}
+
+    def test_the_kinds_line_is_built_from_the_kinds(self):
+        """The annotate prompt still offered `npc|monster|location|item|lore`
+        after `quest` and `faction` joined, so a faction only ever arrived
+        because the model ignored the list it was given, and a scene was
+        refused for obeying it."""
+        for kind in generator.ELEMENT_KINDS:
+            assert kind in generator._KINDS_LINE

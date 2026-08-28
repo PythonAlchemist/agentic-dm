@@ -656,6 +656,8 @@ class DMAgent:
                         retrieval=own,
                         depth=self.depth,
                         model=self.model,
+                        subject=drafted.title or request.subject,
+                        kind=request.kind,
                     )
                     if not annotate_error:
                         drafted = replace(

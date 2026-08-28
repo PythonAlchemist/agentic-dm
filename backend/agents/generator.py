@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.agents import canon_context
-from backend.campaign import homebrew
+from backend.campaign import homebrew, ontology
 from backend.canon.retrieval import Retrieval
 from backend.core.pricing import Usage, estimate
 
@@ -59,7 +59,38 @@ KINDS = ("quest", "npc", "monster", "scene", "encounter")
 #: `scene` IS STILL NOT HERE. A scene inside a scene is a structural claim
 #: about the running order, and the running order is a linked list a DM
 #: arranges -- not something a generation gets to assert about itself.
-ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore", "quest", "faction")
+ELEMENT_KINDS = (
+    "npc", "monster", "location", "item", "lore", "quest", "faction",
+    # A SCENE AND AN ENCOUNTER ARE THINGS A QUEST CONTAINS. Without them the
+    # annotate pass dropped five candidates from one ambush as "element kind
+    # 'scene' not offered" -- the model reading the prose correctly and being
+    # told it may not say so. They mint as STUBS with no position, which is the
+    # honest shape: an entity is a thing, and where it is played is a separate
+    # decision the running order makes.
+    "scene", "encounter",
+)
+
+#: What each element kind MEANS, for the pass that lists them. The kinds
+#: reached the annotate prompt as a bare row of words -- `scene|encounter` and
+#: nothing about when either applies -- so a passage with a boarding action in
+#: it produced four scenes and no encounter. A name is not a definition.
+#:
+#: Only the two that are easy to confuse are glossed. `npc` and `item` need no
+#: help; a scene and an encounter are both episodes and the difference between
+#: them is whether somebody is fighting.
+ELEMENT_GLOSS = """
+  scene      -- an episode that happens at a point in the adventure
+  encounter  -- an episode that is a FIGHT: name it when the text has one,
+                with the opposition as its own elements beside it
+  faction    -- a group that acts as one: a crew, a clan, a guild
+"""
+
+#: The kinds line the prompts print, built from `ELEMENT_KINDS` rather than
+#: written out beside it. The two had already drifted: the annotate prompt
+#: still offered `npc|monster|location|item|lore` after `quest` and `faction`
+#: joined, so a faction only ever arrived because the model ignored the list it
+#: was given, and a scene was refused for obeying it.
+_KINDS_LINE = "|".join(ELEMENT_KINDS)
 
 SHAPES = {
     "quest": "a quest hook: who gives it, what it asks, what stands in the way, "
@@ -298,7 +329,7 @@ _CLUSTER_RULE = """
 {vocabulary}"""
 
 _CLUSTER_FIELD = """,
-  "elements": [{{"kind": "npc|monster|location|item|lore|quest", "name": "...",
+  "elements": [{{"kind": "{kinds}", "name": "...",
                 "role": "what it is here in one line",
                 "from_canon": [], "invented": ["..."]}}],
   "edges": [{{"source": "...", "target": "...", "rel_type": "LOCATED_IN",
@@ -504,7 +535,9 @@ def build_messages(
                     if cluster
                     else ""
                 ),
-                cluster_field=_CLUSTER_FIELD if cluster else "",
+                cluster_field=(
+                    _CLUSTER_FIELD.format(kinds=_KINDS_LINE) if cluster else ""
+                ),
             )
             + (
                 _REVISE.format(previous=previous.strip(), note=note.strip())
@@ -593,7 +626,34 @@ def parse(
     return data, ""
 
 
-def sift_manifest(data: dict) -> tuple[tuple[dict, ...], tuple[dict, ...], dict]:
+#: Element kinds that are POSITIONS in the running order, mapped onto the
+#: levels the ontology reasons about. The rest -- an npc, an item -- are things
+#: rather than places in a sequence, and nothing contains them in this sense.
+_AS_LEVEL = {"scene": ontology.SCENE, "encounter": ontology.ENCOUNTER}
+
+
+def kind_of(entry: dict) -> str:
+    """The kind an element claims, folded. `""` when it claims none."""
+    return str(entry.get("kind") or "").strip().casefold()
+
+
+def _may_not_contain(parent_kind: str, child_kind: str) -> str:
+    """Why this material may not hold this element, or `""`.
+
+    ONLY BETWEEN TWO EPISODES. A quest is not a level -- it spans an adventure
+    rather than happening at a point in one -- so it may name whatever it
+    involves, and an npc is a thing rather than a position. The question only
+    has an answer when both sides sit in the running order.
+    """
+    parent, child = _AS_LEVEL.get(parent_kind, ""), _AS_LEVEL.get(child_kind, "")
+    if not parent or not child:
+        return ""
+    return ontology.refuse(parent, child)
+
+
+def sift_manifest(
+    data: dict, subject: str = "", material_kind: str = ""
+) -> tuple[tuple[dict, ...], tuple[dict, ...], dict]:
     """Keep the manifest entries that are usable; count the rest by reason.
 
     Returns `(elements, edges, dropped)`. Pure and separate from `parse` so the
@@ -621,6 +681,22 @@ def sift_manifest(data: dict) -> tuple[tuple[dict, ...], tuple[dict, ...], dict]
         kind = str(entry.get("kind") or "").strip().lower()
         if not name:
             drop("element without a name")
+        elif (ontology_refusal := _may_not_contain(material_kind, kind)):
+            # THE ONTOLOGY DECIDES WHICH EPISODE HOLDS WHICH, and it already
+            # had the answer in a sentence. An encounter listed eleven scenes
+            # across four runs -- the siblings it REFERENCES rather than the
+            # things it contains -- and a scene sits inside a section, never
+            # inside a fight.
+            drop(ontology_refusal)
+        elif subject and name.strip().casefold() == subject.strip().casefold():
+            # A THING DOES NOT CONTAIN ITSELF. Asked what The Corsair Ambush
+            # contains, the answer is the crew, the ship and the captain --
+            # not "The Corsair Ambush". Only reachable since `scene` and
+            # `encounter` became element kinds, and the prompt saying so did
+            # not stop it: the model listed the passage as its own first
+            # element on two runs out of two. So the rule is here, where it
+            # holds.
+            drop("the material itself is not one of its parts")
         elif kind not in ELEMENT_KINDS:
             drop(f"element kind {kind!r} not offered")
         elif name.casefold() in names:
@@ -665,6 +741,13 @@ RULES:
    it, and using a thing is not inventing it. List a place, person, creature,
    object or piece of lore only when this text is where it first exists.
 2. Something mentioned once in passing is scenery; leave it out.
+2a. WHAT THE KINDS MEAN, where two of them are easy to confuse:
+{kind_gloss}
+2b. THE MATERIAL IS NOT ONE OF THE THINGS IT CONTAINS. Do not list the passage
+   itself. Asked what The Corsair Ambush contains, the answer is the crew, the
+   ship and the captain -- not "The Corsair Ambush". It became possible to get
+   this wrong the moment `scene` and `encounter` were offered as kinds, and a
+   thing cannot contain itself.
 3. Use the names exactly as the text writes them.
 4. For each thing, say what in it leans on the CANON passages below (citing
    one, like [1]) and what was invented. A new innkeeper standing in the
@@ -678,7 +761,7 @@ RULES:
 
 Return ONLY JSON:
 
-{{"elements": [{{"kind": "npc|monster|location|item|lore", "name": "...",
+{{"elements": [{{"kind": "{kinds}", "name": "...",
                 "role": "what it is here, in one line",
                 "from_canon": [{{"claim": "...", "cite": "[1]"}}],
                 "invented": ["..."]}}],
@@ -852,6 +935,12 @@ async def annotate(
     retrieval: Retrieval,
     depth: canon_context.Depth,
     model: str,
+    #: What the material IS, so it cannot be listed among the things it
+    #: contains. Optional because a caller that does not know it is no worse
+    #: off than before this existed.
+    subject: str = "",
+    #: Its KIND, so the ontology can refuse an episode that may not sit in it.
+    kind: str = "",
     temperature: float = 0.0,
     seed: int | None = None,
 ) -> tuple[tuple[dict, ...], tuple[dict, ...], dict, str]:
@@ -875,7 +964,8 @@ async def annotate(
     shown = canon_context.apply(retrieval, depth)
     sources = canon_context.render(shown, max_edges=depth.max_edges)
     prompt = _ANNOTATE.format(
-        body=body, vocabulary=vocabulary_gloss(), sources=sources
+        body=body, vocabulary=vocabulary_gloss(), sources=sources,
+        kinds=_KINDS_LINE, kind_gloss=ELEMENT_GLOSS,
     )
     response = await client.chat.completions.create(
         model=model,
@@ -888,7 +978,7 @@ async def annotate(
     data, error = parse_manifest(text)
     if error:
         return (), (), {}, error
-    elements, edges, dropped = sift_manifest(data)
+    elements, edges, dropped = sift_manifest(data, subject, material_kind=kind)
     return elements, edges, dropped, ""
 
 
@@ -955,7 +1045,9 @@ async def generate(
     data, error = parse(
         text, expect_context=not carried.empty, expect_cluster=cluster
     )
-    elements, edges, manifest_dropped = sift_manifest(data) if cluster else ((), (), {})
+    elements, edges, manifest_dropped = (
+        sift_manifest(data, subject, material_kind=kind) if cluster else ((), (), {})
+    )
 
     shown = canon_context.apply(retrieval, depth)
     cites = canon_context.sources(shown)

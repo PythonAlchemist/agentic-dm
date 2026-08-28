@@ -493,6 +493,7 @@ export const labAPI = {
   findElements(
     body: string,
     subject: string,
+    kind: string,
     book: string,
     campaign: string | null,
     model: string,
@@ -501,7 +502,7 @@ export const labAPI = {
       elements: GeneratedReply['elements']
       edges: GeneratedReply['edges']
       dropped: Record<string, number>
-    }>('/find-elements', { body, subject, book, campaign, model })
+    }>('/find-elements', { body, subject, kind, book, campaign, model })
   },
 
   /** Say no to a guess, so it stays said. Deleting one only removes it until
