@@ -55,8 +55,10 @@ same one, by never offering a FACTION in the same block as anything else.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 
+from backend.canon.assembler import slugify
 from backend.core.database import neo4j_session, read_only_session
 from backend.graph.schema import LAYER_MAP, RelationshipType
 
@@ -82,6 +84,36 @@ ORDER BY sec.id
 """
 
 
+def names_present(text: str, surfaces: list[str], kept: list[str]) -> tuple[bool, bool]:
+    """Which side's names this text actually uses, longest name winning.
+
+    LONGEST MATCH FIRST, because a plain substring test makes a short name
+    match inside a long one. `Xeluan` is contained in `Order of Xeluan` and in
+    `Shard of Xeluan`, so splitting the giant out of his own order claimed all
+    twenty of the order's sections -- including the ones that only ever write
+    the order's name. Both sides are matched against ONE scan of the text with
+    the longer name taking the position, so a name is only credited where no
+    longer name already covers it.
+    """
+    ordered = sorted(
+        [(s, True) for s in surfaces] + [(k, False) for k in kept],
+        key=lambda pair: -len(pair[0]),
+    )
+    if not ordered:
+        return False, False
+    lookup = {s.casefold(): mine for s, mine in ordered}
+    pattern = re.compile(
+        "|".join(re.escape(s) for s, _ in ordered), re.IGNORECASE
+    )
+    mine = theirs = False
+    for match in pattern.finditer(text or ""):
+        if lookup.get(match.group(0).casefold(), False):
+            mine = True
+        else:
+            theirs = True
+    return mine, theirs
+
+
 def plan(rows: list[dict], surfaces: list[str], kept: list[str]) -> dict:
     """Which sections name the thing being split out, which name what is left.
 
@@ -91,9 +123,7 @@ def plan(rows: list[dict], surfaces: list[str], kept: list[str]) -> dict:
     """
     out: dict[str, list[dict]] = {"moves": [], "stays": [], "both": [], "neither": []}
     for row in rows:
-        text = row["text"] or ""
-        mine = any(s in text for s in surfaces)
-        theirs = any(s in text for s in kept)
+        mine, theirs = names_present(row["text"] or "", surfaces, kept)
         key = ("both" if mine and theirs
                else "moves" if mine
                else "stays" if theirs else "neither")
@@ -223,8 +253,10 @@ def main() -> None:
         except ValueError:
             sys.exit(f"{rel} is not a relationship this graph writes")
     if not args.new_id:
-        slug = "-".join(w for w in args.name.casefold().split() if w)
-        args.new_id = args.source.rsplit(":", 1)[0] + ":" + slug
+        # THE BOOK'S OWN SLUGIFY, not a local one. Splitting on whitespace left
+        # the apostrophe in `wylie-van-timmel's-lyre`, which is an id no other
+        # part of this graph could have minted.
+        args.new_id = args.source.rsplit(":", 1)[0] + ":" + slugify(args.name)
     surfaces = args.aliases or [args.name]
 
     with read_only_session() as session:

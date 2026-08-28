@@ -6,7 +6,7 @@ part that decides WHICH sections move, which is where the interesting mistake
 is available.
 """
 
-from backend.scripts.split_entity import plan
+from backend.scripts.split_entity import names_present, plan
 
 
 def _row(index: int, text: str) -> dict:
@@ -69,3 +69,40 @@ class TestDecidingWhichSectionsMove:
         row = _row(3, "")
         row["text"] = None
         assert plan([row], SURFACES, KEPT)["neither"] == [row]
+
+
+class TestALongNameBeatsAShortOneInsideIt:
+    """A plain substring test makes a short name match inside a long one.
+    `Xeluan` is contained in `Order of Xeluan` and in `Shard of Xeluan`, so
+    splitting the giant out of his own order claimed all twenty of the order's
+    sections -- including the five that only ever write the order's name."""
+
+    SURFACES = ["Xeluan"]
+    KEPT = ["Order of Xeluan", "Shard of Xeluan"]
+
+    def test_the_order_alone_is_not_the_giant(self):
+        assert names_present(
+            "The Order of Xeluan keeps the tomb.", self.SURFACES, self.KEPT
+        ) == (False, True)
+
+    def test_the_giant_alone_is_not_the_order(self):
+        assert names_present(
+            "Xeluan pledged his life.", self.SURFACES, self.KEPT
+        ) == (True, False)
+
+    def test_a_text_using_both_credits_both(self):
+        assert names_present(
+            "Xeluan founded it; the Order of Xeluan remains.", self.SURFACES, self.KEPT
+        ) == (True, True)
+
+    def test_the_shard_does_not_make_the_giant_present(self):
+        """Two different long names both contain the short one."""
+        assert names_present(
+            "The Shard of Xeluan is obsidian.", self.SURFACES, self.KEPT
+        ) == (False, True)
+
+    def test_neither_is_neither(self):
+        assert names_present("A quiet tomb.", self.SURFACES, self.KEPT) == (False, False)
+
+    def test_case_does_not_decide_it(self):
+        assert names_present("xeluan walked.", self.SURFACES, self.KEPT) == (True, False)
