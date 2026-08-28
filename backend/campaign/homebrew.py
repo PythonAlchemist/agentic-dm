@@ -55,6 +55,7 @@ from backend.graph.schema import (
     IN_SECTION,
     LAYER_MAP,
     REFERS_TO,
+    EntityType,
     RelationshipType,
 )
 
@@ -80,6 +81,10 @@ LABELS = {
     "location": "LOCATION",
     "item": "ITEM",
     "lore": "LORE",
+    # A CREW IS NOT A PERSON. Without this every group was minted NPC, and
+    # `MEMBER_OF` -- which the type table says needs a FACTION target -- could
+    # never be written about campaign material at all.
+    "faction": "FACTION",
 }
 
 #: A homebrew section cites the canon it was built on.
@@ -859,6 +864,10 @@ def _anchor_chapter(tx, slug: str, section_id: str) -> str:
     return (dict(row)["chapter"] or "") if row else ""
 
 
+#: The labels the constraint table has an opinion about, so a node wearing
+#: something else is checked as `LORE` rather than crashing the lookup.
+_ENTITY_TYPES = frozenset(member.value for member in EntityType)
+
 PROPOSED = "proposed"
 
 #: What a model calls a relationship, and the one this graph writes instead.
@@ -910,23 +919,40 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
     title besides -- which is the whole reason "points at itself" had to exist
     as a drop reason.
     """
-    named = {
-        row["name"].casefold(): row["id"]
-        for row in tx.run(
-            f"""
-            MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$s}})
-            WHERE m.{SCANNED} = true
-            MATCH (m)-[:{REFERS_TO}]->(e:Entity)
-            RETURN DISTINCT e.id AS id, e.name AS name
-            """,
-            {"s": section_id},
+    from backend.canon.constraints import report_edges
+    from backend.canon.models import CandidateEdge, CandidateNode
+
+    named = {}
+    kinds = {}
+    for row in tx.run(
+        f"""
+        MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$s}})
+        WHERE m.{SCANNED} = true
+        MATCH (m)-[:{REFERS_TO}]->(e:Entity)
+        RETURN DISTINCT e.id AS id, e.name AS name,
+               [l IN labels(e) WHERE l <> 'Entity'] AS labels
+        """,
+        {"s": section_id},
+    ):
+        key = row["name"].casefold()
+        named[key] = row["id"]
+        # THE FIRST LABEL THE TYPE TABLE KNOWS. A node can wear several -- a
+        # merge left `Absolution Council` both NPC and FACTION -- and the
+        # constraint table is keyed on one, so the first it recognises is the
+        # one it is checked as.
+        kinds[key] = next(
+            (label for label in row["labels"] if label in _ENTITY_TYPES), "LORE"
         )
-    }
     written, already, dropped = 0, 0, {}
 
     def drop(reason: str) -> None:
         dropped[reason] = dropped.get(reason, 0) + 1
 
+    # RESOLVED FIRST, CHECKED SECOND. The endpoint types have to be settled
+    # before the type table can be asked anything, and a synonym has to be
+    # mapped before it is checked -- `LEADS` is not in the table at all, and
+    # what the table has an opinion about is the `MEMBER_OF` it becomes.
+    resolved: list[tuple[str, str, RelationshipType, dict]] = []
     for edge in edges or ():
         source = str(edge.get("source") or "").strip().casefold()
         target = str(edge.get("target") or "").strip().casefold()
@@ -946,6 +972,39 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
             except ValueError:
                 drop(f"{rel or '(none)'} is not a relationship this graph writes")
                 continue
+        resolved.append((source, target, relationship, extra))
+
+    # THE SAME TYPE CHECK CANON RUNS, and the reason this exists: this was the
+    # one edge writer that skipped it. `report_edges` reads
+    # `RELATIONSHIP_DOMAIN_RANGE`, so a read-back edge has to satisfy exactly
+    # what an extracted one does -- there is one table and one answer to "can
+    # an NPC be a MEMBER_OF another NPC", not a second, laxer one for prose a
+    # DM wrote.
+    #
+    # `LEADS` FOUND IT. Mapping that onto `MEMBER_OF` wrote Captain Saltmarrow
+    # MEMBER_OF Corsair Skirmisher -- a captain belonging to one kind of
+    # fighter -- because nothing here asked whether the target was a group.
+    # The table says it must be a FACTION, and always did.
+    nodes = [
+        CandidateNode(name=name, entity_type=kinds[name]) for name in sorted(named)
+    ]
+    candidates = [
+        CandidateEdge(source_name=s, target_name=t_, rel_type=rel.value)
+        for s, t_, rel, _ in resolved
+    ]
+    refused = set()
+    for violation in report_edges(nodes, candidates).violations:
+        refused.add(violation.edge_index)
+        # NAMED, not counted as one lump, and reversal called out separately:
+        # `plan_edges` measured four of twenty-two declared edges as real
+        # relationships pointing the wrong way, which is a different thing to
+        # know than "6 dropped".
+        turned = " (it would pass reversed)" if violation.reversal_would_pass else ""
+        drop(f"{violation.rel_type}: {violation.reason}{turned}")
+
+    for index, (source, target, relationship, extra) in enumerate(resolved):
+        if index in refused:
+            continue
         layer = LAYER_MAP.get(relationship)
         # `r.status IS NULL` IS THE CREATION TEST. MERGE is idempotent and says
         # nothing about which branch it took, so the ON CREATE clause is also

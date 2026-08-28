@@ -1081,8 +1081,10 @@ class TestRelationshipsReadBackOutOfTheProse:
         return stored.section_id
 
     def test_an_edge_between_two_things_it_names_is_written(self, table):
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="location", title="Pytest Sloop", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         result = table.execute_write(
@@ -1098,8 +1100,10 @@ class TestRelationshipsReadBackOutOfTheProse:
         """The DM asserting a relationship and a model guessing one from their
         sentences are different claims. The second is dimmed and labelled
         rather than mixed in with the first."""
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="location", title="Pytest Sloop", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         table.execute_write(
@@ -1119,8 +1123,10 @@ class TestRelationshipsReadBackOutOfTheProse:
         """A re-read is the NORMAL case -- an edit, a second pass, a backfill
         re-run -- and MERGE is idempotent. Counting every merge as a write
         reported three new relationships on a graph that gained none."""
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="location", title="Pytest Sloop", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         edges = [{"source": "Pytest Skipper", "target": "Pytest Sloop", "rel_type": "OWNS"}]
@@ -1138,8 +1144,10 @@ class TestRelationshipsReadBackOutOfTheProse:
     def test_a_re_read_does_not_demote_an_edge_the_dm_approved(self, table):
         """The DM accepting a card writes `authored`. A model re-reading the
         same prose must not quietly turn that assertion back into a guess."""
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Sloop", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="location", title="Pytest Sloop", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper sails the Pytest Sloop.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         table.run(
@@ -1166,8 +1174,10 @@ class TestRelationshipsReadBackOutOfTheProse:
         cannot ground a relationship read back OUT of the prose, because the
         model cannot see her there. The Corsair Ambush offered up two cast
         members its text never names."""
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Stowaway", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Stowaway", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper stands the watch alone.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         # Declared, exactly as `write_cluster` writes it: no `scanned` flag.
@@ -1208,8 +1218,10 @@ class TestRelationshipsReadBackOutOfTheProse:
         commands the Corsair Crew" is the natural reading of the prose and
         there was no leadership type to put it in. MEMBER_OF already carries
         the structural fact, and rank is a property of the membership."""
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Deckhands", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="faction", title="Pytest Deckhands", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper leads the Pytest Deckhands.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         result = table.execute_write(
@@ -1229,8 +1241,10 @@ class TestRelationshipsReadBackOutOfTheProse:
     def test_a_synonym_does_not_overwrite_a_rank_the_dm_set(self, table):
         """Same rule as the status: a re-read may fill in what is missing and
         may not restate what the DM already decided."""
-        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
-        _store(table, anchor=None, title="Pytest Deckhands", body="a", generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="faction", title="Pytest Deckhands", body="a",
+               generated_body="a")
         section = self._scene(table, "Pytest Skipper leads the Pytest Deckhands.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
         table.run(
@@ -1250,6 +1264,30 @@ class TestRelationshipsReadBackOutOfTheProse:
             "(:Entity {name:'Pytest Deckhands'}) RETURN r.role AS role"
         ).single()["role"]
         assert role == "quartermaster"
+
+    def test_an_edge_the_type_table_forbids_is_refused_by_name(self, table):
+        """THE SAME CHECK CANON RUNS, and this was the one edge writer that
+        skipped it. `MEMBER_OF` says B is the group, so a captain cannot belong
+        to another person -- and mapping `LEADS` onto it wrote exactly that:
+        Captain Saltmarrow MEMBER_OF Corsair Skirmisher, a captain belonging to
+        one kind of fighter."""
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="npc", title="Pytest Bosun", body="a",
+               generated_body="a")
+        section = self._scene(table, "Pytest Skipper leads Pytest Bosun.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        result = table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Bosun",
+                        "rel_type": "LEADS"}],
+            )
+        )
+        assert result["written"] == 0
+        # Named, not counted as one lump: which rule refused it is the thing
+        # worth knowing.
+        assert any("MEMBER_OF" in reason for reason in result["dropped"]), result
 
     def test_a_relationship_the_graph_does_not_write_is_refused(self, table):
         section = self._scene(table, "Pytest Read Back happens.")

@@ -59,7 +59,7 @@ KINDS = ("quest", "npc", "monster", "scene", "encounter")
 #: `scene` IS STILL NOT HERE. A scene inside a scene is a structural claim
 #: about the running order, and the running order is a linked list a DM
 #: arranges -- not something a generation gets to assert about itself.
-ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore", "quest")
+ELEMENT_KINDS = ("npc", "monster", "location", "item", "lore", "quest", "faction")
 
 SHAPES = {
     "quest": "a quest hook: who gives it, what it asks, what stands in the way, "
@@ -104,6 +104,13 @@ SHAPES = {
             "what carrying it costs or risks",
     "lore": "a piece of lore: what is believed, who tells it, how much of it "
             "is true, and what it explains about the world",
+    # ADDED BECAUSE A GROUP HAD NOWHERE TO GO. Every crew, clan and guild a
+    # generation named was minted `npc`, being the closest thing on offer --
+    # and the type table says `A MEMBER_OF B` needs B to be a FACTION, so no
+    # campaign group could ever be one. "Captain Saltmarrow leads the Corsair
+    # Crew" had no writable form at all.
+    "faction": "a group that acts as one: who belongs to it, what it wants, "
+               "who leads it, and how it treats outsiders",
 }
 
 #: RULE 4 IS THERE BECAUSE PROSE THAT NAMES NOTHING CONNECTS TO NOTHING.
