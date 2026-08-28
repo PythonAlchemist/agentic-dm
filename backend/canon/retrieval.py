@@ -793,6 +793,9 @@ class CanonRetriever:
         #: crash waiting for the first campaign session.
         self._focus = ""
         self.campaign = campaign
+        #: Whether this book's chapters are unrelated, read once on demand.
+        self._is_anthology: bool | None = None
+        self._book_wide: frozenset[str] = frozenset()
         self._title: str | None = None
 
     def retrieve(
@@ -1262,6 +1265,32 @@ class CanonRetriever:
         # withholding `strahd` from it would just make it a worse search.
         text_terms = content_terms(question)
         text_passages = self._text_passages(session, text_terms, limit)
+        # IN AN ANTHOLOGY, A KEYWORD HIT IN ANOTHER HEIST IS NOISE. The graph
+        # path already obeys the anthology rule; Lucene does not, and it reads
+        # the whole book. Asked for the cultist Elra's party caught -- a
+        # question whose every graph passage was Reach for the Stars -- the
+        # word "names" pulled `True Names` out of Affair on the Concordant
+        # Express, and the model cited it for a claim that section does not
+        # make. A false citation is the one failure this project promises
+        # cannot happen, and the passage should never have been offered.
+        #
+        # ONLY WHERE THE BOOK SAYS ITS CHAPTERS ARE UNRELATED, and only when a
+        # name resolved. Curse of Strahd is one story: a question about Barovia
+        # is legitimately answered three chapters away, and narrowing there
+        # would be inventing a boundary the book does not have. With nothing
+        # anchored there is no adventure to be inside, and the text path is the
+        # only path -- narrowing it then would answer fewer questions, not
+        # fewer wrong ones.
+        if anchors and self._anthology() and (home := home_chapters_of(
+            list(self._rows(session, MENTIONS, {"ids": ids})), ids
+        )):
+            # THE FRONT MATTER STAYS REACHABLE. It is about running any of the
+            # thirteen rather than being one of them, and "what do I need on
+            # the table" is answered there -- from a question whose only anchor
+            # was the word `table`, resolving to a literal table in whichever
+            # heist happened to own one.
+            allowed = home | self._book_wide_chapters()
+            text_passages = [p for p in text_passages if p.chapter in allowed]
         kept = combine_passages(passages, text_passages, limit)
 
         edges = dedupe_edges(self._rows(session, EDGES, {"ids": ids}))
@@ -1291,6 +1320,30 @@ class CanonRetriever:
             terms=tuple(text_terms),
             miss_reason="" if kept else "anchored, but no section mentions the anchors",
         )
+
+    def _anthology(self) -> bool:
+        """Does this book say its chapters are unrelated?
+
+        Read from the book's own scheme rather than guessed from the slug, and
+        cached on the instance because a retriever answers many questions and
+        the answer cannot change under it.
+        """
+        if self._is_anthology is None:
+            from backend.canon.books import SEEDS
+            from backend.canon.books import load as load_book
+
+            try:
+                scheme = load_book(SEEDS / f"{self.book}.yaml")
+                self._is_anthology = scheme.anthology
+                self._book_wide = scheme.book_wide_chapters
+            except Exception:  # noqa: BLE001 - a missing scheme is not an anthology
+                self._is_anthology = False
+        return self._is_anthology
+
+    def _book_wide_chapters(self) -> frozenset[str]:
+        """Chapters this book holds in common, never confined to one adventure."""
+        self._anthology()
+        return self._book_wide or frozenset()
 
     def _text_passages(self, session, terms: list[str], limit: int) -> list[Passage]:
         """The prose search itself, with no opinion about why it was called.

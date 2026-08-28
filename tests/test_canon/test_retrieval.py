@@ -1024,3 +1024,38 @@ class TestWhichChapterAnAnchorBelongsTo:
         """A resolved name with no mentions among the candidate rows. Silent,
         not an exception: it simply has no chapter to offer."""
         assert home_chapters_of([], ["cos:never-said"]) == set()
+
+
+class TestAKeywordHitInAnotherHeistIsNoise:
+    """The graph path obeys the anthology rule; Lucene reads the whole book.
+    Asked for the cultist Elra's party caught -- a question whose every graph
+    passage was Reach for the Stars -- the word "names" pulled `True Names`
+    out of Affair on the Concordant Express, and the model cited it for a
+    claim that section does not make."""
+
+    def test_an_anthology_keeps_the_text_path_in_its_own_adventure(self):
+        from backend.canon.books import SEEDS
+        from backend.canon.books import load as load_book
+
+        assert load_book(SEEDS / "kftgv.yaml").anthology
+
+    def test_a_campaign_does_not_narrow(self):
+        """Curse of Strahd is one story: a question about Barovia is
+        legitimately answered three chapters away, and narrowing there would
+        invent a boundary the book does not have."""
+        from backend.canon.books import SEEDS
+        from backend.canon.books import load as load_book
+
+        assert not load_book(SEEDS / "cos.yaml").anthology
+
+    def test_the_front_matter_stays_reachable_from_any_adventure(self):
+        """"What do I need on the table to run these adventures" is answered
+        in the introduction and nowhere else -- from a question whose only
+        anchor was the word `table`, resolving to a literal table in whichever
+        heist happened to own one. Confining the text path to that heist lost
+        the answer entirely."""
+        from backend.canon.books import SEEDS
+        from backend.canon.books import load as load_book
+
+        scheme = load_book(SEEDS / "kftgv.yaml")
+        assert "introduction-a-collection-of-heists" in scheme.book_wide_chapters

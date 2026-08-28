@@ -14,6 +14,12 @@ structural_headings: structural-headings-kftgv.yaml
 # The Golden Vault is the organisation that commissions every heist -- named 88
 # times across the 14 harvested chapters and the only thing connecting them.
 # Without this line it would be thirteen separate organisations.
+# THE FRONT MATTER IS ABOUT RUNNING ANY OF THEM, so it is not one of the
+# thirteen and retrieval may reach it from inside any. "What do I need on the
+# table to run these adventures" is answered here and nowhere else.
+book_wide_chapters:
+  - introduction-a-collection-of-heists
+
 global_names:
   - The Golden Vault
 

@@ -54,6 +54,16 @@ class BookScheme:
     anthology: bool = False
     #: Names that stay book-wide even in an anthology, folded for comparison.
     global_names: frozenset[str] = field(default_factory=frozenset)
+    #: Chapters that belong to the whole book rather than to one adventure --
+    #: front matter, which is about running any of them.
+    #:
+    #: An anthology's chapters are unrelated, so a keyword hit in another
+    #: heist is noise and retrieval keeps the text path inside the adventure a
+    #: question anchored in. The introduction is the exception that rule needs:
+    #: "what do I need on the table to run these adventures" is answered there
+    #: and nowhere else, and confining it to whichever heist the word `table`
+    #: happened to resolve in loses the answer entirely.
+    book_wide_chapters: frozenset[str] = field(default_factory=frozenset)
     #: This book's structural-heading seed, by filename inside the seeds
     #: directory. Per book because books organise themselves differently:
     #: nothing in Barovia heads `Planning the Heist` and nothing in the heist
@@ -137,6 +147,7 @@ def load(path: Path) -> BookScheme:
         prefix=raw["prefix"],
         title=raw.get("title", ""),
         anthology=bool(raw.get("anthology", False)),
+        book_wide_chapters=frozenset(raw.get("book_wide_chapters") or ()),
         global_names=frozenset(raw.get("global_names", [])),
         structural_headings=raw.get(
             "structural_headings", "structural-headings.yaml"

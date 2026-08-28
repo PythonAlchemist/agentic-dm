@@ -379,12 +379,31 @@ def delete(tx, *, slug: str, entity_id: str, log_path: Path | None = None) -> di
 
     The exact inverse of `write`, and possible only because canon was never
     mutated: everything this removes was created by that.
+
+    ITS CLAIMS GO WITH IT. Deleting the entities a scene minted used to leave
+    behind the edges it wrote between two entities it did NOT mint: an edge
+    joining two CANON nodes has no minted endpoint to be deleted alongside, so
+    it outlived the prose that asserted it. Discarding a draft about Elra left
+    the book holding `Elra Lionheart THREATENS Markos Delphi` from material
+    that no longer exists, and a few generate-and-discard cycles would silt
+    canon up with assertions nothing stands behind.
     """
     section_id = tx.run(
         f"MATCH (s:Section)-[:{DESCRIBES}]->(:Entity {{id:$id}}) RETURN s.id AS id",
         {"id": entity_id},
     ).single()
     section_id = dict(section_id)["id"] if section_id else ""
+
+    asserted = 0
+    if section_id:
+        asserted = tx.run(
+            """
+            MATCH (:Entity)-[r]->(:Entity)
+            WHERE r.from_section = $section AND r.campaign = $slug
+            DELETE r RETURN count(r) AS n
+            """,
+            {"section": section_id, "slug": slug},
+        ).single()["n"]
 
     spliced = 0
     if section_id:
@@ -441,7 +460,14 @@ def delete(tx, *, slug: str, entity_id: str, log_path: Path | None = None) -> di
             "MATCH (s:Section {id:$id, plane:$plane}) DETACH DELETE s",
             {"id": section_id, "plane": CAMPAIGN_PLANE},
         )
-    return {"entity": removed, "section": 1 if section_id else 0, "chain_changes": spliced}
+    return {
+        "entity": removed,
+        "section": 1 if section_id else 0,
+        "chain_changes": spliced,
+        # COUNTED, because an edge silently outliving its prose is exactly the
+        # shape of thing this reports rather than hides.
+        "asserted_edges": asserted,
+    }
 
 
 def write_cluster(
@@ -671,7 +697,12 @@ def write_cluster(
             MATCH (a:Entity {{id:$a}}), (b:Entity {{id:$b}})
             MERGE (a)-[r:{relationship.value}]->(b)
             SET r.plane = $plane, r.campaign = $slug, r.status = $status,
-                r.layer = $layer
+                r.layer = $layer,
+                // WHICH PROSE SAID SO, for the reason `derive_edges` records
+                // it: an edge joining two entities this cluster did not mint
+                // has no minted endpoint to be deleted alongside, and would
+                // outlive the scene that asserted it.
+                r.from_section = $section
             """,
             {
                 "a": by_name[source.casefold()],
@@ -679,6 +710,7 @@ def write_cluster(
                 "plane": CAMPAIGN_PLANE,
                 "slug": plan.campaign,
                 "status": AUTHORED,
+                "section": root.section_id,
                 "layer": layer.value if layer else "",
             },
         )
@@ -1126,7 +1158,14 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
             SET r.plane = coalesce(r.plane, $plane),
                 r.campaign = coalesce(r.campaign, $slug),
                 r.status = coalesce(r.status, $status),
-                r.layer = coalesce(r.layer, $layer)
+                r.layer = coalesce(r.layer, $layer),
+                // WHICH PROSE SAID SO, so deleting that prose can take its
+                // claims with it. An edge between two CANON entities has no
+                // minted endpoint to be deleted alongside, so it outlived the
+                // scene that asserted it: discard a draft about Elra and the
+                // book was left holding `Elra Lionheart THREATENS Markos
+                // Delphi` from material that no longer exists.
+                r.from_section = coalesce(r.from_section, $section)
             // ON CREATE ONLY, like the rest: a synonym's shading must not
             // overwrite a role the DM set by hand on an edge they authored.
             // A `WHERE made` here would filter the row away and leave the
@@ -1136,7 +1175,7 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
             """,
             {
                 "a": named[source], "b": named[target], "plane": CAMPAIGN_PLANE,
-                "slug": slug, "status": PROPOSED,
+                "slug": slug, "status": PROPOSED, "section": section_id,
                 "layer": layer.value if layer else "", "extra": extra,
             },
         ).single()["made"]

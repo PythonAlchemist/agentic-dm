@@ -1069,6 +1069,64 @@ class TestSomethingTheCampaignAlreadyHoldsStaysInTheCluster:
         assert named >= 1, "the involvement is recorded even though nothing was minted"
 
 
+class TestAClaimDoesNotOutliveTheProseThatMadeIt:
+    """Deleting the entities a scene minted left behind the edges it wrote
+    between two entities it did NOT mint. An edge joining two canon nodes has
+    no minted endpoint to be deleted alongside, so discarding a draft about
+    Elra left the book holding `Elra Lionheart THREATENS Markos Delphi` from
+    material that no longer exists."""
+
+    def test_an_edge_between_two_canon_nodes_goes_with_its_section(self, table):
+        stored = _store(table, anchor=None, title="Pytest Claim Scene",
+                        body="Pytest Sea Battle names two of the book's own.",
+                        generated_body="x")
+        # Two entities this scene did not mint, joined by an edge it asserted.
+        table.run(
+            "CREATE (:Entity {id:'pytest:one', name:'Pytest One', plane:'canon'}) "
+            "CREATE (:Entity {id:'pytest:two', name:'Pytest Two', plane:'canon'})"
+        )
+        table.run(
+            "MATCH (a:Entity {id:'pytest:one'}), (b:Entity {id:'pytest:two'}) "
+            "CREATE (a)-[:KNOWS {plane:'campaign', campaign:$c, status:'proposed', "
+            "from_section:$s}]->(b)",
+            {"c": SLUG, "s": stored.section_id},
+        )
+        result = table.execute_write(
+            lambda tx: homebrew.delete(tx, slug=SLUG, entity_id=stored.entity_id)
+        )
+        assert result["asserted_edges"] == 1
+        left = table.run(
+            "MATCH (:Entity {id:'pytest:one'})-[r:KNOWS]->() RETURN count(r) AS n"
+        ).single()["n"]
+        assert left == 0, "the claim went with the prose"
+        table.run("MATCH (e:Entity) WHERE e.id STARTS WITH 'pytest:' DETACH DELETE e")
+
+    def test_an_edge_from_other_prose_is_left_alone(self, table):
+        """Only what THIS section asserted. A claim another scene made about
+        the same pair is that scene's to keep."""
+        stored = _store(table, anchor=None, title="Pytest Claim Scene",
+                        body="a", generated_body="a")
+        table.run(
+            "CREATE (:Entity {id:'pytest:one', name:'Pytest One', plane:'canon'}) "
+            "CREATE (:Entity {id:'pytest:two', name:'Pytest Two', plane:'canon'})"
+        )
+        table.run(
+            "MATCH (a:Entity {id:'pytest:one'}), (b:Entity {id:'pytest:two'}) "
+            "CREATE (a)-[:KNOWS {plane:'campaign', campaign:$c, status:'proposed', "
+            "from_section:'hb:somewhere-else#0'}]->(b)",
+            {"c": SLUG},
+        )
+        result = table.execute_write(
+            lambda tx: homebrew.delete(tx, slug=SLUG, entity_id=stored.entity_id)
+        )
+        assert result["asserted_edges"] == 0
+        left = table.run(
+            "MATCH (:Entity {id:'pytest:one'})-[r:KNOWS]->() RETURN count(r) AS n"
+        ).single()["n"]
+        assert left == 1
+        table.run("MATCH (e:Entity) WHERE e.id STARTS WITH 'pytest:' DETACH DELETE e")
+
+
 class TestSayingNoToAGuessAndHavingItStay:
     """Deleting a proposed edge never meant no. `derive_edges` reads the prose
     again and proposes the same thing again, so a guess the DM threw out came
