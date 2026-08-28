@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for ingesting a sourcebook PDF into canon text and ChromaDB."""
+"""CLI for transcribing a sourcebook PDF into canon chapter text."""
 
 import argparse
 import asyncio
@@ -11,11 +11,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from backend.canon.assembler import assemble_chapters
 from backend.canon.cache import TranscriptCache
-from backend.canon.ingest import clear_book_chunks, ingest_chapters
 from backend.canon.page_extractor import PageExtractor
 from backend.canon.transcriber import PageTranscriber
 from backend.core.config import settings
-from backend.ingestion.embeddings import EmbeddingPipeline
 
 # gpt-4o rates, USD per 1M tokens
 INPUT_RATE = 2.50
@@ -63,7 +61,6 @@ async def run(
     book_slug: str,
     pages: range | None,
     concurrency: int,
-    skip_embed: bool,
 ) -> dict:
     """Run stages 0-3 and return a summary."""
     extractor = PageExtractor(pdf_path)
@@ -105,20 +102,10 @@ async def run(
         for chapter in chapters:
             print(f"  p{chapter.start_page}-{chapter.end_page}  {chapter.title}")
 
-        stored: list[str] = []
-        if not skip_embed:
-            pipeline = EmbeddingPipeline()
-            removed = await clear_book_chunks(book_slug, pipeline=pipeline)
-            if removed:
-                print(f"Cleared {removed} stale chunks for {book_slug}")
-            stored = await ingest_chapters(chapters, book_slug=book_slug, pipeline=pipeline)
-            print(f"Embedded {len(stored)} chunks into ChromaDB")
-
         return {
             "pages": len(page_images),
             "failed_pages": failed,
             "chapters": len(chapters),
-            "chunks": len(stored),
             "usd": actual_usd,
         }
     finally:
@@ -127,7 +114,7 @@ async def run(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Ingest a sourcebook PDF into canon text and ChromaDB"
+        description="Transcribe a sourcebook PDF into canon chapter text"
     )
     parser.add_argument("pdf", type=Path, help="Path to the source PDF")
     parser.add_argument(
@@ -141,11 +128,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--estimate", action="store_true", help="Print a cost estimate and exit"
-    )
-    parser.add_argument(
-        "--skip-embed",
-        action="store_true",
-        help="Transcribe and assemble only; do not write to ChromaDB",
     )
     args = parser.parse_args()
 
@@ -174,7 +156,6 @@ def main() -> None:
             book_slug=args.book_slug,
             pages=pages,
             concurrency=args.concurrency,
-            skip_embed=args.skip_embed,
         )
     )
     sys.exit(1 if summary["failed_pages"] else 0)

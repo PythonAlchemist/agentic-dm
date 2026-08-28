@@ -52,19 +52,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ChromaDB Vector Database (optional - can use embedded)
-  # Uncomment if you want to run ChromaDB as a separate service
-  # chroma:
-  #   image: chromadb/chroma:latest
-  #   container_name: dnd-chroma
-  #   ports:
-  #     - "8001:8000"
-  #   volumes:
-  #     - chroma_data:/chroma/chroma
-  #   environment:
-  #     - ANONYMIZED_TELEMETRY=false
-
 volumes:
   neo4j_data:
   neo4j_logs:
-  # chroma_data:

@@ -68,9 +68,6 @@ def client(monkeypatch):
     """A lab whose graph and model are both fakes."""
     lab._SESSIONS.clear()
 
-    monkeypatch.setattr(
-        "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
-    )
     fake_retriever = lambda **kw: SimpleNamespace(  # noqa: E731
         book=kw.get("book", "cos"),
         campaign=kw.get("campaign"),

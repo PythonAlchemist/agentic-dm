@@ -346,7 +346,7 @@ async def _answer(
         canon=CanonRetriever(book=book),
     )
     response = await agent.process_message(
-        user_input=question, use_rag=False, use_canon=True
+        user_input=question, use_canon=True
     )
     return response.message, response.cost
 

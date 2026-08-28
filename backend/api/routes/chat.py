@@ -73,7 +73,6 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     campaign_id: Optional[str] = None
-    use_rag: bool = True
 
 
 class ChatResponse(BaseModel):
@@ -152,7 +151,6 @@ async def chat(request: ChatRequest) -> ChatResponse:
         # Process the message
         result: DMResponse = await agent.process_message(
             user_input=request.message,
-            use_rag=request.use_rag,
         )
 
         return ChatResponse(
@@ -308,12 +306,10 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
             # Receive message
             data = await websocket.receive_json()
             message = data.get("message", "")
-            use_rag = data.get("use_rag", True)
 
             # Process message
             result = await agent.process_message(
                 user_input=message,
-                use_rag=use_rag,
             )
 
             # Send response

@@ -11,11 +11,9 @@ from backend.api.routes import (
     chat,
     combat,
     homebrew,
-    ingest,
     lab,
     npc_discord,
     players,
-    search,
     shop,
     transcript,
 )
@@ -28,7 +26,6 @@ async def lifespan(app: FastAPI):
     # Startup: ensure data directories exist
     settings.pdf_dir.mkdir(parents=True, exist_ok=True)
     settings.transcript_dir.mkdir(parents=True, exist_ok=True)
-    settings.chroma_dir.mkdir(parents=True, exist_ok=True)
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
 
     yield
@@ -55,9 +52,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(chat.router, prefix="/api/chat", tags=["Chat"])
-app.include_router(search.router, prefix="/api/search", tags=["Search"])
 app.include_router(campaign.router, prefix="/api/campaign", tags=["Campaign"])
-app.include_router(ingest.router, prefix="/api/ingest", tags=["Ingestion"])
 app.include_router(transcript.router, prefix="/api/transcript", tags=["Transcript"])
 app.include_router(players.router, prefix="/api", tags=["Players"])
 app.include_router(npc_discord.router, prefix="/api", tags=["NPC Discord"])

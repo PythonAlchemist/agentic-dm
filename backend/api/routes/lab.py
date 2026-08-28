@@ -77,7 +77,6 @@ class ChatRequest(BaseModel):
     focus: str = ""
     #: Off by default. The campaign RAG pipeline needs a populated vector store
     #: and answers about the campaign plane; this lab is about canon.
-    use_rag: bool = False
 
 
 class GenerateRequest(BaseModel):
@@ -186,7 +185,6 @@ async def chat(request: ChatRequest) -> dict:
     try:
         result: DMResponse = await agent.process_message(
             user_input=request.message,
-            use_rag=request.use_rag,
             use_canon=True,
         )
     except Exception as exc:  # noqa: BLE001 - surfaced to the lab, not swallowed

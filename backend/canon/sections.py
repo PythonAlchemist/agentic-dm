@@ -1,7 +1,7 @@
 """Split a chapter into units small enough to extract from in one pass.
 
 A whole chapter is too large -- Castle Ravenloft is ~40k tokens, and a single
-response enumerating its entities would be unmanageable. ChromaDB chunks are the
+response enumerating its entities would be unmanageable. The prose chunks are the
 wrong unit too: they split mid-topic, so an entity introduced in one chunk and
 located in the next becomes two partial extractions that the least-certain part
 of the pipeline has to merge. Sections split where the book's own author put a

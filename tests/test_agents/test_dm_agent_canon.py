@@ -80,10 +80,7 @@ def a_retrieval(text="Ismark sits by himself at a corner table.") -> Retrieval:
 
 @pytest.fixture
 def agent(monkeypatch):
-    """A DMAgent whose model and RAG pipeline are inert."""
-    monkeypatch.setattr(
-        "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
-    )
+    """A DMAgent whose model is inert."""
     built = DMAgent(canon=FakeRetriever(a_retrieval()))
     built.openai = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     return built
@@ -97,35 +94,35 @@ def system_text(agent) -> str:
 @pytest.mark.asyncio
 class TestTheBlockReachesTheModel:
     async def test_the_passage_text_is_in_the_messages_sent(self, agent):
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         assert "Ismark sits by himself at a corner table." in system_text(agent)
 
     async def test_the_question_is_what_canon_was_asked(self, agent):
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         assert agent.canon.asked == ["Who is Ismark?"]
 
     async def test_canon_is_read_before_the_conversation(self, agent):
         """The model should read the book's words before the question, not
         after its own previous answers."""
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         sent = agent.openai.chat.completions.messages
         canon_at = next(i for i, m in enumerate(sent) if BLOCK_MARK in m["content"])
         user_at = next(i for i, m in enumerate(sent) if m["role"] == "user")
         assert canon_at < user_at
 
     async def test_the_citation_comes_back_as_a_source(self, agent):
-        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        response = await agent.process_message("Who is Ismark?")
         assert response.sources[0]["source"] == "cos:the-village-of-barovia#5"
         assert response.sources[0]["type"] == "canon"
 
     async def test_use_canon_false_sends_no_block_and_asks_nothing(self, agent):
-        await agent.process_message("Who is Ismark?", use_rag=False, use_canon=False)
+        await agent.process_message("Who is Ismark?", use_canon=False)
         assert BLOCK_MARK not in system_text(agent)
         assert agent.canon.asked == []
 
     async def test_a_slash_command_never_reaches_canon(self, agent):
         """`/roll 1d20` is not a question about the book."""
-        await agent.process_message("/roll 1d20", use_rag=False)
+        await agent.process_message("/roll 1d20")
         assert agent.canon.asked == []
 
 
@@ -134,14 +131,11 @@ class TestWhenTheGraphIsUnreachable:
     async def test_a_dead_neo4j_degrades_rather_than_crashing_mid_session(
         self, monkeypatch
     ):
-        monkeypatch.setattr(
-            "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
-        )
         agent = DMAgent(canon=FakeRetriever(boom=True))
         agent.openai = SimpleNamespace(
             chat=SimpleNamespace(completions=FakeCompletions())
         )
-        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        response = await agent.process_message("Who is Ismark?")
         assert response.message == "an answer"
 
     async def test_and_the_model_is_still_told_the_canon_covers_nothing(
@@ -154,14 +148,11 @@ class TestWhenTheGraphIsUnreachable:
         whole path exists to prevent, appearing only when the database is down
         and only in production.
         """
-        monkeypatch.setattr(
-            "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
-        )
         agent = DMAgent(canon=FakeRetriever(boom=True))
         agent.openai = SimpleNamespace(
             chat=SimpleNamespace(completions=FakeCompletions())
         )
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         assert BLOCK_MARK in system_text(agent)
         assert "nothing retrieved" in system_text(agent)
 
@@ -201,12 +192,9 @@ class TestTheReportSaysWhichPathFoundWhat:
         )
 
     async def _report(self, monkeypatch, retrieval: Retrieval) -> dict:
-        monkeypatch.setattr(
-            "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
-        )
         built = DMAgent(canon=FakeRetriever(retrieval))
         built.openai = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
-        result = await built.process_message("q", use_rag=False, use_canon=True)
+        result = await built.process_message("q", use_canon=True)
         return result.retrieval
 
     async def test_a_mixed_result_counts_each_path(self, monkeypatch):
@@ -267,9 +255,6 @@ class TestTheToolLoop:
     into the subgraph; the transcript of finding it does not."""
 
     async def _agent(self, monkeypatch, completions):
-        monkeypatch.setattr(
-            "backend.agents.dm_agent.HybridRAGPipeline", lambda: SimpleNamespace()
-        )
         built = DMAgent(canon=FakeRetriever(a_retrieval()))
         built.openai = SimpleNamespace(chat=SimpleNamespace(completions=completions))
         return built
@@ -278,7 +263,7 @@ class TestTheToolLoop:
         """The common case must not have become more expensive."""
         completions = ScriptedCompletions(("an answer", None))
         agent = await self._agent(monkeypatch, completions)
-        await agent.process_message("q", use_rag=False, use_canon=True)
+        await agent.process_message("q", use_canon=True)
         assert len(completions.calls) == 1
 
     async def test_a_tool_call_is_run_and_the_model_asked_again(self, monkeypatch):
@@ -287,7 +272,7 @@ class TestTheToolLoop:
             ("an answer", None),
         )
         agent = await self._agent(monkeypatch, completions)
-        result = await agent.process_message("q", use_rag=False, use_canon=True)
+        result = await agent.process_message("q", use_canon=True)
         assert result.message == "an answer"
         assert len(completions.calls) == 2
 
@@ -299,7 +284,7 @@ class TestTheToolLoop:
             ("an answer", None),
         )
         agent = await self._agent(monkeypatch, completions)
-        result = await agent.process_message("q", use_rag=False, use_canon=True)
+        result = await agent.process_message("q", use_canon=True)
         assert result.usage["input"] == 200
         assert result.usage["output"] == 20
 
@@ -311,7 +296,7 @@ class TestTheToolLoop:
             ("an answer", None),
         )
         agent = await self._agent(monkeypatch, completions)
-        await agent.process_message("q", use_rag=False, use_canon=True)
+        await agent.process_message("q", use_canon=True)
         roles = [m["role"] for m in agent.conversation.get_context()]
         assert "tool" not in roles
 
@@ -323,7 +308,7 @@ class TestTheToolLoop:
             ("an answer", None),
         )
         agent = await self._agent(monkeypatch, completions)
-        result = await agent.process_message("q", use_rag=False, use_canon=True)
+        result = await agent.process_message("q", use_canon=True)
         assert result.message == "an answer"
         sent = completions.calls[-1]["messages"]
         assert any(m.get("role") == "tool" and "error" in m["content"] for m in sent)
@@ -335,7 +320,7 @@ class TestTheToolLoop:
             (None, [_Call("resolve", '{"name": "Rictavio"}')]),
         )
         agent = await self._agent(monkeypatch, completions)
-        await agent.process_message("q", use_rag=False, use_canon=True)
+        await agent.process_message("q", use_canon=True)
         assert len(completions.calls) == 4  # three rounds, then one without tools
 
     async def test_the_final_call_offers_no_tools(self, monkeypatch):
@@ -344,7 +329,7 @@ class TestTheToolLoop:
             (None, [_Call("resolve", '{"name": "Rictavio"}')]),
         )
         agent = await self._agent(monkeypatch, completions)
-        await agent.process_message("q", use_rag=False, use_canon=True)
+        await agent.process_message("q", use_canon=True)
         assert "tools" not in completions.calls[-1]
 
 
@@ -371,7 +356,7 @@ class TestTheGraphVocabularyReachesTheModel:
 
     async def test_the_vocabulary_is_in_the_messages_sent(self, agent, monkeypatch):
         self._speaking(monkeypatch, Ontology(entity_types=("NPC",), guessed=("SERVES",)))
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         assert "Entity types: NPC" in system_text(agent)
         assert "SERVES" in system_text(agent)
 
@@ -380,7 +365,7 @@ class TestTheGraphVocabularyReachesTheModel:
         the passages is a vocabulary read after the model has already decided
         what the passages mean."""
         self._speaking(monkeypatch, Ontology(entity_types=("NPC",)))
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         sent = agent.openai.chat.completions.messages
         vocabulary_at = next(
             i for i, m in enumerate(sent) if "Entity types:" in m["content"]
@@ -393,7 +378,7 @@ class TestTheGraphVocabularyReachesTheModel:
         them belongs on every call. A question that retrieved nothing is
         exactly when the model goes looking through them."""
         self._speaking(monkeypatch, Ontology(entity_types=("NPC",)))
-        await agent.process_message("Who is Ismark?", use_rag=False, use_canon=False)
+        await agent.process_message("Who is Ismark?", use_canon=False)
         assert "Entity types: NPC" in system_text(agent)
 
     async def test_an_unreadable_graph_omits_it_rather_than_failing_the_turn(
@@ -408,13 +393,13 @@ class TestTheGraphVocabularyReachesTheModel:
             raise RuntimeError("neo4j is down")
 
         monkeypatch.setattr("backend.agents.dm_agent.read_only_session", boom)
-        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        response = await agent.process_message("Who is Ismark?")
         assert response.message == "an answer"
         assert "Entity types:" not in system_text(agent)
 
     async def test_an_empty_graph_sends_no_block_at_all(self, agent, monkeypatch):
         self._speaking(monkeypatch, Ontology())
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         assert "Entity types:" not in system_text(agent)
         # ...and the canon block is still where it was, rather than shifted by
         # an empty string inserted ahead of it.
@@ -443,12 +428,12 @@ class TestTheSentenceLayerIsForTheReaderOnly:
 
     async def test_it_reaches_the_reader(self, agent, monkeypatch):
         self._speaking(agent, monkeypatch, self.TOGETHER)
-        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        response = await agent.process_message("Who is Ismark?")
         assert response.subgraph["together"] == self.TOGETHER
 
     async def test_it_does_NOT_reach_the_model(self, agent, monkeypatch):
         self._speaking(agent, monkeypatch, self.TOGETHER)
-        await agent.process_message("Who is Ismark?", use_rag=False)
+        await agent.process_message("Who is Ismark?")
         sent = system_text(agent)
         # Neither endpoint is in the fixture's passage or the vocabulary, so
         # either name appearing means the layer leaked.
@@ -460,7 +445,7 @@ class TestTheSentenceLayerIsForTheReaderOnly:
             raise RuntimeError("neo4j is down")
 
         monkeypatch.setattr("backend.agents.dm_agent.read_only_session", boom)
-        response = await agent.process_message("Who is Ismark?", use_rag=False)
+        response = await agent.process_message("Who is Ismark?")
         assert response.message == "an answer"
         assert response.subgraph["together"] == []
 

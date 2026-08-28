@@ -122,7 +122,6 @@ class TestRunCostAccounting:
             book_slug=book_slug,
             pages=None,
             concurrency=1,
-            skip_embed=True,
         )
 
         # Only page 61 (the fresh, non-cached page) should be billed.
@@ -167,7 +166,7 @@ class TestMainExitCode:
         monkeypatch.setattr(ingest_canon, "PageTranscriber", _FakeTranscriber)
         monkeypatch.setattr(
             "sys.argv",
-            ["ingest_canon.py", str(tmp_path / "fake.pdf"), "-b", "clean-book", "--skip-embed"],
+            ["ingest_canon.py", str(tmp_path / "fake.pdf"), "-b", "clean-book"],
         )
 
         with pytest.raises(SystemExit) as exc_info:
@@ -181,7 +180,7 @@ class TestMainExitCode:
         monkeypatch.setattr(ingest_canon, "PageTranscriber", _FakeTranscriberAllFail)
         monkeypatch.setattr(
             "sys.argv",
-            ["ingest_canon.py", str(tmp_path / "fake.pdf"), "-b", "broken-book", "--skip-embed"],
+            ["ingest_canon.py", str(tmp_path / "fake.pdf"), "-b", "broken-book"],
         )
 
         with pytest.raises(SystemExit) as exc_info:

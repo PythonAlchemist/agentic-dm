@@ -24,7 +24,6 @@ from backend.canon.retrieval import (
 from backend.core.config import settings
 from backend.core.database import neo4j_session, read_only_session
 from backend.core.pricing import Usage, estimate
-from backend.rag import HybridRAGPipeline, QueryType
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +53,8 @@ class DMResponse(BaseModel):
     """Response from the DM Agent."""
 
     message: str
-    query_type: QueryType | None = None
     tool_results: list[dict] = Field(default_factory=list)
     sources: list[dict] = Field(default_factory=list)
-    suggestions: list[str] = Field(default_factory=list)
     #: Tokens the call consumed and what the rate table says that cost. Absent
     #: on a tool command, which never reaches a model. Reported rather than
     #: merely logged: the number that matters to somebody paying for this is the
@@ -121,7 +118,6 @@ class DMAgent:
         self.temperature = temperature
         self.seed = seed
         self.depth = depth or canon_context.Depth()
-        self.rag_pipeline = HybridRAGPipeline()
         self.tools = DMTools()
         self.canon = canon or CanonRetriever(
             limit=self.depth.passages, passage_width=self.depth.passage_width
@@ -182,14 +178,12 @@ class DMAgent:
     async def process_message(
         self,
         user_input: str,
-        use_rag: bool = True,
         use_canon: bool = True,
     ) -> DMResponse:
         """Process a user message.
 
         Args:
             user_input: User's input text.
-            use_rag: Whether to use RAG for context.
             use_canon: Whether to ground the answer in the canon graph.
 
         Returns:
@@ -211,8 +205,8 @@ class DMAgent:
             self.conversation.add_assistant_message(response.message)
             return response
 
-        # Retrieve canon BEFORE the RAG pipeline, and unconditionally when
-        # enabled. It is deterministic and costs no API call, so there is
+        # Retrieve canon unconditionally when enabled. It is deterministic
+        # and costs no API call, so there is
         # nothing to gate it on -- and a heuristic deciding when a question is
         # "about the book" would fail exactly on the questions a DM most needs
         # grounded. A question naming nothing simply retrieves little.
@@ -229,16 +223,7 @@ class DMAgent:
             # scene to a section it read two questions ago.
             self._seen_sections.update(p.section_id for p in retrieval.passages)
 
-        # Use RAG pipeline for context
-        rag_response = None
-        if use_rag:
-            rag_response = await self.rag_pipeline.query(
-                question=user_input,
-                conversation_history=self.conversation.get_context(include_system=False),
-            )
-
-        # Generate response
-        response = await self._generate_response(user_input, rag_response, retrieval)
+        response = await self._generate_response(user_input, retrieval)
 
         # What the ANSWER named. Retrieval's anchors are what the QUESTION
         # resolved, and a question often names nothing while its answer names
@@ -462,14 +447,12 @@ class DMAgent:
     async def _generate_response(
         self,
         user_input: str,
-        rag_response=None,
         retrieval=None,
     ) -> DMResponse:
         """Generate a response using the LLM.
 
         Args:
             user_input: User's input.
-            rag_response: Optional RAG response with context.
             retrieval: Optional canon retrieval to ground the answer in.
 
         Returns:
@@ -541,17 +524,6 @@ class DMAgent:
                 "miss_reason": retrieval.miss_reason,
             }
 
-        # Add RAG context if available
-        if rag_response and rag_response.context_used:
-            sources_text = "\n".join([
-                f"- {s.get('source', 'unknown')}: {s.get('type', 'unknown')}"
-                for s in rag_response.sources[:5]
-            ])
-            context_note = {
-                "role": "system",
-                "content": f"Relevant context has been retrieved. Sources consulted:\n{sources_text}",
-            }
-            context.insert(1, context_note)  # After system prompt
 
         # Generate response, letting the model reach into the graph first.
         response, usage = await self._answer_with_tools(self._trim(context))
@@ -560,11 +532,6 @@ class DMAgent:
         # reaches `DMResponse` and fails the turn on a validation error.
         message = response.choices[0].message.content or ""
         cost = estimate(self.model, usage)
-
-        # Always generate suggestions
-        suggestions = []
-        if rag_response:
-            suggestions = self._generate_suggestions(rag_response.query_type)
 
         # AFTER the answer, because generation is a second model call and its
         # cost belongs to the card rather than to the turn's reasoning. The
@@ -576,9 +543,7 @@ class DMAgent:
         return DMResponse(
             message=message,
             generations=cards,
-            query_type=rag_response.query_type if rag_response else None,
-            sources=canon_sources + (rag_response.sources if rag_response else []),
-            suggestions=suggestions,
+            sources=canon_sources,
             usage={"input": usage.input_tokens, "output": usage.output_tokens,
                    "total": usage.total},
             cost=cost.as_dict(),
@@ -1065,47 +1030,6 @@ class DMAgent:
         keep = 1  # the current question
         return system + rest[-keep:] if keep < len(rest) else system + rest
 
-    def _generate_suggestions(self, query_type: QueryType | None) -> list[str]:
-        """Generate contextual suggestions.
-
-        Args:
-            query_type: The classified query type.
-
-        Returns:
-            List of suggested follow-up actions.
-        """
-        if not query_type:
-            return []
-
-        suggestions_map = {
-            QueryType.RULES_LOOKUP: [
-                "Roll for it?",
-                "See related rules",
-                "Common mistakes to avoid",
-            ],
-            QueryType.ENCOUNTER_GENERATION: [
-                "Generate another encounter",
-                "Adjust difficulty",
-                "Add terrain features",
-            ],
-            QueryType.NPC_GENERATION: [
-                "Generate another NPC",
-                "Create a rival for this NPC",
-                "Add a secret or hook",
-            ],
-            QueryType.CAMPAIGN_STATE: [
-                "View related NPCs",
-                "Check location details",
-                "Review recent events",
-            ],
-            QueryType.CAMPAIGN_HISTORY: [
-                "Full session recap",
-                "Find related events",
-                "Check NPC involvement",
-            ],
-        }
-
-        return suggestions_map.get(query_type, [])
 
     def roll_dice(self, expression: str) -> DiceResult:
         """Roll dice using standard notation.

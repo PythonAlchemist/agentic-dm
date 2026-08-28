@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     data_dir: Path = base_dir / "data"
     pdf_dir: Path = data_dir / "pdfs"
     transcript_dir: Path = data_dir / "transcripts"
-    chroma_dir: Path = data_dir / "chromadb"
     audio_dir: Path = data_dir / "audio"
     canon_dir: Path = data_dir / "canon"
     # The harvested D&D Beyond markdown cache. Gitignored like everything under
@@ -39,8 +38,6 @@ class Settings(BaseSettings):
     neo4j_user: str = "neo4j"
     neo4j_password: str = "testpassword"
 
-    # ChromaDB
-    chroma_collection_name: str = "dnd_documents"
 
     # PDF Processing
     chunk_size: int = 1000  # tokens

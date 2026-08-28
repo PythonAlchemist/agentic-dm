@@ -2,14 +2,14 @@
 
 AI-powered tool that can both assist and replace a Dungeon Master in D&D 5e campaigns.
 
-It ingests your rulebooks and PDFs into a vector store, builds a Neo4j knowledge graph of
+It ingests your rulebooks and PDFs into a Neo4j knowledge graph of
 your campaign from session transcripts, and exposes both through a single DM agent — plus
 a web UI for combat, shops, players, and live session recording.
 
 ## Features
 
 **Knowledge & retrieval**
-- **Hybrid RAG** — vector search over rules/lore combined with graph traversal over
+- **Graph retrieval** — the mention triangle and typed edges over
   campaign state, with query planning and reranking
 - **PDF ingestion** — D&D-aware chunking that respects stat blocks, spells, and tables
 - **Campaign knowledge graph** — Neo4j tracking of PCs, NPCs, locations, items, factions,
@@ -46,9 +46,9 @@ rules, and DM notes; campaign-owned entities are scoped, reference data is share
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| 1. Foundation | ✅ Complete | Project structure, PDF ingestion, basic RAG |
+| 1. Foundation | ✅ Complete | Project structure, PDF ingestion |
 | 2. Knowledge Graph | ✅ Complete | NER pipeline, transcript processing, entity resolution |
-| 3. Hybrid RAG | ✅ Complete | Query planning, graph-augmented retrieval, reranking |
+| 3. Graph retrieval | ✅ Complete | Anchored retrieval, provenance-first passages |
 | 4. DM Agent | ✅ Complete | Unified agent (the Assistant/Autonomous split was removed) |
 | 5. Frontend | ✅ Complete | Chat, campaign dashboard, graph visualization |
 | 6. Players & Discord NPCs | ✅ Complete | Player tracking, AI NPCs in Discord with voice |
@@ -56,7 +56,7 @@ rules, and DM notes; campaign-owned entities are scoped, reference data is share
 | 8. Shops | ✅ Complete | AI shopkeeper, inventory, transactions |
 | 9. Audio Capture | ✅ Complete | Deepgram transcription with diarization |
 | 10. Multi-Campaign | 🚧 Unverified | Built but uncommitted; not yet tested end-to-end |
-| 11. Canon Ingestion | ✅ Complete | Curse of Strahd transcribed from page images into ChromaDB |
+| 11. Canon Ingestion | ✅ Complete | Curse of Strahd transcribed from page images into the graph |
 
 **Not built**: authentication (there is none — CORS is wide open), campaign export/import,
 campaign deletion, dynamic difficulty adjustment. See [PLAN.md](PLAN.md) for the full
@@ -194,12 +194,11 @@ agentic-dm/
 │   ├── api/routes/       # 10 routers (chat, campaign, combat, shop, audio, ...)
 │   ├── core/             # Configuration & database
 │   ├── ingestion/        # PDF processing & embeddings
-│   ├── rag/              # Retrieval, query planning, reranking, hybrid pipeline
 │   ├── graph/            # Neo4j schema & operations
 │   ├── ner/              # SpaCy + gazetteer + LLM extraction, entity resolution
 │   ├── transcript/       # Transcript parsing & processing
 │   ├── audio/            # Deepgram transcription & diarization
-│   ├── canon/            # Sourcebook ingestion: page images → markdown → ChromaDB
+│   ├── canon/            # Sourcebook ingestion: page images → markdown → graph
 │   ├── agents/           # DMAgent, DMTools, prompts
 │   ├── discord/          # NPC bots, combat manager, TTS voice
 │   ├── shop/             # Shop generation, registry, SRD items
@@ -208,7 +207,7 @@ agentic-dm/
 ├── frontend/src/         # React 19 + Tailwind 4 + Vite
 ├── claude-plugins/       # dm-screen: printable DM screen PDFs from D&D Beyond
 ├── sessions/             # Generated DM screens and adventure assets
-├── data/                 # PDFs, transcripts, audio, vector DB (gitignored)
+├── data/                 # PDFs, transcripts, audio (gitignored)
 ├── tests/                # Test suite
 ├── docker-compose.yml    # Neo4j service
 └── PLAN.md               # Full architecture plan
@@ -236,7 +235,6 @@ Environment variables (set in `.env`):
 | `NEO4J_URI` | Neo4j connection | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j username | `neo4j` |
 | `NEO4J_PASSWORD` | Neo4j password | `testpassword` |
-| `CHROMA_COLLECTION_NAME` | ChromaDB collection | `dnd_documents` |
 | `CHUNK_SIZE` | Tokens per chunk | `1000` |
 | `CHUNK_OVERLAP` | Overlap tokens | `200` |
 | `RETRIEVAL_TOP_K` | Chunks retrieved | `5` |
