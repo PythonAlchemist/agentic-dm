@@ -44,6 +44,17 @@ RETURN e.name AS name, collect(e.id) AS ids
 """
 
 
+def chapter_of(entity_id: str) -> str:
+    """The adventure an id is scoped to, or "" for one the book holds book-wide.
+
+    The middle segment IS the scope -- `kftgv:the-stygian-gambit:the-heist` is
+    the Stygian Gambit's, and `kftgv:prisoner-13` has no middle segment because
+    it is the adventure itself rather than something inside one.
+    """
+    parts = entity_id.split(":")
+    return parts[1] if len(parts) > 2 else ""
+
+
 def plan(groups: list[dict], by_name: dict[str, list[str]]) -> tuple[list[Merge], list[str]]:
     """Turn read groupings into merges. Returns `(merges, refusals)`.
 
@@ -66,6 +77,28 @@ def plan(groups: list[dict], by_name: dict[str, list[str]]) -> tuple[list[Merge]
         ambiguous = {n: by_name[n] for n in names if len(by_name[n]) > 1}
         if ambiguous:
             refused.append(f"{canonical!r}: {ambiguous!r} names more than one entity")
+            continue
+
+        # A GROUP MAY NOT SPAN ADVENTURES. Every heist in this book is a
+        # heist, so `Heist`, `The Heist`, `Planning the Heist`, `Casino Heist`
+        # and `Vidorant's Next Heist` came back as one thing -- and one QUEST
+        # node scoped to the Stygian Gambit ended up holding the jobs of four
+        # separate adventures, with mentions in chapters its own scope forbids
+        # it from being scanned in.
+        #
+        # The existing refusal above catches a NAME that resolves to several
+        # entities. This catches a GROUP that reaches across several, which is
+        # the same anthology rule from the other side and did not fire because
+        # each of those names resolved perfectly well on its own.
+        #
+        # A book-wide member does not conflict: it legitimately belongs to no
+        # one adventure, which is why `chapter_of` returns "" rather than
+        # guessing.
+        chapters = {c for n in names if (c := chapter_of(by_name[n][0]))}
+        if len(chapters) > 1:
+            refused.append(
+                f"{canonical!r}: spans {sorted(chapters)!r} -- one name in several adventures"
+            )
             continue
 
         survivor = by_name[canonical][0]
