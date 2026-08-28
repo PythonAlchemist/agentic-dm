@@ -1069,6 +1069,82 @@ class TestSomethingTheCampaignAlreadyHoldsStaysInTheCluster:
         assert named >= 1, "the involvement is recorded even though nothing was minted"
 
 
+class TestSayingNoToAGuessAndHavingItStay:
+    """Deleting a proposed edge never meant no. `derive_edges` reads the prose
+    again and proposes the same thing again, so a guess the DM threw out came
+    back on the next run and the review loop never closed."""
+
+    def _pair(self, table):
+        _store(table, anchor=None, kind="npc", title="Pytest Skipper", body="a",
+               generated_body="a")
+        _store(table, anchor=None, kind="faction", title="Pytest Deckhands", body="a",
+               generated_body="a")
+        section = _store(table, anchor=None, title="Pytest Reject Scene",
+                         body="Pytest Skipper leads the Pytest Deckhands.",
+                         generated_body="x").section_id
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        return section
+
+    EDGE = [{"source": "Pytest Skipper", "target": "Pytest Deckhands",
+             "rel_type": "MEMBER_OF"}]
+
+    def _derive(self, table, section):
+        return table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section, edges=self.EDGE
+            )
+        )
+
+    def _reject(self, table):
+        return table.execute_write(
+            lambda tx: homebrew.reject_edge(
+                tx, slug=SLUG,
+                source=f"hb:{SLUG}:pytest-skipper", rel_type="MEMBER_OF",
+                target=f"hb:{SLUG}:pytest-deckhands",
+            )
+        )
+
+    def test_a_rejected_guess_is_not_proposed_again(self, table):
+        section = self._pair(table)
+        assert self._derive(table, section)["written"] == 1
+        assert self._reject(table)["rejected"] == 1
+        again = self._derive(table, section)
+        assert again["written"] == 0 and again["already"] == 0
+        assert any("rejected" in reason for reason in again["dropped"]), again
+
+    def test_the_verdict_is_kept_rather_than_the_edge_deleted(self, table):
+        """"Nobody has looked at this" and "somebody looked and said no" are
+        different states, and an absent edge cannot tell them apart."""
+        section = self._pair(table)
+        self._derive(table, section)
+        self._reject(table)
+        status = table.run(
+            "MATCH (:Entity {name:'Pytest Skipper'})-[r:MEMBER_OF]->"
+            "(:Entity {name:'Pytest Deckhands'}) RETURN r.status AS s"
+        ).single()
+        assert status is not None, "the edge stays, carrying its verdict"
+        assert status["s"] == homebrew.REJECTED
+
+    def test_an_authored_edge_cannot_be_rejected(self, table):
+        """`authored` is the DM saying so. Overwriting it with a verdict meant
+        for guesses would lose the assertion; removing it is a delete, which is
+        a different act."""
+        self._pair(table)
+        table.run(
+            "MATCH (a:Entity {name:'Pytest Skipper'}), (b:Entity {name:'Pytest Deckhands'}) "
+            "MERGE (a)-[r:MEMBER_OF]->(b) SET r.status=$s, r.campaign=$c",
+            {"s": homebrew.AUTHORED, "c": SLUG},
+        )
+        result = self._reject(table)
+        assert result["rejected"] == 0
+        assert "authored" in result["note"]
+
+    def test_rejecting_something_that_is_not_there_says_so(self, table):
+        self._pair(table)
+        result = self._reject(table)
+        assert result["rejected"] == 0 and "no such edge" in result["note"]
+
+
 class TestOneMentionNodePerEntityPerSection:
     """`mention_id` is `<entity>@<section>` and has always meant one node per
     pair -- but `write_cluster` created its mentions with no id, so nothing

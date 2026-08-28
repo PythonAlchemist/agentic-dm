@@ -183,6 +183,8 @@ export interface SectionRead {
    *  connected to. The prose does not say it; the graph does. */
   connections: {
     from: string
+    /** Both ends by id, so a guess can be addressed well enough to reject. */
+    from_id: string
     rel: string
     to: string
     to_id: string
@@ -482,6 +484,17 @@ export const labAPI = {
       campaign,
       section_id: sectionId,
       parent,
+    })
+  },
+
+  /** Say no to a guess, so it stays said. Deleting one only removes it until
+   *  the next read-back proposes it again. */
+  rejectEdge(campaign: string, source: string, relType: string, target: string) {
+    return postTo<{ rejected: number; note?: string }>('/homebrew/reject-edge', {
+      campaign,
+      source,
+      rel_type: relType,
+      target,
     })
   },
 

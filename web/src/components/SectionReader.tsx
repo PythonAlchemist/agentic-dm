@@ -48,6 +48,9 @@ export function SectionReader({
   //  glance away from it and back — so the section stays underneath and the
   //  back arrow returns to exactly where they were.
   const [entity, setEntity] = useState<EntityRead | null>(null)
+  //: The edge being rejected, so its own control can say so and the rest of
+  //  the list stays clickable.
+  const [rejecting, setRejecting] = useState('')
 
   const openEntity = async (entityId: string) => {
     try {
@@ -126,6 +129,22 @@ export function SectionReader({
       setFailed(error instanceof Error ? error.message : String(error))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const reject = async (fromId: string, rel: string, toId: string) => {
+    if (!campaign || rejecting) return
+    setRejecting(toId + rel)
+    try {
+      await labAPI.rejectEdge(campaign, fromId, rel, toId)
+      // RE-READ RATHER THAN SPLICING IT OUT HERE. The server decides what a
+      // reader may see -- an `authored` edge is refused rather than rejected --
+      // so dropping the row locally would show a verdict that was not reached.
+      setSection(await labAPI.section(sectionId!, campaign))
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRejecting('')
     }
   }
 
@@ -349,7 +368,9 @@ export function SectionReader({
                     {shown.connections.map((edge, index) => (
                       <li
                         key={`${edge.from}-${edge.rel}-${edge.to_id}-${index}`}
-                        className={edge.status === 'accepted' ? '' : 'opacity-60'}
+                        className={`group/edge ${
+                          edge.status === 'accepted' ? '' : 'opacity-60'
+                        }`}
                       >
                         <span className="text-neutral-400">{edge.from}</span>{' '}
                         <span className="text-neutral-600">
@@ -367,6 +388,21 @@ export function SectionReader({
                         </button>
                         {edge.status !== 'accepted' && (
                           <span className="text-neutral-600"> · guessed</span>
+                        )}
+                        {/* SAY NO, AND HAVE IT STAY SAID. Deleting a guess only
+                            removed it until the next read-back proposed the same
+                            thing again, so the review loop never closed. An
+                            `authored` or `accepted` edge is not a guess and the
+                            backend refuses to reject one, so no button is offered
+                            for it. */}
+                        {edge.status !== 'accepted' && (
+                          <button
+                            onClick={() => reject(edge.from_id, edge.rel, edge.to_id)}
+                            disabled={rejecting === edge.to_id + edge.rel}
+                            className="ml-1 text-[10px] text-neutral-700 opacity-0 transition-opacity group-hover/edge:opacity-100 hover:text-rose-300"
+                          >
+                            {rejecting === edge.to_id + edge.rel ? '…' : 'no'}
+                          </button>
                         )}
                       </li>
                     ))}

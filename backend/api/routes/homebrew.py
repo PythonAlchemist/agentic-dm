@@ -560,6 +560,9 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             // is a fact about what is happening in this section.
             WHERE (far.plane = 'canon' OR far.campaign = $campaign)
               AND (far)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(s)
+              // A REJECTED GUESS IS GONE, not dimmed. The DM has read it and
+              // said no; showing it faintly is showing it.
+              AND coalesce(edge.status,'') <> 'rejected'
             RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
                    subject.id AS describes,
                    s.plane AS plane, s.kind AS kind, s.invented AS invented,
@@ -588,7 +591,8 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
                    // not say and the graph does. A DM reading a scene wants
                    // "what else is this touching" without leaving it.
                    collect(DISTINCT {
-                     from: named.name, rel: type(edge), to: far.name,
+                     from: named.name, from_id: named.id,
+                     rel: type(edge), to: far.name,
                      to_id: far.id, plane: far.plane, status: edge.status
                    }) AS connections
             """,
@@ -1020,6 +1024,31 @@ async def name_entities(request: DeriveRequest) -> dict:
         # write, and the pass is not for writing prose.
         "drifted": drifted(body, rewritten, [row["name"] for row in rows]),
     }
+
+
+class RejectRequest(BaseModel):
+    campaign: str
+    source: str
+    rel_type: str
+    target: str
+
+
+@router.post("/reject-edge")
+def reject_edge(request: RejectRequest) -> dict:
+    """Say no to a guess, so it stays said.
+
+    THE VERDICT THAT WAS MISSING. Accepting a proposed edge promotes it;
+    deleting one only removes it until the next read-back proposes it again.
+    2,145 proposed edges stood against 593 accepted and 7 authored with one
+    exit between them, and a DM who threw a guess out watched it return.
+    """
+    with neo4j_session() as session:
+        return session.execute_write(
+            lambda tx: homebrew.reject_edge(
+                tx, slug=request.campaign, source=request.source,
+                rel_type=request.rel_type, target=request.target,
+            )
+        )
 
 
 class DeriveRequest(BaseModel):

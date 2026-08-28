@@ -58,6 +58,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from backend.campaign.model import REJECTED
 from backend.canon.aliases import resolve_name
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.passage import derive_passage
@@ -241,15 +242,19 @@ ORDER BY chapter_index, section_index
 #: Every edge attached to the entity, both ways round. Half of what a DM wants
 #: about an NPC is written with the NPC as the TARGET -- `Strahd SEEKS Ireena`
 #: is the answer to "what is after Ireena" -- so an out-only read loses it.
-EDGES = """
-MATCH (n:Entity {plane:$plane})-[r]->(o:Entity {plane:$plane})
-WHERE n.id IN $ids AND r.plane = $plane
+#: A REJECTED EDGE IS NEVER READ. `split_by_status` files everything that is
+#: not `accepted` under proposed, so one reaching a reader would arrive dimmed
+#: rather than gone -- and the DM has already said no to it. Excluded here, in
+#: the query, so no caller has to remember.
+EDGES = f"""
+MATCH (n:Entity {{plane:$plane}})-[r]->(o:Entity {{plane:$plane}})
+WHERE n.id IN $ids AND r.plane = $plane AND coalesce(r.status,'') <> '{REJECTED}'
 RETURN n.name AS entity, 'out' AS direction, type(r) AS relationship,
        o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status,
        r.evidence_check AS evidence_check
 UNION
-MATCH (o:Entity {plane:$plane})-[r]->(n:Entity {plane:$plane})
-WHERE n.id IN $ids AND r.plane = $plane
+MATCH (o:Entity {{plane:$plane}})-[r]->(n:Entity {{plane:$plane}})
+WHERE n.id IN $ids AND r.plane = $plane AND coalesce(r.status,'') <> '{REJECTED}'
 RETURN n.name AS entity, 'in' AS direction, type(r) AS relationship,
        o.id AS other_id, o.name AS other, labels(o) AS other_labels, r.status AS status,
        r.evidence_check AS evidence_check

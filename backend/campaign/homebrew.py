@@ -45,6 +45,7 @@ from backend.campaign.model import (
     CAMPAIGN_PLANE,
     DRAWS_ON,
     NEXT,
+    REJECTED,
     campaign_prefix,
     mint_id,
 )
@@ -935,6 +936,50 @@ SYNONYMS: dict[str, tuple[RelationshipType, dict]] = {
 }
 
 
+def reject_edge(tx, *, slug: str, source: str, rel_type: str, target: str) -> dict:
+    """Record that the DM read this guess and judged it wrong.
+
+    A STATUS RATHER THAN A DELETION, because the fact worth keeping is the
+    JUDGEMENT. Deleting a proposed edge does not mean no -- `derive_edges`
+    reads the prose again and proposes the same thing again -- so a guess the
+    DM threw out came back on the next run and the review loop never closed.
+    "Nobody has looked at this" and "somebody looked and said no" are different
+    states, and an absent edge cannot tell them apart.
+
+    REFUSES TO REJECT WHAT THE DM ASSERTED. `authored` is the DM saying so and
+    `accepted` is derived from the book's own structure; neither is a guess,
+    and quietly overwriting one with a verdict meant for guesses would lose the
+    assertion. Removing those is a delete, which is a different act.
+    """
+    from backend.canon.writer import ACCEPTED
+
+    try:
+        relationship = RelationshipType(rel_type)
+    except ValueError:
+        return {"rejected": 0, "note": f"{rel_type} is not a relationship this graph writes"}
+    row = tx.run(
+        f"""
+        MATCH (a:Entity {{id:$a}})-[r:{relationship.value}]->(b:Entity {{id:$b}})
+        WHERE r.campaign = $slug
+        RETURN coalesce(r.status,'') AS status
+        """,
+        {"a": source, "b": target, "slug": slug},
+    ).single()
+    if row is None:
+        return {"rejected": 0, "note": "no such edge here"}
+    if row["status"] in (AUTHORED, ACCEPTED):
+        return {"rejected": 0, "note": f"that edge is {row['status']}, not a guess"}
+    tx.run(
+        f"""
+        MATCH (a:Entity {{id:$a}})-[r:{relationship.value}]->(b:Entity {{id:$b}})
+        WHERE r.campaign = $slug
+        SET r.status = $rejected
+        """,
+        {"a": source, "b": target, "slug": slug, "rejected": REJECTED},
+    )
+    return {"rejected": 1}
+
+
 def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
     """Write relationships READ BACK out of stored prose, as guesses.
 
@@ -1045,8 +1090,28 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
         turned = " (it would pass reversed)" if violation.reversal_would_pass else ""
         drop(f"{violation.rel_type}: {violation.reason}{turned}")
 
+    # WHAT THE DM HAS ALREADY SAID NO TO. Deleting a proposed edge never
+    # meant no: this reads the prose again and proposes the same thing again,
+    # so a guess thrown out came back on the next run and the review loop never
+    # closed. A rejected edge stays in the graph carrying its verdict, and the
+    # verdict is what stops it being re-proposed.
+    rejected = {
+        (row["a"], row["rel"], row["b"])
+        for row in tx.run(
+            """
+            MATCH (a:Entity)-[r]->(b:Entity)
+            WHERE r.status = $rejected AND r.campaign = $slug
+            RETURN a.id AS a, type(r) AS rel, b.id AS b
+            """,
+            {"rejected": REJECTED, "slug": slug},
+        )
+    }
+
     for index, (source, target, relationship, extra) in enumerate(resolved):
         if index in refused:
+            continue
+        if (named[source], relationship.value, named[target]) in rejected:
+            drop(f"{relationship.value}: the DM rejected this one")
             continue
         layer = LAYER_MAP.get(relationship)
         # `r.status IS NULL` IS THE CREATION TEST. MERGE is idempotent and says

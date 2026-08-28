@@ -45,6 +45,25 @@ CAMPAIGN_PLANE = "campaign"
 #: authored and owns. Neither is true of "I decided this."
 AUTHORED = "authored"
 
+#: Read by the DM and judged wrong. The verdict that was missing.
+#:
+#: `accepted` and `authored` are both ways of saying yes, and there was no way
+#: of saying no. Deleting a proposed edge does not mean no: `derive_edges` reads
+#: the prose again and proposes it again, so a guess the DM threw out came back
+#: on the next run and the review loop never closed. 2,145 proposed edges stood
+#: against 593 accepted and 7 authored, with one exit between them.
+#:
+#: A STATUS RATHER THAN A DELETION, because the fact worth keeping is the
+#: JUDGEMENT. "Nobody has looked at this" and "somebody looked and said no" are
+#: different states, and an absent edge cannot tell them apart -- which is the
+#: same argument `AUTHORED` makes about not reusing `accepted`.
+#:
+#: NEVER SURFACED. `split_by_status` files everything that is not `accepted`
+#: under proposed, so a rejected edge reaching a reader would be dimmed rather
+#: than gone. The read queries exclude it instead, so the only thing that ever
+#: sees one is the writer checking whether to propose it again.
+REJECTED = "rejected"
+
 #: The campaign's first section. Exists if and only if the chain is non-empty,
 #: which is the invariant a pure-homebrew campaign starts out violating in the
 #: only legal way: no sections, no start.
