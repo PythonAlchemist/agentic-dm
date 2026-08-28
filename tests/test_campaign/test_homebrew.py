@@ -1203,6 +1203,54 @@ class TestRelationshipsReadBackOutOfTheProse:
         assert result["written"] == 0
         assert result["dropped"] == {"an endpoint is not named in this section": 1}
 
+    def test_leading_a_group_is_membership_with_a_rank(self, table):
+        """`LEADS` was proposed and dropped on every run: "Captain Saltmarrow
+        commands the Corsair Crew" is the natural reading of the prose and
+        there was no leadership type to put it in. MEMBER_OF already carries
+        the structural fact, and rank is a property of the membership."""
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Deckhands", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper leads the Pytest Deckhands.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        result = table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Deckhands",
+                        "rel_type": "LEADS"}],
+            )
+        )
+        assert result["written"] == 1 and result["dropped"] == {}
+        edge = table.run(
+            "MATCH (:Entity {name:'Pytest Skipper'})-[r:MEMBER_OF]->"
+            "(:Entity {name:'Pytest Deckhands'}) RETURN r.role AS role, r.status AS s"
+        ).single()
+        assert dict(edge) == {"role": "leads", "s": "proposed"}
+
+    def test_a_synonym_does_not_overwrite_a_rank_the_dm_set(self, table):
+        """Same rule as the status: a re-read may fill in what is missing and
+        may not restate what the DM already decided."""
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Deckhands", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper leads the Pytest Deckhands.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        table.run(
+            "MATCH (a:Entity {name:'Pytest Skipper'}), (b:Entity {name:'Pytest Deckhands'}) "
+            "MERGE (a)-[r:MEMBER_OF]->(b) SET r.status = $s, r.role = 'quartermaster'",
+            {"s": homebrew.AUTHORED},
+        )
+        table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Deckhands",
+                        "rel_type": "LEADS"}],
+            )
+        )
+        role = table.run(
+            "MATCH (:Entity {name:'Pytest Skipper'})-[r:MEMBER_OF]->"
+            "(:Entity {name:'Pytest Deckhands'}) RETURN r.role AS role"
+        ).single()["role"]
+        assert role == "quartermaster"
+
     def test_a_relationship_the_graph_does_not_write_is_refused(self, table):
         section = self._scene(table, "Pytest Read Back happens.")
         table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))

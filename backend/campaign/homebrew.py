@@ -861,6 +861,27 @@ def _anchor_chapter(tx, slug: str, section_id: str) -> str:
 
 PROPOSED = "proposed"
 
+#: What a model calls a relationship, and the one this graph writes instead.
+#:
+#: `LEADS` WAS PROPOSED AND DROPPED ON EVERY RUN. "Captain Saltmarrow commands
+#: the Corsair Crew" is the natural reading of the prose and there is no
+#: leadership type to put it in, so a true sentence became a counted drop
+#: forever.
+#:
+#: MEMBER_OF ALREADY CARRIES THE STRUCTURAL FACT -- she belongs to that crew --
+#: and what `LEADS` adds is rank, which is a property of the membership rather
+#: than a different kind of edge. `SEEKS` carries `motive` and `IDENTITY_OF`
+#: carries `nature` for the same reason: the shape is the type, the shading is
+#: a property. Widening the type table instead would widen what the canon
+#: extractor may emit, and its out-of-table rate is a measured number.
+#:
+#: DIRECTION SURVIVES THE MAPPING because both point the same way: `A LEADS B`
+#: and `A MEMBER_OF B` both put the person first and the group second.
+SYNONYMS: dict[str, tuple[RelationshipType, dict]] = {
+    "LEADS": (RelationshipType.MEMBER_OF, {"role": "leads"}),
+    "COMMANDS": (RelationshipType.MEMBER_OF, {"role": "leads"}),
+}
+
 
 def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
     """Write relationships READ BACK out of stored prose, as guesses.
@@ -916,11 +937,15 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
         if source == target:
             drop("points at itself")
             continue
-        try:
-            relationship = RelationshipType(rel)
-        except ValueError:
-            drop(f"{rel or '(none)'} is not a relationship this graph writes")
-            continue
+        extra: dict = {}
+        if rel in SYNONYMS:
+            relationship, extra = SYNONYMS[rel]
+        else:
+            try:
+                relationship = RelationshipType(rel)
+            except ValueError:
+                drop(f"{rel or '(none)'} is not a relationship this graph writes")
+                continue
         layer = LAYER_MAP.get(relationship)
         # `r.status IS NULL` IS THE CREATION TEST. MERGE is idempotent and says
         # nothing about which branch it took, so the ON CREATE clause is also
@@ -935,12 +960,17 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
                 r.campaign = coalesce(r.campaign, $slug),
                 r.status = coalesce(r.status, $status),
                 r.layer = coalesce(r.layer, $layer)
+            // ON CREATE ONLY, like the rest: a synonym's shading must not
+            // overwrite a role the DM set by hand on an edge they authored.
+            // A `WHERE made` here would filter the row away and leave the
+            // already-existed case with nothing to return.
+            SET r += CASE WHEN made THEN $extra ELSE {{}} END
             RETURN made
             """,
             {
                 "a": named[source], "b": named[target], "plane": CAMPAIGN_PLANE,
                 "slug": slug, "status": PROPOSED,
-                "layer": layer.value if layer else "",
+                "layer": layer.value if layer else "", "extra": extra,
             },
         ).single()["made"]
         if made:
