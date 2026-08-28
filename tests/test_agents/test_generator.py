@@ -1,6 +1,7 @@
 """Generating material with canon and invention kept apart."""
 
 import asyncio
+import re
 import json
 from types import SimpleNamespace
 
@@ -598,3 +599,44 @@ class TestReadingRelationshipsBackOutOfStoredProse:
             generator.read_back(client=None, body="   ", names=("A", "B"), model="m")
         )
         assert edges == () and error == ""
+
+
+class TestProseThatNamesNothingConnectsToNothing:
+    """The mention scan is how a generation joins the rest of the campaign, and
+    it reads the words. A bio saying Captain Saltmarrow "commands her ship"
+    names neither The Red Barge nor the Corsair Crew, so the COMMANDS edge the
+    sentence plainly asserts can never be read back out of it."""
+
+    def test_the_body_is_told_to_use_names(self):
+        prompt = generator.build_messages(
+            "npc", "a captain", a_retrieval(), canon_context.Depth()
+        )[1]["content"]
+        assert "NAME THINGS BY THEIR NAMES" in prompt
+        assert "on first reference" in prompt
+
+    def test_the_optional_rules_are_numbered_after_it(self):
+        """The rules below it are appended conditionally and number themselves.
+        Inserting a fourth silently gave two rules the same number until they
+        were made to count."""
+        context = generator.GenerationContext(entities=("Captain Saltmarrow",))
+        with_context = generator.build_messages(
+            "scene", "x", a_retrieval(), canon_context.Depth(),
+            context=context, cluster=True,
+        )[1]["content"]
+        without = generator.build_messages(
+            "scene", "x", a_retrieval(), canon_context.Depth(), cluster=True,
+        )[1]["content"]
+        assert "5. The CONVERSATION block" in with_context
+        assert "6. LIST WHAT THIS CONTAINS" in with_context
+        # No conversation, so the cluster rule takes the number back.
+        assert "5. LIST WHAT THIS CONTAINS" in without
+        assert "The CONVERSATION block" not in without
+
+    def test_no_two_rules_share_a_number(self):
+        prompt = generator.build_messages(
+            "scene", "x", a_retrieval(), canon_context.Depth(),
+            context=generator.GenerationContext(entities=("A",)), cluster=True,
+        )[1]["content"]
+        numbers = re.findall(r"^(\d+)\. ", prompt, flags=re.MULTILINE)
+        assert numbers == sorted(numbers, key=int)
+        assert len(numbers) == len(set(numbers)), numbers

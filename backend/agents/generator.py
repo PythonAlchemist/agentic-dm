@@ -106,6 +106,19 @@ SHAPES = {
             "is true, and what it explains about the world",
 }
 
+#: RULE 4 IS THERE BECAUSE PROSE THAT NAMES NOTHING CONNECTS TO NOTHING.
+#:
+#: The mention scan is how a generation joins the rest of the campaign, and it
+#: reads the words. A bio of Captain Saltmarrow that says she "commands her
+#: ship" and expects "loyalty from her crew" names neither The Red Barge nor
+#: the Corsair Crew, both of which exist in the graph -- so the COMMANDS edge
+#: the sentence plainly asserts can never be read back out of it. Measured on
+#: eight campaign sections: two of the three with real prose named nothing at
+#: all, one of them across 1,967 characters of "the barge", "the crew", "the
+#: characters".
+#:
+#: It is a writing instruction with a graph reason, which is why it sits with
+#: the provenance rules rather than in the shape gloss.
 _INSTRUCTIONS = """You generate material for a Dungeon Master running {book}.
 
 Generate {shape}.
@@ -121,7 +134,12 @@ RULES, and the second is the one that matters:
    and detail you supplied -- goes in `invented`. A DM will act on this at a
    table, and cannot afford to mistake your invention for the book's text.
 3. If the passages are thin or absent, invent more and say so by putting more in
-   `invented`. Do not pad `from_canon` to look better sourced.{context_rule}{cluster_rule}
+   `invented`. Do not pad `from_canon` to look better sourced.
+4. NAME THINGS BY THEIR NAMES, in `body`, on first reference. If the material
+   involves a person, place, ship, or group that HAS a name -- one from the
+   passages above, one handed to you, or one you invented and listed -- write
+   that name. Not "the captain", "her ship", "the crew". Afterwards pronouns
+   are fine.{context_rule}{cluster_rule}
 
 Return ONLY JSON, of this shape:
 
@@ -137,7 +155,7 @@ Return ONLY JSON, of this shape:
 #: own. Both are false, and the second is the worse of the two: it reports a
 #: fact the table established as something a model made up.
 _CONTEXT_RULE = """
-4. The CONVERSATION block is a THIRD source and is neither of the first two.
+{n}. The CONVERSATION block is a THIRD source and is neither of the first two.
    Anything you take from it goes in `from_context`. It is not the book, so it
    may not go in `from_canon`; it is not yours, so it may not go in `invented`."""
 
@@ -466,14 +484,14 @@ def build_messages(
                 # Asked for only when there is a third source to ask about: a
                 # required list that is always empty teaches the model to ignore
                 # it, and this one has to mean something the day it is used.
-                context_rule=_CONTEXT_RULE if not carried.empty else "",
+                context_rule=_CONTEXT_RULE.format(n=5) if not carried.empty else "",
                 context_field=_CONTEXT_FIELD if not carried.empty else "",
                 # Numbered after whatever came before it, so the rules read as
                 # a list rather than jumping from 3 to 4 with a gap where the
                 # context rule would have been.
                 cluster_rule=(
                     _CLUSTER_RULE.format(
-                        n=5 if not carried.empty else 4,
+                        n=6 if not carried.empty else 5,
                         vocabulary=vocabulary_gloss(kind),
                     )
                     if cluster
