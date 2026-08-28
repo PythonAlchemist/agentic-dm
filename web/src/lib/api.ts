@@ -162,6 +162,11 @@ export interface GeneratedReply {
 
 export interface SectionRead {
   section_id: string
+  /** The entity this section is ABOUT, when it is about one. A write-up of
+   *  Captain Saltmarrow names her, so she is among its mentions -- which is
+   *  right for underlining her in her own prose and wrong for listing her as
+   *  something she is connected to. */
+  describes: string | null
   heading: string
   text: string
   plane: 'canon' | 'campaign'

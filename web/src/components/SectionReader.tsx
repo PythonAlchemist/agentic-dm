@@ -132,6 +132,12 @@ export function SectionReader({
   // Only shown once it is the CURRENT section's content.
   const shown = loadedFor === sectionId ? section : null
   const yours = shown?.plane === 'campaign'
+  // Everything the prose names EXCEPT what the section is about. Derived
+  // rather than stored, so it cannot fall out of step with `shown.mentions`,
+  // which the underlining still needs whole.
+  const connected = (shown?.mentions ?? []).filter(
+    (named) => named.entity_id !== shown?.describes
+  )
 
   // A PANE NOW, NOT A DRAWER. It was an overlay because the screen had one
   // column to spare; with three it is the middle one, and reading no longer
@@ -292,7 +298,14 @@ export function SectionReader({
               </div>
             )}
 
-            {/* ONE HOP FROM THIS SECTION, for reference while reading.
+            {/* NOT THE SUBJECT ITSELF. A write-up of Captain Saltmarrow names
+                her, so she is among its mentions -- correct for underlining
+                her in her own prose, and wrong here: her page showed her name
+                three times, as the heading, in the text, and as something she
+                is connected to. The graph knows which entity a section is
+                about, so the reader does not have to infer it from the id.
+
+                ONE HOP FROM THIS SECTION, for reference while reading.
                 What a section is connected to IS the set of things it names --
                 that is the edge the graph actually holds from a section -- so
                 those are the list, with the relationships among them
@@ -303,13 +316,13 @@ export function SectionReader({
                 contains Stables" and two more like it: true of Revel's End,
                 which the prose mentions in passing, and nothing to do with the
                 scene. */}
-            {shown.mentions.length > 0 && (
+            {connected.length > 0 && (
               <div className="mt-5 border-t border-neutral-800 pt-4">
                 <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
-                  Connected ({shown.mentions.length})
+                  Connected ({connected.length})
                 </div>
                 <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-                  {shown.mentions.map((named) => (
+                  {connected.map((named) => (
                     <li key={named.entity_id}>
                       <button
                         onClick={() => openEntity(named.entity_id)}

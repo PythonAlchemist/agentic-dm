@@ -543,6 +543,12 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             WHERE s.plane = 'canon' OR s.campaign = $campaign
             OPTIONAL MATCH (c:Chapter)-[:HAS_SECTION]->(s)
             OPTIONAL MATCH (s)-[:DERIVED_FROM]->(cited:Section)
+            // WHAT THIS SECTION IS ABOUT, so a reader can tell the subject
+            // apart from the company it keeps. Captain Saltmarrow's own write-
+            // up listed her under "Connected", so her name appeared three
+            // times on one screen -- as the heading, underlined in her own
+            // prose, and again as something she is connected to.
+            OPTIONAL MATCH (s)-[:DESCRIBES]->(subject:Entity)
             OPTIONAL MATCH (m:Mention)-[:IN_SECTION]->(s)
             OPTIONAL MATCH (m)-[:REFERS_TO]->(named:Entity)
             OPTIONAL MATCH (named)-[edge]->(far:Entity)
@@ -555,6 +561,7 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
             WHERE (far.plane = 'canon' OR far.campaign = $campaign)
               AND (far)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(s)
             RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
+                   subject.id AS describes,
                    s.plane AS plane, s.kind AS kind, s.invented AS invented,
                    s.from_canon AS from_canon, s.from_yours AS from_yours,
                    s.from_context AS from_context,
