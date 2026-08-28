@@ -242,6 +242,43 @@ class TestATaskIsNeverTheThingItIsAbout:
         assert blocks(list(self.KINDS)) == blocks(list(self.KINDS), kinds=None)
 
 
+class TestAGroupIsNeverOneOfItsMembers:
+    """`Varrin`, `Varrin Axebreaker`, `Clan Axebreaker` and `Axebreaker
+    dwarves` were offered in one block and came back as one thing, so the
+    dwarf who hires the party became his own clan. Seven mentions of a person
+    were filed under a faction, and asking the graph about Varrin answered
+    with the clan."""
+
+    KINDS = {
+        "Varrin": frozenset({"NPC"}),
+        "Varrin Axebreaker": frozenset({"NPC"}),
+        "Clan Axebreaker": frozenset({"FACTION"}),
+        "Axebreaker dwarves": frozenset({"FACTION"}),
+    }
+
+    def test_a_clan_is_not_offered_beside_its_dwarf(self):
+        for _, group in blocks(list(self.KINDS), kinds=self.KINDS):
+            kinds = {next(iter(self.KINDS[n])) for n in group}
+            assert kinds in ({"NPC"}, {"FACTION"}), group
+
+    def test_a_surname_cannot_catch_this_one(self):
+        """`shares_only_a_surname` is the guard that separates a family, and a
+        clan is named for exactly that surname. It does not fire here: the two
+        names do not even share a last word, so the kinds are the only signal
+        left."""
+        assert not shares_only_a_surname("Varrin Axebreaker", "Axebreaker dwarves")
+
+    def test_two_spellings_of_one_faction_are_still_asked_about(self):
+        """Splitting must not stop factions grouping with each other -- which
+        is the whole point, since `Clan Axebreaker` and `Axebreaker dwarves`
+        ARE one thing said twice."""
+        kinds = {
+            "Clan Axebreaker": frozenset({"FACTION"}),
+            "Axebreaker dwarves": frozenset({"FACTION"}),
+        }
+        assert blocks(list(kinds), kinds=kinds) != []
+
+
 class TestAnOwnerIsNotWhatTheyOwn:
     """`Constantori` and `Constantori's Portrait` share a word, so blocking
     offered them together and the model merged a man with his portrait. It did

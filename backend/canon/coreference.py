@@ -100,6 +100,19 @@ def weak_words(names: Sequence[str], *, common: int = 6) -> frozenset[str]:
 _TASK_LABELS = frozenset({"QUEST"})
 
 
+#: A name whose entity is one of these is a GROUP, and a group is never one of
+#: its members. Same defect as `_TASK_LABELS` and found the same way: `Varrin`,
+#: `Varrin Axebreaker`, `Clan Axebreaker` and `Axebreaker dwarves` were offered
+#: in one block and came back as one thing, so the dwarf who hires the party
+#: became his own clan. Seven mentions of a person were filed under a faction,
+#: and asking the graph about Varrin answered with the clan.
+#:
+#: A surname is exactly what a clan is named for, so `shares_only_a_surname`
+#: cannot see this one: `Varrin Axebreaker` and `Axebreaker dwarves` do not
+#: even share a last word. The kinds are the only signal that separates them.
+_GROUP_LABELS = frozenset({"FACTION"})
+
+
 #: Either apostrophe the corpus sets a possessive with. The book uses the curly
 #: one and the extractor emits the straight one, the same split `spine` folds.
 _POSSESSIVE = re.compile(r"['\u2019]s\b", re.IGNORECASE)
@@ -160,17 +173,27 @@ def shares_only_a_surname(a: str, b: str) -> bool:
 
 
 def _partition(name: str, kinds: "Mapping[str, frozenset[str]] | None") -> str:
-    """`task` or `thing`. Blocks never mix the two.
+    """`task`, `group`, or `thing`. Blocks never mix any two.
 
     AT BLOCKING, not at validation, for the reason `weak_words` is: a question
     that offers a quest beside its object invites the answer it gets, and the
     prompt forbidding it did not stop the model doing it fourteen times. Asked
     only about quests, the same model groups two spellings of one quest, which
     is right and useful.
+
+    `group` IS THE SAME RULE ON THE OTHER AXIS. A quest is not the thing it is
+    about; a clan is not the dwarf it is named after. Offered together, both
+    get merged -- and the merge is worse here, because the group's name is the
+    one that survives and the person stops being answerable at all.
     """
     if not kinds:
         return "thing"
-    return "task" if kinds.get(name, frozenset()) & _TASK_LABELS else "thing"
+    labels = kinds.get(name, frozenset())
+    if labels & _TASK_LABELS:
+        return "task"
+    if labels & _GROUP_LABELS:
+        return "group"
+    return "thing"
 
 
 def blocks(
