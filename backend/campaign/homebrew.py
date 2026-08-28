@@ -877,15 +877,24 @@ def derive_edges(tx, *, slug: str, section_id: str, edges) -> dict:
     so the reader dims them and says "guessed" -- visible, checkable, and never
     passing for something the DM asserted.
 
-    BOTH ENDPOINTS MUST BE NAMED IN THE SECTION. The scan has already decided
-    which entities this prose mentions; an edge reaching outside that set is
-    about something the section does not discuss, whatever the model thought.
+    BOTH ENDPOINTS MUST BE NAMED IN THE SECTION, and `{SCANNED}` IS WHAT
+    "NAMED" MEANS. A declared mention is a claim about the manifest -- "this
+    scene contains him" -- true whether or not the prose ever spells it. A
+    scanned one is a claim about the text. Only the second can ground a
+    relationship read back OUT of the text, so only the second is offered.
+
+    Taking both offered the model names the passage does not contain. The
+    Corsair Ambush handed over `Enna 'The Silence' Galakiir` and `Sabrina
+    'Kill More' Kilgore`, neither of which appears in its prose, and its own
+    title besides -- which is the whole reason "points at itself" had to exist
+    as a drop reason.
     """
     named = {
         row["name"].casefold(): row["id"]
         for row in tx.run(
             f"""
             MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$s}})
+            WHERE m.{SCANNED} = true
             MATCH (m)-[:{REFERS_TO}]->(e:Entity)
             RETURN DISTINCT e.id AS id, e.name AS name
             """,

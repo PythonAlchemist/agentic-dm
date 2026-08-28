@@ -1160,6 +1160,33 @@ class TestRelationshipsReadBackOutOfTheProse:
         ).single()["s"]
         assert status == homebrew.AUTHORED
 
+    def test_a_name_only_the_manifest_declares_is_not_relatable(self, table):
+        """A declared mention says "this scene contains her" -- a fact about
+        the manifest, true whether or not the prose ever spells her name. It
+        cannot ground a relationship read back OUT of the prose, because the
+        model cannot see her there. The Corsair Ambush offered up two cast
+        members its text never names."""
+        _store(table, anchor=None, title="Pytest Skipper", body="a", generated_body="a")
+        _store(table, anchor=None, title="Pytest Stowaway", body="a", generated_body="a")
+        section = self._scene(table, "Pytest Skipper stands the watch alone.")
+        table.execute_write(lambda tx: homebrew.rescan(tx, slug=SLUG, section_id=section))
+        # Declared, exactly as `write_cluster` writes it: no `scanned` flag.
+        table.run(
+            "MATCH (s:Section {id:$s}), (e:Entity {name:'Pytest Stowaway'}) "
+            "CREATE (m:Mention {id:$m, plane:'campaign', campaign:$c}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)",
+            {"s": section, "m": f"declared@{section}", "c": SLUG},
+        )
+        result = table.execute_write(
+            lambda tx: homebrew.derive_edges(
+                tx, slug=SLUG, section_id=section,
+                edges=[{"source": "Pytest Skipper", "target": "Pytest Stowaway",
+                        "rel_type": "KNOWS"}],
+            )
+        )
+        assert result["written"] == 0
+        assert result["dropped"] == {"an endpoint is not named in this section": 1}
+
     def test_an_endpoint_the_section_does_not_name_is_refused(self, table):
         """The scan has already decided what this prose mentions. An edge
         reaching outside that is about something the section does not

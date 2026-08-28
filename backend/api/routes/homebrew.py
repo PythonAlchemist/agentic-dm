@@ -869,6 +869,7 @@ async def derive_edges(request: DeriveRequest) -> dict:
     from openai import AsyncOpenAI
 
     from backend.agents import generator
+    from backend.campaign.homebrew import SCANNED
     from backend.graph.schema import IN_SECTION, REFERS_TO
 
     with read_only_session() as session:
@@ -884,11 +885,17 @@ async def derive_edges(request: DeriveRequest) -> dict:
         # rediscovered. They are the closed set the answer may use, which is
         # both what makes the question narrow enough to answer well and what
         # makes an out-of-scope edge impossible rather than merely dropped.
+        #
+        # SCANNED ONLY, matching what `derive_edges` will accept back. A
+        # declared mention says the manifest contains something; it does not
+        # say the prose names it, and a name the passage never uses is one the
+        # model can only relate by guessing.
         names = tuple(
             r["name"]
             for r in session.run(
                 f"""
                 MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$s}})
+                WHERE m.{SCANNED} = true
                 MATCH (m)-[:{REFERS_TO}]->(e:Entity)
                 RETURN DISTINCT e.name AS name ORDER BY e.name
                 """,
