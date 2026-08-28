@@ -71,6 +71,16 @@ export function ChatPane({
     }, 0)
     return () => clearTimeout(timer)
   }, [raised, onRaisedHandled])
+  //: Drafts the DM threw away. Nothing was written, so discarding IS just
+  //  this -- but the alternative was scrolling past a draft you do not want
+  //  for the rest of the session. Keyed rather than spliced, because a turn's
+  //  cards live inside its reply and a raised card comes in as a prop; both
+  //  survive a re-render, and a key that stays hidden is what makes discarding
+  //  stick either way.
+  const [discarded, setDiscarded] = useState<Set<string>>(new Set())
+  const discard = (key: string) =>
+    setDiscarded((prev) => new Set(prev).add(key))
+
   // The anchor picker on a card needs the book's sections to choose from.
   // Fetched once per table rather than per card: it is the same list.
   const [order, setOrder] = useState<OrderRow[]>([])
@@ -151,6 +161,7 @@ export function ChatPane({
           <div className="flex min-h-0 flex-1 flex-col p-3">
           <div className="min-h-0 flex-1 space-y-8 overflow-y-auto pr-1">
             {raisedCards.map((card, index) => (
+              discarded.has(`raised-${index}`) ? null : (
               <div key={`raised-${index}`} className="mb-4">
                 <p className="mb-1 text-xs text-neutral-500">
                   Drafted from your material panel — nothing is stored yet.
@@ -159,9 +170,12 @@ export function ChatPane({
                   card={card}
                   campaign={campaign}
                   order={campaign ? order : []}
+                  book={book}
                   onStored={onChainChanged}
+                  onDiscard={() => discard(`raised-${index}`)}
                 />
               </div>
+              )
             ))}
             {turns.length === 0 && raisedCards.length === 0 && (
               <p className="text-sm leading-relaxed text-neutral-600">
@@ -218,14 +232,18 @@ export function ChatPane({
                         actually appears, with its provenance split intact and
                         a person's approval between it and the graph. */}
                     {(turn.reply.generations ?? []).map((card, index) => (
+                      discarded.has(`turn-${i}-${index}`) ? null : (
                       <div key={index} className="mt-3">
                         <GenerationCard
                           card={card}
                           campaign={campaign}
                           order={campaign ? order : []}
+                          book={book}
                           onStored={onChainChanged}
+                          onDiscard={() => discard(`turn-${i}-${index}`)}
                         />
                       </div>
+                      )
                     ))}
 
                     {/* MECHANISM, BEHIND THE FLIP. These ran on every turn,

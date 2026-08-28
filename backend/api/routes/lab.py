@@ -254,6 +254,70 @@ async def generate(request: GenerateRequest) -> dict:
     }
 
 
+class FindElementsRequest(BaseModel):
+    """A draft the DM wants the cast of."""
+
+    body: str
+    subject: str
+    book: str = "cos"
+    campaign: str | None = None
+    model: str | None = None
+    depth: Depth = Field(default_factory=Depth)
+
+
+@router.post("/find-elements")
+async def find_elements(request: FindElementsRequest) -> dict:
+    """Ask a draft what things it contains, on demand.
+
+    A QUEST, SCENE OR ENCOUNTER IS ANNOTATED WHEN IT IS WRITTEN, and when that
+    pass finds nothing the DM is left with a single entity and no way to ask
+    again. It is not a rare outcome: the pass is element-first, so it reads
+    prose looking for things to MINT and goes quiet exactly when the scene is
+    built out of people who already exist -- which is most of the second scene
+    a table writes.
+
+    So the ask becomes a button. Same `annotate` the write path runs, over the
+    body as it now stands rather than as it was generated, because the DM has
+    usually edited it by the time they notice the cast is missing.
+
+    NOTHING IS WRITTEN. What comes back populates the review the card already
+    has, where each element is ticked or unticked before any of it is stored.
+    """
+    model = request.model or settings.openai_model
+    depth = request.depth.to_domain()
+    if not request.body.strip():
+        return {"elements": [], "edges": [], "dropped": {}}
+
+    agent = DMAgent(
+        model=model,
+        depth=depth,
+        canon=CanonRetriever(
+            limit=depth.passages,
+            passage_width=depth.passage_width,
+            book=request.book,
+            campaign=request.campaign,
+        ),
+    )
+    retrieval = agent._retrieve_canon(request.subject)
+    elements, edges, dropped, error = await generator.annotate(
+        agent.openai,
+        body=request.body,
+        retrieval=retrieval,
+        depth=depth,
+        model=model,
+    )
+    if error:
+        raise HTTPException(status_code=502, detail=f"could not read the cast: {error}")
+    return {
+        "elements": [dict(e) for e in elements],
+        "edges": [dict(x) for x in edges],
+        # COUNTED, NEVER SILENT. A kind the graph will not mint is a thing the
+        # DM asked for and did not get, and saying so is cheaper than letting
+        # them wonder where it went.
+        "dropped": dropped,
+    }
+
+
 @router.post("/reset")
 def reset(session_id: str = "lab") -> dict:
     """Drop a session's history. The knobs are per-request, so nothing else."""

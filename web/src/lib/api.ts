@@ -487,6 +487,23 @@ export const labAPI = {
     })
   },
 
+  /** Ask a draft what things it contains, after the fact. The write path
+   *  annotates a quest or scene as it is generated; when that finds nothing
+   *  the DM is left with one entity and no way to ask again. */
+  findElements(
+    body: string,
+    subject: string,
+    book: string,
+    campaign: string | null,
+    model: string,
+  ) {
+    return post<{
+      elements: GeneratedReply['elements']
+      edges: GeneratedReply['edges']
+      dropped: Record<string, number>
+    }>('/find-elements', { body, subject, book, campaign, model })
+  },
+
   /** Say no to a guess, so it stays said. Deleting one only removes it until
    *  the next read-back proposes it again. */
   rejectEdge(campaign: string, source: string, relType: string, target: string) {

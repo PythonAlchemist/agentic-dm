@@ -16,18 +16,34 @@ import { ClusterReview } from './ClusterReview'
  * NOTHING HERE IS IN THE GRAPH until Store is pressed. That is the whole shape
  * of the flow: a model proposes, a human reads, one step applies.
  */
+//: The kinds that CONTAIN things, and so have a cast worth asking about. An
+//: NPC or a monster IS one thing; asking it what it contains is a question
+//: with no answer, so the control is not offered. Mirrors `CLUSTER_KINDS` in
+//: `dm_agent`, which decides the same thing on the way out.
+const CAN_CONTAIN = new Set(['quest', 'scene', 'encounter'])
+
+
 export function GenerationCard({
   card,
   campaign,
   order,
   onStored,
+  onDiscard,
   onRevise,
+  book,
   busy: revising,
 }: {
   card: GeneratedReply
   campaign: string | null
   order: OrderRow[]
+  /** Which book the session reads, for the retrieval that grounds a
+   *  cast asked for after the fact. */
+  book: string
   onStored?: () => void
+  /** Throw the draft away. Nothing was written, so this is the whole of it --
+   *  but without it the only exit from a draft you do not want is to scroll
+   *  past it forever. */
+  onDiscard?: () => void
   /** Ask for the same thing again with one change. Absent where revision has
    *  nowhere to put the answer -- the chat card is a message in a transcript,
    *  not a pane that can be replaced. */
@@ -45,8 +61,36 @@ export function GenerationCard({
   const [failed, setFailed] = useState('')
   const [plan, setPlan] = useState<ClusterPlan | null>(null)
   const [clusterBody, setClusterBody] = useState<Record<string, unknown> | null>(null)
+  //: A cast asked for AFTER the draft was written, when the pass that runs at
+  //  write time found nothing. Held beside the card rather than in it: the
+  //  card is what the model returned and stays that.
+  const [found, setFound] = useState<GeneratedReply | null>(null)
+  const [finding, setFinding] = useState(false)
 
-  const isCluster = (card.elements?.length ?? 0) > 0
+  const shown = found ?? card
+
+  const findCast = async () => {
+    if (finding) return
+    setFinding(true)
+    setFailed('')
+    try {
+      // THE BODY AS IT NOW STANDS, not as it was generated. By the time a DM
+      // notices the cast is missing they have usually edited the prose, and
+      // annotating what the model first wrote would read the wrong scene.
+      const cast = await labAPI.findElements(
+        body, shown.subject, book, campaign, card.model ?? '',
+      )
+      setFound({ ...card, elements: cast.elements, edges: cast.edges })
+      if (!cast.elements?.length) {
+        setFailed('Nothing in it that the graph would mint as its own thing.')
+      }
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error))
+    } finally {
+      setFinding(false)
+    }
+  }
+  const isCluster = (shown.elements?.length ?? 0) > 0
   // A draft ABOUT something that already exists takes the expand path. The
   // minting path would raise `AlreadyStored` -- correctly, since a second
   // Captain Saltmarrow is not what "tell me more about him" means.
@@ -235,7 +279,7 @@ export function GenerationCard({
 
       {campaign && isCluster && (
         <ClusterReview
-          card={card}
+          card={shown}
           campaign={campaign}
           anchor={anchor}
           onPlan={(next, body) => {
@@ -365,6 +409,34 @@ export function GenerationCard({
               <span className="text-xs text-neutral-300">
                 Resolve the name{plan!.collisions.length === 1 ? '' : 's'} above first.
               </span>
+            )}
+
+            {/* ASK THE DRAFT WHAT IS IN IT. A quest, scene or encounter is
+                annotated as it is written, and that pass is element-first --
+                it reads prose looking for things to MINT and goes quiet
+                exactly when the scene is built out of people who already
+                exist. When it finds nothing there was no way to ask again,
+                and the DM got one entity where they meant a cast. */}
+            {!stored && !isCluster && CAN_CONTAIN.has(shown.kind) && (
+              <button
+                onClick={findCast}
+                disabled={finding || busy}
+                className="text-xs text-neutral-500 underline-offset-2 transition-colors hover:text-neutral-200 hover:underline disabled:opacity-40"
+              >
+                {finding ? 'reading…' : 'find what it contains'}
+              </button>
+            )}
+
+            {/* NOTHING WAS WRITTEN, so this is the whole of discarding. It is
+                here because without it the only exit from a draft you do not
+                want is to scroll past it for the rest of the session. */}
+            {!stored && onDiscard && (
+              <button
+                onClick={onDiscard}
+                className="ml-auto text-xs text-neutral-600 transition-colors hover:text-rose-300"
+              >
+                discard
+              </button>
             )}
           </div>
           {failed && <p className="mt-2 text-xs text-red-400">{failed}</p>}
