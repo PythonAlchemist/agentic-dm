@@ -679,6 +679,31 @@ class DMAgent:
             # best of those is the obvious place. The card offered 546 sections
             # across thirteen unconnected heists with no suggestion at all.
             suggested, chapters = canon_context.suggest_anchor(own)
+            # AND THEN ASKED, because the deterministic answer is to a
+            # different question. `suggest_anchor` finds the section that names
+            # the subject most, which comes apart from which beat this is on
+            # any scene about getting somewhere: a sea battle on the voyage to
+            # Revel's End scores the prison seven and the voyage two, so it
+            # lands after they have arrived. Over ten subjects with the
+            # acceptable anchors written down first, weight alone was right
+            # four times and asking over the same shortlist eight.
+            #
+            # THE DETERMINISTIC ANSWER REMAINS THE FALLBACK. A failed call, a
+            # slot outside the list, an unparseable reply -- each falls back to
+            # it rather than failing the card, so this can only improve the
+            # suggestion or leave it where it was.
+            # READ OFF THE CARD, NOT OFF `drafted`. That name is bound inside
+            # the try above and is not there at all when generation raised --
+            # the branch that builds an error card. The card is always built.
+            if not request.insert_after and not card.get("error"):
+                placed = await canon_context.place_it(
+                    self.openai,
+                    subject=request.subject,
+                    body=str(card.get("body") or ""),
+                    shown=canon_context.sources(own),
+                    model=self.model,
+                )
+                suggested = placed or suggested
             card["anchor"] = request.insert_after or suggested
             #: The chapters this scene is actually about, so a picker can lead
             #: with them instead of listing the whole book flat.

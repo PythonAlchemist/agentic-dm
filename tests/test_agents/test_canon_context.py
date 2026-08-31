@@ -5,6 +5,8 @@ from an answer a model happened to produce.
 """
 
 
+import asyncio
+
 from backend.agents import canon_context
 from backend.canon.retrieval import PATH_GRAPH, PATH_TEXT, Passage, Retrieval
 
@@ -398,3 +400,60 @@ class TestTheRosterIsForTheChatAndNotTheGenerator:
         block = canon_context.render(self._shown(), max_edges=4, for_chat=False)
         assert "revise_my_material" not in block
         assert "WHAT THE DM IS READING" not in block
+
+
+class TestAskingWhichBeatThisIs:
+    """`suggest_anchor` answers which section names the subject most, which
+    comes apart from which beat this is on any scene about getting somewhere.
+    A sea battle on the voyage to Revel's End scores the prison at seven
+    mentions and the voyage at two, so the deterministic answer lands after
+    the party has arrived."""
+
+    SHOWN = [
+        {"source": "kftgv:prisoner-13#4", "section": "Varrin’s Proposition"},
+        {"source": "kftgv:prisoner-13#7", "section": "Trek to the Prison"},
+        {"source": "kftgv:prisoner-13#12", "section": "Revel’s End"},
+    ]
+
+    def _client(self, reply):
+        class Fake:
+            class chat:
+                class completions:
+                    @staticmethod
+                    async def create(**kw):
+                        from types import SimpleNamespace
+                        return SimpleNamespace(choices=[SimpleNamespace(
+                            message=SimpleNamespace(content=reply))])
+        return Fake()
+
+    def test_it_returns_the_slot_it_was_given(self):
+        got = asyncio.run(canon_context.place_it(
+            self._client('{"after": 2}'), subject="a sea battle", body="",
+            shown=self.SHOWN, model="m"))
+        assert got == "kftgv:prisoner-13#7"
+
+    def test_a_slot_outside_the_list_is_discarded(self):
+        """The answer is an INDEX into what was shown, so a model cannot invent
+        a section that was never offered -- and one out of range is dropped
+        rather than clamped into a choice nobody made."""
+        for reply in ('{"after": 9}', '{"after": 0}', '{"after": -1}'):
+            assert asyncio.run(canon_context.place_it(
+                self._client(reply), subject="x", body="", shown=self.SHOWN,
+                model="m")) == ""
+
+    def test_an_unparseable_reply_falls_back(self):
+        assert asyncio.run(canon_context.place_it(
+            self._client("no json here"), subject="x", body="",
+            shown=self.SHOWN, model="m")) == ""
+
+    def test_nothing_shown_asks_nothing(self):
+        """`client` is None on purpose: reaching the network here would raise
+        rather than quietly pass."""
+        assert asyncio.run(canon_context.place_it(
+            None, subject="x", body="", shown=[], model="m")) == ""
+
+    def test_the_prompt_says_what_after_means(self):
+        """The whole failure is that the destination outranks the journey, so
+        the question has to say which one it wants."""
+        assert "AFTER MEANS THE BEAT BEFORE IT" in canon_context._PLACE
+        assert "not after the prison" in canon_context._PLACE

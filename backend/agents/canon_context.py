@@ -22,7 +22,9 @@ language available, with what it is worth.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
+from typing import Any
 
 from backend.canon.retrieval import DEFAULT_LIMIT, PATH_GRAPH, PATH_TEXT, Retrieval
 
@@ -456,6 +458,100 @@ def suggest_anchor(retrieval: Retrieval) -> tuple[str, tuple[str, ...]]:
     by_graph = [s for s in within if s.get("path") == PATH_GRAPH]
     best = (by_graph or within)[0]
     return str(best.get("source") or ""), chapters
+
+
+_PLACE = """A Dungeon Master has had this written for their game.
+
+WHAT IT IS: {subject}
+
+{body}
+
+Their running order is the book's own sections, in order. These are the ones
+this material was written against:
+
+{shortlist}
+
+Which one does it come immediately AFTER in play?
+
+AFTER MEANS THE BEAT BEFORE IT, and that is the whole question. Material about
+travelling somewhere comes after whatever sends them and BEFORE the place they
+have not reached yet -- a fight on the voyage to a prison comes after the
+voyage begins, not after the prison, however much the prison is mentioned.
+Material about a place they are at comes after that place is introduced.
+
+Reply with JSON only: {{"after": <the number>}}
+Pick from the list. If none of them is the beat before this, pick the one
+closest to it."""
+
+
+async def place_it(
+    client: Any,
+    *,
+    subject: str,
+    body: str,
+    shown: list[dict],
+    model: str,
+    temperature: float = 0.0,
+) -> str:
+    """Which shown passage this material comes after. `""` when unanswerable.
+
+    `suggest_anchor` ANSWERS A DIFFERENT QUESTION and says so in its own
+    docstring: which section names the subject most, which comes apart from
+    which beat this is on any scene about getting somewhere. A sea battle on
+    the voyage to Revel's End scores the prison at seven mentions and the
+    voyage at two, so the deterministic answer lands after they have arrived.
+    Measured over ten subjects with the acceptable answers written down first,
+    it was right four times.
+
+    NOTHING DETERMINISTIC REORDERS IT. The signals available -- mention weight,
+    retrieval rank, the book's own order -- all say the same wrong thing,
+    because the destination genuinely is what the prose is most about. Taking
+    the earliest retrieved passage instead proposes the job offer, which is
+    early by as much as the other is late.
+
+    So this asks, over a CLOSED list of the eight passages the material was
+    written against, and the answer is an index into that list rather than a
+    section id: a model cannot invent a slot that was never shown, and one that
+    comes back outside the range is discarded rather than guessed at.
+
+    A SUGGESTION EITHER WAY. The caller keeps the deterministic answer as its
+    fallback, the card shows the shortlist beside whatever is chosen, and a DM
+    overrides both with one click. This is worth a cheap call because the cost
+    of the wrong beat is a scene played after the arrival it was meant to
+    delay -- and worth no more than a cheap call for the same reason.
+    """
+    if not shown:
+        return ""
+    lines = []
+    for index, source in enumerate(shown, start=1):
+        # `sources` calls the heading `section`; `heading` is what the card
+        # calls the same thing, so both are accepted rather than one
+        # being right by luck.
+        heading = str(
+            source.get("section") or source.get("heading") or source.get("source") or ""
+        )
+        lines.append(f"  {index}. {heading}")
+    prompt = _PLACE.format(
+        subject=subject or "(unsaid)",
+        # ENOUGH TO TELL THE BEAT, not the whole scene. What decides this is
+        # where the material sits in the journey, which its opening says.
+        body=(body or "")[:700],
+        shortlist="\n".join(lines),
+    )
+    try:
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=60,
+        )
+        raw = json.loads((response.choices[0].message.content or "").strip())
+        choice = int(raw.get("after", 0))
+    except Exception:  # noqa: BLE001 - a failed placement falls back, never fails a card
+        return ""
+    if not 1 <= choice <= len(shown):
+        return ""
+    return str(shown[choice - 1].get("source") or "")
 
 
 def sources(retrieval: Retrieval) -> list[dict]:

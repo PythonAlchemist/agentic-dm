@@ -1,0 +1,87 @@
+# Where a generated scene belongs in the running order.
+#
+# `suggest_anchor` answers "which section does the subject name most", which
+# comes apart from "which beat is this" on any scene about getting somewhere:
+# a fight on the voyage to Revel's End scores the prison at seven mentions and
+# the voyage at two, so the suggestion lands after the party has arrived.
+#
+# WHAT `after` MEANS. The anchor is the section the new material is inserted
+# AFTER, so a scene about travelling toward a place anchors after the beat that
+# sends them, not after the place they have not reached yet. "The trek south to
+# Elra's camp" belongs after `Meeting Elra` -- where her ghost tells them where
+# the camp is -- and before `Elra's Camp`, where they arrive.
+#
+# EACH CASE LISTS EVERY DEFENSIBLE ANSWER rather than one, because a beat can
+# honestly sit in more than one place and a measurement that insists on a
+# single id would score good suggestions as failures. A scene of the party
+# arriving at the camp is defensible after either `Meeting Elra` or `Elra's
+# Camp` depending on whether the DM reads it as approach or arrival.
+
+cases:
+  - id: a01
+    book: kftgv
+    subject: the trek south to Elra's camp
+    accept: [kftgv:reach-for-the-stars#4]
+    why: after her ghost sends them, before they arrive
+
+  - id: a02
+    book: kftgv
+    subject: the party sheltering overnight at Elra's camp
+    accept: [kftgv:reach-for-the-stars#4, kftgv:reach-for-the-stars#5]
+    why: at the camp, so after arriving there or after being sent
+
+  - id: a03
+    book: kftgv
+    subject: a cultist the party meets on the road south to Elra's camp
+    accept: [kftgv:reach-for-the-stars#4, kftgv:reach-for-the-stars#5]
+    why: on the road between the meeting and the camp
+
+  - id: a04
+    book: kftgv
+    subject: the party's first sight of Delphi Mansion from the bluff
+    accept: [kftgv:reach-for-the-stars#5, kftgv:reach-for-the-stars#6,
+             kftgv:reach-for-the-stars#7]
+    why: the bluff overlooks the mansion, so at the camp or on arrival
+
+  - id: a05
+    book: kftgv
+    subject: a storm that scatters the crew on the voyage to Revel's End
+    accept: [kftgv:prisoner-13#7]
+    why: the voyage is Trek to the Prison, before they arrive
+
+  - id: a06
+    book: kftgv
+    subject: a sea battle on the voyage to Revel's End
+    accept: [kftgv:prisoner-13#7]
+    why: same voyage; the fight happens on it, not at the prison
+
+  - id: a07
+    book: kftgv
+    subject: Varrin briefing the party on the job
+    accept: [kftgv:prisoner-13#3, kftgv:prisoner-13#4]
+    why: the briefing IS Varrin's Proposition, or just before it
+
+  - id: a08
+    book: cos
+    subject: a night in the Blood of the Vine Tavern
+    accept: [cos:the-village-of-barovia#4, cos:the-village-of-barovia#5]
+    why: the tavern is area E2 in the village
+
+  - id: a09
+    book: cos
+    subject: the party's first sight of Castle Ravenloft from the road
+    accept: [cos:the-village-of-barovia#0, cos:the-village-of-barovia#1,
+             cos:into-the-valley#0, cos:into-the-valley#1]
+    why: seen on the approach, before the castle chapter
+
+  # CORRECTED AFTER THE FIRST RUN, and against my own result. This listed
+  # `#4`, `#5` and `#6` -- guessed indices for "somewhere in the village" --
+  # which are Bildrath's Mercantile, the Blood of the Vine Tavern and Mad
+  # Mary's Townhouse. Ireena and Ismark live at the burgomaster's mansion,
+  # which is `#7`, so the answer scored as a miss was right and the case was
+  # wrong. Written down here rather than quietly widened.
+  - id: a10
+    book: cos
+    subject: returning Ireena to her brother in the village
+    accept: [cos:the-village-of-barovia#7]
+    why: E4, the burgomaster's mansion, where she and Ismark live
