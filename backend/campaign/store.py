@@ -212,6 +212,52 @@ def create(tx, campaign: Campaign) -> None:
         )
 
 
+def delete_campaign(tx, slug: str) -> dict:
+    """Remove a campaign and everything it ever wrote. Counted, never silent.
+
+    THE INVERSE `create` NEVER HAD. A table could be made and not unmade, so
+    an abandoned one left its running order on the book forever: 542 `NEXT`
+    links between CANON sections, each carrying a slug for a campaign that no
+    longer existed. Deleting the `:Campaign` node does not touch them, because
+    they join two nodes it does not own -- the same shape that let edges and
+    then mentions outlive the prose that made them, one level up.
+
+    CANON IS NEVER MUTATED, which is the invariant that makes this possible at
+    all. Everything removed here was created by the campaign: its own entities
+    and sections, the mentions it wrote, the edges it asserted, and the chain
+    it laid over the book's own order. The book's nodes survive with their
+    campaign-plane attachments gone and nothing else changed.
+
+    ORDERED SO NOTHING IS ORPHANED ON THE WAY. Mentions before the sections
+    they sit in, aliases after the entities that answer to them, the chain
+    before the campaign that owns it -- each step leaving nothing for the next
+    to trip over.
+    """
+    counts: dict[str, int] = {}
+
+    def run(key: str, cypher: str) -> None:
+        counts[key] = tx.run(cypher, {"slug": slug, "plane": CAMPAIGN_PLANE}).single()["n"]
+
+    # The mention triangle first: a mention outlives its section otherwise,
+    # which is exactly the defect this ordering exists to avoid.
+    run("mentions", "MATCH (m:Mention {campaign:$slug}) DETACH DELETE m RETURN count(m) AS n")
+    # Every relationship the campaign wrote, wherever it lands. This is the one
+    # that catches the chain over canon sections and the edges between canon
+    # entities -- neither has an endpoint the campaign owns.
+    run("relationships", "MATCH ()-[r]->() WHERE r.campaign = $slug DELETE r RETURN count(r) AS n")
+    run("sections",
+        "MATCH (s:Section {plane:$plane, campaign:$slug}) DETACH DELETE s RETURN count(s) AS n")
+    run("entities",
+        "MATCH (e:Entity {plane:$plane, campaign:$slug}) DETACH DELETE e RETURN count(e) AS n")
+    # AFTER the entities, since an alias is orphaned by their going and the
+    # `:Alias` node is shared -- it goes only when nothing answers to it.
+    run("aliases",
+        "MATCH (a:Alias {plane:$plane}) WHERE NOT (a)-[:ALIAS_OF]->() "
+        "DETACH DELETE a RETURN count(a) AS n")
+    run("campaign", "MATCH (c:Campaign {slug:$slug}) DETACH DELETE c RETURN count(c) AS n")
+    return counts
+
+
 def apply_rewire(
     tx, slug: str, rewire: Rewire, expected: frozenset[str], *, log_path: Path | None = None
 ) -> dict:

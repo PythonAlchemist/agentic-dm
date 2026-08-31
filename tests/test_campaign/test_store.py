@@ -52,6 +52,56 @@ def table(tmp_path):
         _clean(session)
 
 
+class TestUnmakingATable:
+    """`create` had no inverse, so an abandoned campaign left its running
+    order lying on the book -- 542 `NEXT` links between CANON sections, each
+    carrying the slug of a campaign that no longer existed. Deleting the
+    `:Campaign` node does not touch them, because they join two nodes it does
+    not own."""
+
+    def test_the_chain_over_the_book_goes_too(self, table):
+        before = table.run(
+            "MATCH ()-[r:NEXT {campaign:$s}]->() RETURN count(r) AS n", {"s": SLUG}
+        ).single()["n"]
+        assert before > 0, "the fixture seeded a chain to remove"
+        counts = table.execute_write(lambda tx: store.delete_campaign(tx, SLUG))
+        assert counts["relationships"] >= before
+        after = table.run(
+            "MATCH ()-[r]->() WHERE r.campaign = $s RETURN count(r) AS n", {"s": SLUG}
+        ).single()["n"]
+        assert after == 0
+
+    def test_the_book_is_untouched(self, table):
+        """The invariant the whole design rests on. Everything removed was
+        created by the campaign; canon survives with its campaign-plane
+        attachments gone and nothing else changed."""
+        before = table.run(
+            "MATCH (x:Section {plane:'canon'}) RETURN count(x) AS n"
+        ).single()["n"]
+        table.execute_write(lambda tx: store.delete_campaign(tx, SLUG))
+        after = table.run(
+            "MATCH (x:Section {plane:'canon'}) RETURN count(x) AS n"
+        ).single()["n"]
+        assert after == before
+
+    def test_the_campaign_node_goes_last_and_goes(self, table):
+        table.execute_write(lambda tx: store.delete_campaign(tx, SLUG))
+        assert table.run(
+            "MATCH (c:Campaign {slug:$s}) RETURN count(c) AS n", {"s": SLUG}
+        ).single()["n"] == 0
+
+    def test_deleting_a_campaign_that_is_not_there_removes_nothing(self, table):
+        """Reported as zeroes rather than raised: asking to remove something
+        already gone is not an error, and the counts say so."""
+        counts = table.execute_write(
+            lambda tx: store.delete_campaign(tx, "pytest-no-such-table")
+        )
+        assert set(counts.values()) == {0}
+        assert table.run(
+            "MATCH (c:Campaign {slug:$s}) RETURN count(c) AS n", {"s": SLUG}
+        ).single()["n"] == 1, "the real one is untouched"
+
+
 class TestSeeding:
     def test_the_chain_is_the_books_order(self, table):
         assert store.running_order(table, SLUG) == SECTIONS
