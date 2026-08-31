@@ -4,7 +4,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
+from backend.api.auth import OPEN_PATHS, identify, readers
 from backend.api.routes import (
     audio,
     campaign,
@@ -20,6 +23,65 @@ from backend.api.routes import (
 from backend.core.config import settings
 
 
+class ReaderGate:
+    """Refuse anything under `/api` without a reader token.
+
+    RAW ASGI RATHER THAN A ROUTE DEPENDENCY because the chat router carries a
+    WebSocket, and a dependency that raises `HTTPException` has no response to
+    raise it into. At this level both scopes look the same and the guarantee is
+    the simple one: nothing under `/api` answers without a token, whatever kind
+    of route it turns out to be.
+
+    THE WEBSOCKET IS GATED BY THE SAME RULE and accepts a valid token like any
+    other route -- but a browser cannot set a header on a WebSocket handshake,
+    so it is unreachable from `web/` while the deployment is gated. Nothing in
+    `web/` opens it, so that costs nothing today. If it is ever wired up it
+    needs a real handshake; the token in a query string is not the answer,
+    since that puts a credential in every proxy log and referrer.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket") or not readers():
+            await self.app(scope, receive, send)
+            return
+        if scope.get("path", "") in OPEN_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        # PREFLIGHT IS NOT A READ. The browser sends `OPTIONS` without the
+        # `Authorization` header by design, so gating it would fail every
+        # cross-origin call before the real request was ever made. It carries
+        # no book text; CORS below decides whether it is answered.
+        if scope["type"] == "http" and scope.get("method") == "OPTIONS":
+            await self.app(scope, receive, send)
+            return
+
+        offered = ""
+        for key, value in scope.get("headers", []):
+            if key == b"authorization":
+                scheme, _, token = value.decode("latin-1").partition(" ")
+                if scheme.lower() == "bearer":
+                    offered = token.strip()
+                break
+
+        if identify(offered):
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        response = JSONResponse(
+            {"detail": "this deployment is private; a reader token is required"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        await response(scope, receive, send)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown."""
@@ -27,6 +89,15 @@ async def lifespan(app: FastAPI):
     settings.pdf_dir.mkdir(parents=True, exist_ok=True)
     settings.transcript_dir.mkdir(parents=True, exist_ok=True)
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
+
+    # SAID OUT LOUD, BOTH WAYS. The graph holds the prose of two published
+    # books, so "did the tokens get set" is the one deployment question worth
+    # answering at startup rather than by trying the URL in a private window.
+    known = readers()
+    if known:
+        print(f"[auth] gated -- {len(known)} reader(s): {', '.join(sorted(known.values()))}")
+    else:
+        print("[auth] OPEN -- no ACCESS_TOKENS set; every endpoint answers anyone")
 
     yield
 
@@ -41,11 +112,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for frontend
+# ORDER MATTERS, AND IT IS THE REVERSE OF WHAT IT READS AS. Starlette builds
+# the stack so that the LAST middleware added is the OUTERMOST, so adding the
+# gate first and CORS second puts CORS around it -- which is what makes a 401
+# arrive at the browser as a 401 rather than as an opaque CORS failure the
+# frontend cannot tell apart from the API being down.
+app.add_middleware(ReaderGate)
+
+_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
-    allow_credentials=True,
+    allow_origins=_origins or ["*"],
+    # THE CREDENTIAL IS A BEARER TOKEN, NOT A COOKIE, so the browser never
+    # needs to attach one on our behalf -- and `allow_credentials` alongside
+    # `allow_origins=["*"]` is a combination the CORS spec forbids outright.
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

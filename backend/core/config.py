@@ -55,6 +55,18 @@ class Settings(BaseSettings):
     api_port: int = 8001
     debug: bool = False
 
+    #: Who may read the graph. `"alice:<sha256>,bob:<sha256>"`, one entry per
+    #: person, hashed -- `backend/api/auth.py` says why it is per-person and
+    #: why the plaintext never lands here. EMPTY MEANS OPEN, which is what
+    #: makes local development and the tests work unchanged; `main` says so
+    #: loudly at startup rather than leaving it to be discovered.
+    access_tokens: str = ""
+
+    #: Origins the browser may call from, comma-separated. Empty means any,
+    #: which was the old hardcoded behaviour and is right for local work.
+    #: A deployment sets its one Vercel origin.
+    allowed_origins: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

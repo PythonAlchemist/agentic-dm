@@ -11,6 +11,80 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://127.0.0.1:8000/api'
 
+/**
+ * The reader token, and the single door every request goes through.
+ *
+ * WHY A TOKEN AT ALL: the graph holds the prose of two published books, so the
+ * deployment is gated and each reader is a person the DM confirmed owns them.
+ * `backend/api/auth.py` is the other half and explains the rest.
+ *
+ * EVERY REQUEST GOES THROUGH `send`, rather than each call site remembering to
+ * attach a header. Five sites is few enough to edit by hand and exactly few
+ * enough that the sixth, added later, would be the one that forgot -- and a
+ * forgotten header here is not a bug that shows up as a header problem, it is
+ * a login screen appearing at random.
+ */
+const TOKEN_KEY = 'agentic-dm.reader-token'
+
+let token = ''
+let refusedHandler: (() => void) | null = null
+
+export const auth = {
+  /** Read back what this browser was given. Guarded for the server render,
+   *  where `localStorage` does not exist and touching it throws. */
+  load(): string {
+    if (typeof window === 'undefined') return ''
+    token = window.localStorage.getItem(TOKEN_KEY) ?? ''
+    return token
+  },
+  set(value: string) {
+    token = value.trim()
+    if (typeof window !== 'undefined') window.localStorage.setItem(TOKEN_KEY, token)
+  },
+  clear() {
+    token = ''
+    if (typeof window !== 'undefined') window.localStorage.removeItem(TOKEN_KEY)
+  },
+  has(): boolean {
+    return token.length > 0
+  },
+  /** Called when the API refuses us, so the app can show the door again. */
+  onRefused(handler: () => void) {
+    refusedHandler = handler
+  },
+  /**
+   * Does the API accept what we are holding?
+   *
+   * ASKED OF THE API RATHER THAN DECIDED HERE, and `/lab/config` is the
+   * cheapest thing behind the gate -- it reads a handful of counts and no book
+   * text. A frontend that judged its own token would be a gate anyone could
+   * walk through with the devtools open.
+   */
+  async check(): Promise<boolean> {
+    const response = await send(`${API_BASE}/lab/config`)
+    return response.ok
+  },
+}
+
+/**
+ * `fetch`, carrying the token and noticing when it is rejected.
+ *
+ * A 401 CLEARS THE STORED TOKEN rather than retrying, because the only two
+ * ways to get one are a token that was never right and a token that has been
+ * revoked -- and in both the answer is to ask for a new one, not to keep
+ * sending the old one at every endpoint the page touches.
+ */
+async function send(url: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const response = await fetch(url, { ...init, headers })
+  if (response.status === 401) {
+    auth.clear()
+    refusedHandler?.()
+  }
+  return response
+}
+
 export interface ModelInfo {
   id: string
   label: string
@@ -303,14 +377,14 @@ export interface StoredResult {
 }
 
 async function getJSON<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`)
+  const response = await send(`${API_BASE}${path}`)
   if (!response.ok) throw new Error(`${path} failed: ${response.status}`)
   return response.json()
 }
 
 /** Posts to a path OUTSIDE `/lab`, which `post` below prefixes. */
 async function postTo<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await send(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -340,7 +414,7 @@ function readableDetail(body: unknown): string {
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE}/lab${path}`, {
+  const response = await send(`${API_BASE}/lab${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -357,7 +431,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 export const labAPI = {
   async config(): Promise<LabConfig> {
-    const response = await fetch(`${API_BASE}/lab/config`)
+    const response = await send(`${API_BASE}/lab/config`)
     if (!response.ok) throw new Error(`config failed: ${response.status}`)
     return response.json()
   },
@@ -549,7 +623,7 @@ export const labAPI = {
   },
 
   reset(sessionId: string) {
-    return fetch(`${API_BASE}/lab/reset?session_id=${encodeURIComponent(sessionId)}`, {
+    return send(`${API_BASE}/lab/reset?session_id=${encodeURIComponent(sessionId)}`, {
       method: 'POST',
     })
   },

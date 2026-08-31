@@ -5,6 +5,7 @@ import { ChatPane } from '@/components/ChatPane'
 import { RunningOrder } from '@/components/RunningOrder'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 
+import { Door } from '@/components/Door'
 import { SectionReader } from '@/components/SectionReader'
 import { Setup } from '@/components/Setup'
 import { useDebug } from '@/lib/debug'
@@ -12,6 +13,7 @@ import { YourMaterial } from '@/components/YourMaterial'
 import { SpendChip, type Running } from '@/components/Meters'
 import { TooltipProvider } from '@/components/ui'
 import {
+  auth,
   labAPI,
   type CampaignInfo,
   type Cost,
@@ -50,6 +52,11 @@ function accumulate(running: Running, usage: Usage, cost: Cost): Running {
 export default function Lab() {
   const [config, setConfig] = useState<LabConfig | null>(null)
   const [failed, setFailed] = useState('')
+  //: Whether the API has refused us. STARTS UNKNOWN (`null`) rather than
+  //  false, because the answer takes a round trip and rendering the lab for
+  //  that instant flashes a screenful of book text at somebody who may turn
+  //  out not to be allowed to see it.
+  const [locked, setLocked] = useState<boolean | null>(null)
   const [model, setModel] = useState('')
   const [book, setBook] = useState('')
   const [campaign, setCampaign] = useState<string | null>(null)
@@ -80,23 +87,38 @@ export default function Lab() {
   const [depth, setDepth] = useState<Depth>(FALLBACK_DEPTH)
   const [running, setRunning] = useState<Running>(ZERO)
 
-  useEffect(() => {
+  //: Pulled out of the mount effect so the door can call it again on the way
+  //  in, rather than the page needing a remount to notice it was opened.
+  const open = useCallback(() => {
     labAPI
       .config()
       .then((c) => {
+        setLocked(false)
         setConfig(c)
         setModel(c.default_model)
         // The first book the graph holds, rather than a slug written here:
         // this list is counted, and a hardcoded default outlives the book.
         setBook(c.books[0]?.slug ?? '')
         setDepth(c.defaults ?? FALLBACK_DEPTH)
+        labAPI.campaigns().then((r) => setCampaigns(r.campaigns)).catch(() => undefined)
       })
-      .catch((e) => setFailed(e instanceof Error ? e.message : String(e)))
+      // A 401 IS NOT A FAILURE TO REACH THE API, and showing it as one told a
+      // reader with a revoked token that the backend was down. `send` has
+      // already flipped `locked` through `onRefused` by the time this runs.
+      .catch((e) => {
+        const message = e instanceof Error ? e.message : String(e)
+        if (!message.includes('401')) setFailed(message)
+      })
   }, [])
 
   useEffect(() => {
-    labAPI.campaigns().then((c) => setCampaigns(c.campaigns)).catch(() => undefined)
-  }, [])
+    // REGISTERED BEFORE THE FIRST REQUEST, so a 401 from that request is the
+    // thing that raises the door -- the app never has to guess whether this
+    // deployment is gated, it finds out by asking.
+    auth.onRefused(() => setLocked(true))
+    auth.load()
+    open()
+  }, [open])
 
   const noteChainChanged = useCallback(() => setOrderVersion((v) => v + 1), [])
 
@@ -106,6 +128,10 @@ export default function Lab() {
   const resetSession = async () => {
     setRunning(ZERO)
     await labAPI.reset(SESSION_ID).catch(() => undefined)
+  }
+
+  if (locked) {
+    return <Door onOpened={open} />
   }
 
   if (failed) {
@@ -124,6 +150,7 @@ export default function Lab() {
     )
   }
 
+  // `locked === null` is the round trip still in flight, and lands here.
   if (!config) {
     return <div className="p-8 text-sm text-neutral-600">Loading…</div>
   }
