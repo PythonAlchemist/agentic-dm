@@ -7,13 +7,14 @@ homebrew section could reach one, the suites would stop measuring the book and
 the number would not change enough for anyone to notice.
 """
 
+import time
+
 import pytest
 
 from backend.agents import canon_context
 from backend.campaign import homebrew, store
 from backend.campaign.chain import seed_plan
-from backend.campaign.model import CAMPAIGN_PLANE, Campaign
-from backend.campaign.model import is_campaign_id
+from backend.campaign.model import CAMPAIGN_PLANE, Campaign, is_campaign_id
 from backend.canon.retrieval import PATH_FOCUS, CanonRetriever
 from backend.core.database import neo4j_session
 
@@ -413,6 +414,23 @@ class TestLinkingACanonEntityIntoAScene:
         assert with_campaign == without
 
 
+def _await_alias(name: str, tries: int = 50) -> None:
+    """Block until a NEW session can see this alias.
+
+    Not a sleep: it reads the way the code under test reads, so it waits for
+    exactly the condition that matters and returns the moment it holds.
+    """
+    for _ in range(tries):
+        with neo4j_session() as fresh:
+            if fresh.run(
+                "MATCH (a:Alias {name:$n})-[:ALIAS_OF]->() RETURN count(a) AS n",
+                {"n": name},
+            ).single()["n"]:
+                return
+        time.sleep(0.02)
+    raise AssertionError(f"alias {name!r} never became visible to a new session")
+
+
 class TestYourOwnNamesAreMatchedCaseFolded:
     """The two-pass case rule is all-or-nothing: a strict match anywhere means
     the folded pass never runs. So "lets revisit the homebrew content about the
@@ -439,13 +457,22 @@ class TestYourOwnNamesAreMatchedCaseFolded:
             """,
             {"id": f"{BOOK}:pytest-warden-kessel"},
         )
+        # WAIT FOR IT TO BE VISIBLE TO A FRESH SESSION, which is what the
+        # retriever opens. The write lands in this session and the read happens
+        # in another with no bookmark tying them, so the retriever could run
+        # against a snapshot from before the alias existed -- and then resolve
+        # only the campaign name, which is what this failed with about a third
+        # of the time.
+        _await_alias("Pytest Warden Kessel")
         try:
             result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
                 "what does Pytest Warden Kessel know about the corsair boarding"
             )
             ids = [a.entity_id for a in result.anchors]
             assert any(is_campaign_id(i) for i in ids), "the DM's own name resolved"
-            assert any(not is_campaign_id(i) for i in ids), "canon still resolves too"
+            assert any(not is_campaign_id(i) for i in ids), (
+                f"canon still resolves too; got {ids} ambiguous={result.ambiguous}"
+            )
         finally:
             # The entity goes with the book prefix on teardown; the alias is
             # canon-plane, so the fixture's orphan sweep does not reach it.
