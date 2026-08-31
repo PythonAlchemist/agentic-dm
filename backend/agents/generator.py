@@ -110,11 +110,23 @@ SHAPES = {
     # shape, which a model can supply out of nothing. Over eleven runs of one
     # subject a scene cited the book 1.6 times on average and cited it not at
     # all three times; a quest over four runs never went below three. The gap
-    # was in the question, not the model.
+    # NAME, DO NOT DESCRIBE, added after the same measurement caught the cost.
+    # Asking a scene which of the book's things it touches pushed grounding
+    # from 1.2 citations to 2.7 and stopped it citing nothing -- and the first
+    # two claims unsupported by ANY passage in a hundred-odd judged all
+    # session came straight after, both from one scene, both describing a
+    # canon place rather than naming it: "looms on a high precipice", "towers
+    # pierce the clouds". Naming a thing needs no invention; saying what it
+    # looks like does, and that description is what got filed under the book.
+    #
+    # Two failures at n=55 is not distinguishable from noise -- the intervals
+    # overlap and the gate still passes -- so this is a cheap hedge against a
+    # plausible mechanism rather than a fix for a proven regression.
     "scene": "an episode that happens at a point in the adventure: what "
-             "occurs, which of the book's people, places or things it touches, "
-             "where it interrupts the journey or the plan, who "
-             "appears, how it can play out, and what it changes afterwards",
+             "occurs, which of the book's people, places or things it touches "
+             "-- NAME them, do not describe them, since what they are like is "
+             "the book's to say -- where it interrupts the journey or the plan, "
+             "who appears, how it can play out, and what it changes afterwards",
     # A SCENE SAYS WHAT HAPPENS; AN ENCOUNTER SAYS WHO YOU ARE FIGHTING. Asked
     # for "a cast of enemies in a table", the closest kind was `scene`, which
     # produced good prose about a fight and left the DM to pull the opposition
