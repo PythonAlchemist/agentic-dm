@@ -455,7 +455,21 @@ def delete(tx, *, slug: str, entity_id: str, log_path: Path | None = None) -> di
         tx.run("MATCH (a:Alias) WHERE a.name IN $names DETACH DELETE a",
                {"names": orphaned})
 
+    orphaned_mentions = 0
     if section_id:
+        # ITS MENTIONS GO WITH IT. `DETACH DELETE s` takes the `IN_SECTION`
+        # edge and leaves the mention node, which its `REFERS_TO` keeps alive
+        # -- so a mention of a CANON entity survived the section that made it,
+        # as half a triangle pointing at nothing. Mentions of entities the
+        # cluster minted are caught by the entity delete; these had nothing to
+        # catch them, and five of them outlived one deleted NPC.
+        orphaned_mentions = tx.run(
+            f"""
+            MATCH (m:Mention)-[:{IN_SECTION}]->(:Section {{id:$id}})
+            DETACH DELETE m RETURN count(m) AS n
+            """,
+            {"id": section_id},
+        ).single()["n"]
         tx.run(
             "MATCH (s:Section {id:$id, plane:$plane}) DETACH DELETE s",
             {"id": section_id, "plane": CAMPAIGN_PLANE},
@@ -467,6 +481,7 @@ def delete(tx, *, slug: str, entity_id: str, log_path: Path | None = None) -> di
         # COUNTED, because an edge silently outliving its prose is exactly the
         # shape of thing this reports rather than hides.
         "asserted_edges": asserted,
+        "mentions": orphaned_mentions,
     }
 
 

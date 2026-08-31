@@ -1069,6 +1069,57 @@ class TestSomethingTheCampaignAlreadyHoldsStaysInTheCluster:
         assert named >= 1, "the involvement is recorded even though nothing was minted"
 
 
+class TestAMentionDoesNotOutliveItsSection:
+    """`DETACH DELETE s` takes the `IN_SECTION` edge and leaves the mention
+    node, which its `REFERS_TO` keeps alive. A mention of a CANON entity then
+    survives the section that made it, as half a triangle pointing at nothing
+    -- five of them outlived one deleted NPC. Mentions of entities the cluster
+    minted are caught by the entity delete; these had nothing to catch them."""
+
+    def test_a_mention_of_the_book_goes_with_the_prose_that_made_it(self, table):
+        stored = _store(table, anchor=None, title="Pytest Mention Scene",
+                        body="Pytest Sea Battle happens here.", generated_body="x")
+        table.run("CREATE (:Entity {id:'pytest:canon-one', "
+                  "name:'Pytest Canon One', plane:'canon'})")
+        table.run(
+            "MATCH (s:Section {id:$s}), (e:Entity {id:'pytest:canon-one'}) "
+            "CREATE (m:Mention {id:'pytest:canon-one@' + $s, plane:'campaign', campaign:$c}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)",
+            {"s": stored.section_id, "c": SLUG},
+        )
+        result = table.execute_write(
+            lambda tx: homebrew.delete(tx, slug=SLUG, entity_id=stored.entity_id)
+        )
+        assert result["mentions"] >= 1
+        left = table.run(
+            "MATCH (m:Mention)-[:REFERS_TO]->(:Entity {id:'pytest:canon-one'}) "
+            "RETURN count(m) AS n"
+        ).single()["n"]
+        assert left == 0, "no half a triangle left pointing at the book"
+        table.run("MATCH (e:Entity) WHERE e.id STARTS WITH 'pytest:' DETACH DELETE e")
+
+    def test_the_canon_entity_itself_is_untouched(self, table):
+        """Canon was never mutated, which is the whole reason a delete is
+        possible at all. Taking the mention must not take what it points at."""
+        stored = _store(table, anchor=None, title="Pytest Mention Scene",
+                        body="a", generated_body="a")
+        table.run("CREATE (:Entity {id:'pytest:canon-two', "
+                  "name:'Pytest Canon Two', plane:'canon'})")
+        table.run(
+            "MATCH (s:Section {id:$s}), (e:Entity {id:'pytest:canon-two'}) "
+            "CREATE (m:Mention {id:'pytest:canon-two@' + $s, plane:'campaign', campaign:$c}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)",
+            {"s": stored.section_id, "c": SLUG},
+        )
+        table.execute_write(
+            lambda tx: homebrew.delete(tx, slug=SLUG, entity_id=stored.entity_id)
+        )
+        assert table.run(
+            "MATCH (e:Entity {id:'pytest:canon-two'}) RETURN count(e) AS n"
+        ).single()["n"] == 1
+        table.run("MATCH (e:Entity) WHERE e.id STARTS WITH 'pytest:' DETACH DELETE e")
+
+
 class TestAClaimDoesNotOutliveTheProseThatMadeIt:
     """Deleting the entities a scene minted left behind the edges it wrote
     between two entities it did NOT mint. An edge joining two canon nodes has

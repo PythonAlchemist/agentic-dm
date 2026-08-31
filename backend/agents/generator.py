@@ -104,8 +104,16 @@ SHAPES = {
     # prison. It is not a quest (nobody gives it), not an NPC, and not a
     # monster; what defines it is WHERE IN THE RUNNING ORDER it happens. `KINDS`
     # is a closed set precisely so an addition is a decision, and this is one.
+    # WHAT IT TOUCHES OF THE BOOK'S, added on measurement. Every other kind
+    # asks for something only canon can answer -- a quest for who gives it, a
+    # monster for where it is met -- and a scene asked only about its own
+    # shape, which a model can supply out of nothing. Over eleven runs of one
+    # subject a scene cited the book 1.6 times on average and cited it not at
+    # all three times; a quest over four runs never went below three. The gap
+    # was in the question, not the model.
     "scene": "an episode that happens at a point in the adventure: what "
-             "occurs, where it interrupts the journey or the plan, who "
+             "occurs, which of the book's people, places or things it touches, "
+             "where it interrupts the journey or the plan, who "
              "appears, how it can play out, and what it changes afterwards",
     # A SCENE SAYS WHAT HAPPENS; AN ENCOUNTER SAYS WHO YOU ARE FIGHTING. Asked
     # for "a cast of enemies in a table", the closest kind was `scene`, which
