@@ -1,0 +1,32 @@
+# THE BOOK TEXT NEVER ENTERS AN IMAGE.
+#
+# `data/` holds the corpus, the gazetteer and the alias seeds; `sessions/` holds
+# harvested D&D Beyond pages. Both are copyrighted, both are kept out of git for
+# that reason, and an image is a thing that gets pushed to a registry and pulled
+# by whoever can reach it -- so the same rule has to be written down twice. A
+# bare `COPY . .` without this file bakes 1.6 million characters of two
+# published books into a layer.
+#
+# The graph is populated over bolt by `backend.scripts.push_graph`, so the
+# running container needs none of it.
+data/
+sessions/
+
+.env
+.env.local
+.venv/
+venv/
+
+.git/
+.github/
+web/
+node_modules/
+evals/
+docs/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
