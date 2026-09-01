@@ -183,10 +183,15 @@ questions:
     must: ["Tser Pool"]
     cites: true
     note: >-
-      Two: Tser Pool, and one outside Vallaki. Still an anchored miss for
-      retrieval at the time of writing, so a `must` failure here is expected
-      and is the point -- it pins whether the model INVENTS a location or says
-      it does not have one.
+      Two: Tser Pool, and one outside Vallaki. Written when this was an
+      anchored miss for retrieval, so a `must` failure was EXPECTED and the
+      question pinned whether the model invents a location or says it has
+      none. That is no longer the state: measured 2026-09-01 at 28/28 against
+      8/30 in `2026-08-26-edges-as-shipped`, and Tser Pool now arrives in the
+      retrieved text. Which change fixed it is not known -- six days and many
+      commits separate the two runs, and no answer baseline was recorded in
+      between. The question is now an ordinary pass and a failure here would
+      be a regression rather than the point.
 
 # ---------------------------------------------------------------------------
 # KEYS FROM THE GOLDEN VAULT.

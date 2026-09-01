@@ -5,6 +5,8 @@ prints. The entity card had said so since the marking landed; this is the same
 fact at the place the reader actually looks.
 """
 
+import time
+
 import pytest
 
 from backend.api.routes.lab import _with_provenance
@@ -26,6 +28,20 @@ def graph():
             f"name:'Closet 1', {NAMED_BY_BOOK}:false}}) "
             f"CREATE (:Entity {{id:'{PREFIX}:said', plane:'canon', name:'Strahd'}})"
         )
+        # WAIT FOR A FRESH SESSION TO SEE THEM. `_with_provenance` opens its
+        # own, and nothing carries a bookmark from this write to that read --
+        # the shape `4948293` documents, and the third time it has bitten a
+        # test in this file's neighbourhood.
+        for _ in range(50):
+            with neo4j_session() as fresh:
+                if fresh.run(
+                    "MATCH (e:Entity) WHERE e.id STARTS WITH $p RETURN count(e) AS n",
+                    {"p": PREFIX},
+                ).single()["n"] == 2:
+                    break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("fixture entities never became visible")
         yield session
         clean(session)
 
