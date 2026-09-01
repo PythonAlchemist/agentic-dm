@@ -34,6 +34,7 @@ from pathlib import Path
 
 import yaml
 
+from backend.canon.aliases import normalize
 from backend.canon.duplicates import Merge
 from backend.canon.lookup import CANON_PLANE
 from backend.core.database import neo4j_session, read_only_session
@@ -66,17 +67,37 @@ def chapter_of(entity_id: str) -> str:
     return parts[1] if len(parts) > 2 else ""
 
 
-def plan(groups: list[dict], by_name: dict[str, list[str]]) -> tuple[list[Merge], list[str]]:
+def plan(
+    groups: list[dict],
+    by_name: dict[str, list[str]],
+    structural: frozenset[str] = frozenset(),
+) -> tuple[list[Merge], list[str]]:
     """Turn read groupings into merges. Returns `(merges, refusals)`.
 
     Pure over the name index, so what a seed WOULD do can be printed without a
     write transaction open.
+
+    A STRUCTURAL HEADING IS NEVER A SPELLING OF ANYTHING. Its seed says so in
+    its first line -- "headings the book writes that are NOT it naming a thing"
+    -- and one got through anyway: `Planning the Heist` heads seven of the
+    thirteen adventures and was grouped under `Heist for the Golden Vault`,
+    which then held the heists of three of them and answered questions about
+    all three as one job. The spanning refusal below could not see it, because
+    that asks whether one NAME resolves across adventures and a heading resolves
+    to nothing at all.
     """
     merges: list[Merge] = []
     refused: list[str] = []
     for group in groups:
         canonical = group["canonical"]
         names = list(group["names"])
+        scaffolding = sorted({n for n in names if normalize(n) in structural})
+        if scaffolding:
+            refused.append(
+                f"{canonical!r}: {scaffolding!r} -- the book's own scaffolding, "
+                "not a name it gives a thing"
+            )
+            continue
 
         missing = [n for n in names if n not in by_name]
         if missing:
@@ -144,6 +165,26 @@ def plan(groups: list[dict], by_name: dict[str, list[str]]) -> tuple[list[Merge]
     return merges, refused
 
 
+def _structural_for(book: str) -> frozenset[str]:
+    """This book's scaffolding headings, normalised for comparison.
+
+    Read through `BookScheme` rather than from a path spelled here, because the
+    two books name different files and one seed shared between them would be
+    each book carrying the other's exceptions.
+    """
+    from backend.canon.books import SEEDS, LEGACY as LEGACY_BOOK
+    from backend.canon.books import load as load_book
+    from backend.canon.seed_loader import (
+        STRUCTURAL_HEADING_SEED,
+        load_structural_headings,
+    )
+
+    seed = SEEDS / f"{book}.yaml"
+    scheme = load_book(seed) if seed.exists() else LEGACY_BOOK
+    path = STRUCTURAL_HEADING_SEED.parent / scheme.structural_headings
+    return load_structural_headings(path) if path.exists() else frozenset()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=Path, required=True)
@@ -166,7 +207,7 @@ def main() -> int:
             row = dict(record)
             by_name[row["name"]] = row["ids"]
 
-    merges, refused = plan(groups, by_name)
+    merges, refused = plan(groups, by_name, _structural_for(book))
     print(f"{args.seed} proposes {len(groups)} groupings for {book}")
     print(f"  {len(merges)} applicable, {sum(len(m.losers) for m in merges)} nodes to fold")
     for refusal in refused:
