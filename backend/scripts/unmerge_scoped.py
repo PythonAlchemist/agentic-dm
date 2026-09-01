@@ -3,6 +3,8 @@
     uv run python -m backend.scripts.unmerge_scoped              # plan, keyed only
     uv run python -m backend.scripts.unmerge_scoped --apply
     uv run python -m backend.scripts.unmerge_scoped --unkeyed     # every scope violation
+    uv run python -m backend.scripts.unmerge_scoped --unkeyed \
+        --label kftgv:heart-of-ashes:mage-s-guild=FACTION --apply
 
 
 `Prison Tower` in Fire and Darkness holds four mentions in Heart of Ashes,
@@ -36,6 +38,15 @@ judgement call any more. A name the book really does use book-wide is not
 reachable from here: `global_names` rescopes those to two-segment ids, which
 carry no chapter and so never appear as a violation.
 
+THE LABEL IS INHERITED AND SOMETIMES WRONG, so `--label <new-id>=<LABEL>`
+overrides it. The new node copies the label of the entity it is being pulled
+out of, which is right whenever the merge folded two things of a kind and wrong
+whenever it did not: `Erinyes Statuette` is an ITEM and `Erinyes Barracks` is a
+room, `Guild Task Force` is an EVENT and `Mage's Guild` is a FACTION. Three of
+nineteen needed correcting by hand on the run this was written for, which is
+three too many to leave to whoever reads the output next. Take the id from the
+dry run, which prints it.
+
 IT MOVES BY SCOPE, NOT BY NAME, which is why it reaches cases `split_entity`
 cannot. That script separates two things by what the section calls them, and
 gives up when the source already carries the foreign spelling as an alias --
@@ -51,6 +62,7 @@ import re
 import sys
 
 from backend.canon.assembler import slugify
+from backend.graph.schema import EntityType
 from backend.core.database import neo4j_session, read_only_session
 
 KEYED = re.compile(r"^[a-z]{1,2}\d+[a-z]?-")
@@ -172,13 +184,44 @@ def write(tx, p):
         ).single()["n"]
     return {"moved": moved, "folded": folded}
 
+def label_overrides(argv: list[str]) -> dict[str, str]:
+    """`{new_id: LABEL}` from repeated `--label id=LABEL`.
+
+    CHECKED AGAINST `EntityType`, because a typo would otherwise become a label
+    no query looks for -- the node would exist, hold its mentions, and be
+    invisible to every read that asks for a kind.
+    """
+    found: dict[str, str] = {}
+    for i, arg in enumerate(argv):
+        if arg != "--label":
+            continue
+        if i + 1 >= len(argv) or "=" not in argv[i + 1]:
+            raise SystemExit("--label wants <new-id>=<LABEL>")
+        entity_id, _, label = argv[i + 1].partition("=")
+        try:
+            EntityType(label)
+        except ValueError:
+            raise SystemExit(
+                f"{label!r} is not a type this graph uses: "
+                + ", ".join(sorted(t.value for t in EntityType))
+            ) from None
+        found[entity_id] = label
+    return found
+
+
 def main() -> int:
     unkeyed = "--unkeyed" in sys.argv
     apply_it = "--apply" in sys.argv
+    overrides = label_overrides(sys.argv)
     with read_only_session() as session:
         groups = [dict(r) for r in session.run(FOREIGN)
                   if wanted(r["source"], unkeyed=unkeyed)]
     plan, skipped = plan_groups(groups)
+    for p in plan:
+        p["label"] = overrides.get(p["new_id"], p["label"])
+    unused = sorted(set(overrides) - {p["new_id"] for p in plan})
+    for entity_id in unused:
+        print(f"  WARNING --label {entity_id} matches nothing in this plan")
     for line in skipped:
         print(f"  SKIP {line}")
     what = "violations" if unkeyed else "rooms"

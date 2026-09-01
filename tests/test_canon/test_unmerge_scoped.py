@@ -6,7 +6,13 @@ them and gives up when the source already carries the foreign spelling as an
 alias. Eight of these did, because `apply_aliases` folded it on.
 """
 
-from backend.scripts.unmerge_scoped import plan_groups, wanted
+import pytest
+
+from backend.scripts.unmerge_scoped import (
+    label_overrides,
+    plan_groups,
+    wanted,
+)
 
 
 def _group(source, name="A Thing", found="prisoner-13", surfaces=("Thing",),
@@ -65,3 +71,36 @@ class TestWhatTheNewNodeIsCalled:
     def test_the_mentions_travel_with_the_plan(self):
         plan, _ = plan_groups([_group("kftgv:a:x", mentions=["m1", "m2"])])
         assert plan[0]["mentions"] == ["m1", "m2"]
+
+
+class TestOverridingAnInheritedLabel:
+    """The new node copies the label of the entity it is pulled out of, which
+    is right when the merge folded two things of a kind and wrong when it did
+    not: `Erinyes Statuette` is an ITEM and `Erinyes Barracks` is a room."""
+
+    def test_one_override_is_read(self):
+        assert label_overrides(
+            ["--unkeyed", "--label", "kftgv:a:b=FACTION"]
+        ) == {"kftgv:a:b": "FACTION"}
+
+    def test_several_are_read(self):
+        found = label_overrides(
+            ["--label", "a=FACTION", "--label", "b=LOCATION", "--apply"])
+        assert found == {"a": "FACTION", "b": "LOCATION"}
+
+    def test_none_is_empty(self):
+        assert label_overrides(["--unkeyed", "--apply"]) == {}
+
+    def test_a_type_the_graph_does_not_use_is_refused(self):
+        """A typo would otherwise become a label no query looks for: the node
+        would exist, hold its mentions, and be invisible to every read that
+        asks for a kind."""
+        with pytest.raises(SystemExit) as raised:
+            label_overrides(["--label", "a=FACTON"])
+        assert "not a type this graph uses" in str(raised.value)
+
+    def test_a_missing_value_is_refused(self):
+        with pytest.raises(SystemExit):
+            label_overrides(["--label"])
+        with pytest.raises(SystemExit):
+            label_overrides(["--label", "no-equals-sign"])

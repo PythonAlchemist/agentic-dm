@@ -13,6 +13,7 @@ honest behaviour for a tool whose whole purpose is trying settings out.
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -28,10 +29,35 @@ from backend.core.config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-#: Per-process, per-session agents. Keyed by whatever the client calls its
-#: session; the client owns that string and a collision only ever costs a
-#: shared history in a scratch tool.
-_SESSIONS: dict[str, DMAgent] = {}
+#: How many conversations one process keeps. Reached only by a deployment with
+#: more readers than that holding sessions at once, and the eviction costs the
+#: oldest of them their thread -- which is why it is well above a table.
+_MAX_SESSIONS = 64
+
+#: Per-process, per-session agents, oldest use first.
+#:
+#: KEYED BY WHATEVER THE CLIENT CALLS ITS SESSION, and the client used to call
+#: it `'lab'` -- every reader of the deployment sharing one history, one
+#: person's questions arriving in the next one's context. Each browser now
+#: mints its own id, which fixed that and made this dict grow: one agent per
+#: reader rather than exactly one, and nothing ever released them.
+#:
+#: BOUNDED, NOT EXPIRED. A `DMAgent` holds a conversation and a subgraph and
+#: nothing about it says when it stopped being wanted; a reader who comes back
+#: after lunch should find their thread. So the cap is on COUNT and eviction is
+#: least-recently-used, which drops the session nobody has touched in longest
+#: rather than guessing at a timeout.
+_SESSIONS: OrderedDict[str, DMAgent] = OrderedDict()
+
+
+def _remember(session_id: str, agent: DMAgent) -> DMAgent:
+    """Store the agent as most-recently-used, evicting the coldest over the cap."""
+    _SESSIONS[session_id] = agent
+    _SESSIONS.move_to_end(session_id)
+    while len(_SESSIONS) > _MAX_SESSIONS:
+        evicted, _ = _SESSIONS.popitem(last=False)
+        logger.info("evicted lab session %s (cap %d)", evicted, _MAX_SESSIONS)
+    return agent
 
 
 class Depth(BaseModel):
@@ -357,6 +383,9 @@ def _agent_for(
         existing.canon.book == book and existing.canon.campaign == campaign
     )
     if existing is not None and same_book and existing.model == model and existing.depth == depth:
+        # A READ IS A USE. Without this the cap would evict by age of creation
+        # and drop the session of whoever has been talking longest.
+        _SESSIONS.move_to_end(session_id)
         return existing
 
     rebuilt = DMAgent(
@@ -376,5 +405,4 @@ def _agent_for(
     if existing is not None and same_book:
         rebuilt.conversation = existing.conversation
         rebuilt.subgraph = existing.subgraph
-    _SESSIONS[session_id] = rebuilt
-    return rebuilt
+    return _remember(session_id, rebuilt)
