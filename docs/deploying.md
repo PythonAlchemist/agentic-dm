@@ -140,6 +140,39 @@ curl -i -H "Authorization: Bearer <token>" https://<api>/api/lab/config   # 200
 If the middle one returns 200, `ACCESS_TOKENS` did not take and the books are
 public. That is the check worth running after every deploy.
 
+## This deployment, by name
+
+Written down because it existed only in two dashboards, and a thing that exists
+only in a dashboard cannot be rebuilt from a clone. **No secrets are here** --
+every value below is an identifier or a public URL. `GRAPH_PASSWORD`,
+`ACCESS_TOKENS` and `OPENAI_API_KEY` live only in Railway's variables and are
+read with `railway variables --json` piped straight into the environment, never
+echoed. (`railway add --variables` DOES echo its inputs, which leaked a
+password once and forced a rotation.)
+
+| | |
+|---|---|
+| Railway project | `agentic-dm` · `d2760a32-f2f0-4cb4-aa95-8729bf969216` |
+| service `api` | `532bdedd-d49a-41ec-96f8-564d132cee23`, from the GitHub repo, auto-redeploys on push |
+| service `neo4j` | `cb7a74f6-f630-4d05-bd40-6869a8bbf270`, 5GB volume at `/data`, private network only |
+| Vercel project | `agentic-dm` · `prj_bjo8UG250d5gsa434zyOcTqoZPFq` |
+| Vercel org | `team_VdggpVvkEtJ7hAnbaFETBX2S` |
+| App | https://agentic-dm.vercel.app |
+| API | https://api-production-bb1e4.up.railway.app |
+
+Variables on `api`, names only: `ACCESS_TOKENS`, `ALLOWED_ORIGINS`,
+`NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `OPENAI_API_KEY`, `OPENAI_MODEL`,
+`PORT`. On `neo4j`: `GRAPH_PASSWORD`, `NEO4J_AUTH`, and the `NEO4J_server_*`
+tuning. **Nothing on `neo4j` may be named `NEO4J_PASSWORD`** -- that image
+reads every `NEO4J_*` variable as a config setting and crash-loops on one it
+does not recognise, which is why the password is `GRAPH_PASSWORD` and the api
+refers to it as `${{neo4j.GRAPH_PASSWORD}}`.
+
+The `neo4j` service keeps a TCP proxy open deliberately. It is how the graph is
+refreshed -- `push_graph`, `mark_unnamed`, `check_invariants` and `audit_scope`
+all reach the deployed database through it -- and closing it between syncs
+would mean recreating it by hand every time.
+
 ## What is deliberately not deployed
 
 - **The websocket** at `/api/chat/ws/{session_id}` is gated like everything
