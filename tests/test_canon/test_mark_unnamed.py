@@ -137,3 +137,16 @@ class TestOnlyTheBookCountsAsTheBookNamingIt:
                   "name:'Closet 1'})")
         _named(graph, f"{PREFIX}:closet", f"{PREFIX}:scene2", plane="campaign")
         assert f"{PREFIX}:closet" in _ids(graph, TO_MARK)
+
+
+class TestTheCountDescribesEntitiesNotJoinRows:
+    """It printed "11 marked entities" and cleared 4: the clearing query joins
+    through mentions, so an entity with three of them arrived three times."""
+
+    def test_an_entity_with_several_mentions_is_listed_once(self, graph):
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:many', plane:'canon', "
+                  f"name:'Gunther Arasek', {NAMED_BY_BOOK}:false}})")
+        for n in range(3):
+            _named(graph, f"{PREFIX}:many", f"{PREFIX}:sec{n}")
+        rows = [r for r in graph.run(TO_CLEAR, PARAMS) if r["id"] == f"{PREFIX}:many"]
+        assert len(rows) == 1, f"one entity, {len(rows)} rows"

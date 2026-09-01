@@ -6,6 +6,8 @@ reads, at the endpoint, because a boolean that is right in Neo4j and wrong by
 the time it reaches the reader is worth nothing.
 """
 
+import time
+
 import pytest
 
 from backend.api.routes.homebrew import read_entity
@@ -26,6 +28,23 @@ def graph():
         clean(session)
 
 
+def _await(cypher: str, params: dict, what: str, tries: int = 50) -> None:
+    """Block until a NEW session can see this write.
+
+    Not a sleep: it reads the way the code under test reads, so it waits for
+    exactly the condition that matters and returns the moment it holds. The
+    fixture writes in its own session and `read_entity` opens another, with no
+    bookmark tying them, so the read can land on a snapshot from before the
+    write -- the same shape `test_retrieval_overlay` documents.
+    """
+    for _ in range(tries):
+        with neo4j_session() as fresh:
+            if fresh.run(cypher, params).single()["n"]:
+                return
+        time.sleep(0.02)
+    raise AssertionError(f"{what} never became visible to a new session")
+
+
 def _entity(session, suffix: str, name: str, **props):
     extra = "".join(f", {k}:{v}" for k, v in props.items())
     session.run(
@@ -33,7 +52,10 @@ def _entity(session, suffix: str, name: str, **props):
         f"name:$name{extra}}})",
         {"name": name},
     )
-    return f"{PREFIX}:{suffix}"
+    entity_id = f"{PREFIX}:{suffix}"
+    _await("MATCH (e:Entity {id:$id}) RETURN count(e) AS n",
+           {"id": entity_id}, entity_id)
+    return entity_id
 
 
 class TestTheCardIsToldWhetherTheBookNamesIt:

@@ -60,7 +60,11 @@ TO_CLEAR = f"""
 MATCH (e:Entity {{plane:$plane}})<-[:REFERS_TO]-(:Mention {{plane:$plane}})
 WHERE e.{NAMED_BY_BOOK} IS NOT NULL
   AND ($prefix = '' OR e.id STARTS WITH $prefix)
-RETURN e.id AS id, e.name AS name,
+// DISTINCT BECAUSE THE JOIN IS ONE ROW PER MENTION. Without it four entities
+// holding eleven mentions between them were reported as eleven entities, and
+// the write then cleared four -- a count that described the join rather than
+// the work, the same way `check_invariants` once described its LIMIT.
+RETURN DISTINCT e.id AS id, e.name AS name,
        [l IN labels(e) WHERE l <> 'Entity'] AS kind
 ORDER BY e.id
 """

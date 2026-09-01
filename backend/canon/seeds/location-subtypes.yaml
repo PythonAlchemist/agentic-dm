@@ -146,6 +146,33 @@ aliases:
   - name: Kolyan Indirovich
     aliases:
       - Kolyan          # 3 standalone, all the burgomaster
+
+  # PEOPLE THE BOOK NAMES AND THE GRAPH COULD NOT CITE. Each of these held no
+  # mention at all -- `named_by_book: false` on a node about a real person --
+  # because the book never writes their name as one run of text. Same
+  # corpus-wide standalone count as the four above.
+  - name: Gunther Arasek
+    aliases:
+      # The book writes "Gunther and Yelena Arasek", so his own name is never
+      # contiguous and the scan could not match it.
+      - Gunther         # 3 standalone, every one the stockyard owner
+  - name: Stefania Martikov
+    aliases:
+      # Introduced as Davian Martikov's daughter; her surname is never set
+      # beside her given name.
+      - Stefania        # 5 standalone, all Davian's daughter
+  - name: Brom Martikova
+    aliases:
+      - Brom            # 3 standalone, all the Martikov boy
+  - name: Anna Krezkov
+    aliases:
+      # The node dropped the feminine ending the book uses throughout.
+      - Anna Krezkova   # 3 standalone, all the burgomaster's wife
+  #
+  # `Anna` alone is REJECTED though all 9 of its standalone occurrences are the
+  # same woman. It is the shape `Mary` failed on -- a bare given name, one line
+  # away from crediting the wrong person -- and `Anna Krezkova` already reaches
+  # her, so the looser spelling buys nothing and risks the next book.
   #
   # REJECTED, and the reasons are the bar. Each looked obvious and each is wrong:
   #

@@ -20,6 +20,7 @@ mention scan cannot match the real book's `Church` sitting in the same database.
 """
 
 import json
+import time
 from dataclasses import dataclass
 
 import pytest
@@ -824,6 +825,16 @@ class TestALookupSaysWhetherTheBookNamesIt:
             f"MATCH (e:Entity {{id:$id}}) SET e.{NAMED_BY_BOOK} = false",
             {"id": CHURCH.id},
         )
+        # `lookup` opens its OWN session, and nothing carries a bookmark from
+        # the write above to that read.
+        for _ in range(50):
+            with neo4j_session() as fresh:
+                if fresh.run(
+                    f"MATCH (e:Entity {{id:$id}}) WHERE e.{NAMED_BY_BOOK} = false "
+                    "RETURN count(e) AS n", {"id": CHURCH.id}
+                ).single()["n"]:
+                    break
+            time.sleep(0.02)
         assert canon.lookup(CHURCH.name)["entities"][0]["named_by_book"] is False
 
     def test_it_is_a_boolean_and_not_the_stored_value(self, graph, canon):
