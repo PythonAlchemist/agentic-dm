@@ -119,10 +119,13 @@ did not, so a push updated one half of the app and left the other on a build
 from the previous day, with no failure anywhere to notice. If the UI is not
 showing a change you know you pushed, check this first.
 
-Once Root Directory is `web`, connect the repo so pushes build:
+Root Directory is `web` and the repo IS connected, so pushes build the web app
+the way they already redeploy the API. To reconnect it, note that neither
+directory has both halves -- `.vercel` lives in `web/`, `.git` at the repo root
+-- so the URL has to be given explicitly:
 
 ```bash
-cd web && vercel git connect
+vercel git connect https://github.com/PythonAlchemist/agentic-dm.git
 ```
 
 After that, deploy from the REPO ROOT rather than `web/` if you deploy by hand
