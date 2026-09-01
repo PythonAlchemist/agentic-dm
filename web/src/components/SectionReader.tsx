@@ -561,6 +561,12 @@ function EntityCard({
   onRead: (sectionId: string) => void
 }) {
   const yours = entity.plane === 'campaign'
+  // THE ONE THING A DM MUST BE ABLE TO TELL. A canon entity that no section
+  // names reads exactly like one the book prints, and the card used to assert
+  // "The book." over both. 154 of them are kept on purpose -- the extractor
+  // title-cased common nouns and described things the book never named -- so
+  // the card says which it is rather than the graph quietly deciding.
+  const unnamed = !yours && !entity.named_by_book
   return (
     <div className="mb-5 rounded-md border border-neutral-800 bg-neutral-900/60 p-4">
       <div className="mb-2 flex items-baseline justify-between gap-4">
@@ -590,6 +596,11 @@ function EntityCard({
             <span className="text-amber-400">Yours.</span> Written for this
             campaign.
           </>
+        ) : unnamed ? (
+          <>
+            <span className="text-sky-400/80">Not named in the book.</span>{' '}
+            {entity.labels.join(' · ').toLowerCase() || 'from extraction'}
+          </>
         ) : (
           <>
             <span className="text-emerald-400/80">The book.</span>{' '}
@@ -598,6 +609,14 @@ function EntityCard({
         )}
         {entity.role && <> — {entity.role}</>}
       </p>
+
+      {unnamed && (
+        <p className="mt-2 rounded border border-sky-900/60 bg-sky-950/30 p-2 text-xs text-sky-200/70">
+          No section of the book says this name. It was derived when the book
+          was read, so what it connects to may well be right — but do not quote
+          it as the book&apos;s wording at the table.
+        </p>
+      )}
 
       {entity.invented.length > 0 && (
         <ul className="mt-2 space-y-0.5 text-xs text-rose-300/80">

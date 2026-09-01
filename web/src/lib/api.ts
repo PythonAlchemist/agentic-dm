@@ -281,6 +281,11 @@ export interface EntityRead {
   name: string
   kind: string | null
   plane: 'canon' | 'campaign'
+  /** Whether any section of the book actually names this. False for entities
+   *  the extractor described rather than found — `Side Room 2`, or a common
+   *  noun it title-cased. They are kept deliberately, so the card has to say
+   *  which kind it is showing. Meaningless on the campaign plane. */
+  named_by_book: boolean
   role: string | null
   invented: string[]
   labels: string[]

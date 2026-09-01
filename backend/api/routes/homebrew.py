@@ -799,6 +799,7 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
             RETURN e.id AS entity_id, e.name AS name, e.kind AS kind,
                    e.plane AS plane, e.role AS role, e.invented AS invented,
                    labels(e) AS labels, own.id AS own_section,
+                   e.named_by_book AS named_by_book,
                    collect(DISTINCT {
                      section_id: sec.id, heading: sec.heading, plane: sec.plane,
                      // The TEXT and the offsets, so the card can quote what
@@ -823,6 +824,12 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
         if where.get("section_id")
     ]
     found["labels"] = [x for x in (found["labels"] or []) if x != "Entity"]
+    # WHETHER THE BOOK ACTUALLY NAMES IT, as a plain boolean. The property is
+    # only ever set to false, so absence is the ordinary case; answering `None`
+    # here would make the card tell "not marked" and "not known" apart, which
+    # is a distinction no reader has. See `schema.NAMED_BY_BOOK` for why 154
+    # canon entities cite no prose and are kept anyway.
+    found["named_by_book"] = found["named_by_book"] is not False
     return found
 
 
