@@ -47,6 +47,14 @@ THEY ARRIVED TWO WAYS AND ARE ONE DEFECT. Measured across both books, 154 of
 144 of the 154 are `kftgv` and none of the `cos` ten are chapter-scoped, so
 this is a property of how one book was extracted rather than of the design.
 
+ONLY THE BOOK'S OWN PROSE ANSWERS, which is why the mentions here name a
+plane. `rescan` scans a campaign section against the canon entities of the
+books the table draws on, so the DM's own scene mints a CAMPAIGN-plane mention
+on a CANON entity -- seven of them in the live graph. Without the plane this
+would read "no section at all" while claiming to mean "no section of the book",
+and a scene the DM wrote would quietly protect an entity from a list it belongs
+on. It errs safe either way; it was still saying something it did not mean.
+
 NO EDGE IS DROPPED SILENTLY, and the reason that matters is the ruling above: 70 of them carry canon edges -- `GUARDS`,
 `CONTAINS`, `GAVE_QUEST` -- and every one is printed with the entity that held
 it, because a claim removed without being named is one the DM cannot decide to
@@ -92,7 +100,7 @@ from backend.core.database import neo4j_session, read_only_session
 #: person reads; a repair has to see all of them.
 FIND = """
 MATCH (e:Entity {plane:$plane})
-WHERE NOT (e)<-[:REFERS_TO]-(:Mention)
+WHERE NOT (e)<-[:REFERS_TO]-(:Mention {plane:$plane})
   AND ($prefix = '' OR e.id STARTS WITH $prefix)
 OPTIONAL MATCH (e)-[r]-(o) WHERE NOT o:Alias
 WITH e, collect({type: type(r), other: coalesce(o.name, o.id),
@@ -123,7 +131,7 @@ RETURN count(*) AS dropped
 
 DROP_ENTITY = """
 MATCH (e:Entity {id:$id, plane:$plane})
-WHERE NOT (e)<-[:REFERS_TO]-(:Mention)
+WHERE NOT (e)<-[:REFERS_TO]-(:Mention {plane:$plane})
 DETACH DELETE e
 RETURN count(*) AS dropped
 """

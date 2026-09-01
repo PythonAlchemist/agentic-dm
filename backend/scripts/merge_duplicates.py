@@ -69,9 +69,14 @@ _ENTITIES = "MATCH (e:Entity {plane:$plane}) RETURN e.id AS id, e.name AS name"
 #: The same entities with how often the book actually names each, which is how
 #: `plan_globals` picks which half survives. Scoped to one book because the
 #: exception list is one book's.
+#:
+#: THE MENTION CARRIES THE PLANE BECAUSE THE SENTENCE ABOVE SAYS "THE BOOK".
+#: `rescan` mints CAMPAIGN-plane mentions on canon entities whenever a DM's
+#: scene names one, so counting every mention would let the table's own prose
+#: decide which of two duplicate nodes the book keeps.
 _BOOK_ENTITIES = """
 MATCH (e:Entity {plane:$plane}) WHERE e.id STARTS WITH $prefix + ':'
-OPTIONAL MATCH (e)<-[:REFERS_TO]-(m:Mention)
+OPTIONAL MATCH (e)<-[:REFERS_TO]-(m:Mention {plane:$plane})
 RETURN e.id AS id, e.name AS name, count(m) AS mentions
 """
 
