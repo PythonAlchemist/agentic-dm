@@ -15,6 +15,7 @@ import { TooltipProvider } from '@/components/ui'
 import {
   auth,
   labAPI,
+  sessionId,
   type CampaignInfo,
   type Cost,
   type Depth,
@@ -23,7 +24,6 @@ import {
   type Usage,
 } from '@/lib/api'
 
-const SESSION_ID = 'lab'
 
 /** Used only until `/lab/config` answers. The server owns the real defaults --
  *  they are read from `canon_context.Depth`, so the number the evaluation
@@ -56,6 +56,9 @@ export default function Lab() {
   //  false, because the answer takes a round trip and rendering the lab for
   //  that instant flashes a screenful of book text at somebody who may turn
   //  out not to be allowed to see it.
+  // THIS BROWSER'S OWN CONVERSATION. Read once, in a state initialiser, so
+  // the id is stable across renders and the same one reaches every request.
+  const [session] = useState(sessionId)
   const [locked, setLocked] = useState<boolean | null>(null)
   const [model, setModel] = useState('')
   const [book, setBook] = useState('')
@@ -127,7 +130,7 @@ export default function Lab() {
 
   const resetSession = async () => {
     setRunning(ZERO)
-    await labAPI.reset(SESSION_ID).catch(() => undefined)
+    await labAPI.reset(session).catch(() => undefined)
   }
 
   if (locked) {
@@ -243,7 +246,7 @@ export default function Lab() {
               suggestion={here?.examples.ask ?? ''}
               model={model}
               depth={depth}
-              sessionId={SESSION_ID}
+              sessionId={session}
               onSpend={spend}
             />
           </Panel>

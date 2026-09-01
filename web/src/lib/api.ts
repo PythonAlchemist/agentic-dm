@@ -29,6 +29,33 @@ const TOKEN_KEY = 'agentic-dm.reader-token'
 let token = ''
 let refusedHandler: (() => void) | null = null
 
+const SESSION_KEY = 'agentic-dm.session'
+
+/** This browser's own conversation, kept across reloads.
+ *
+ *  IT USED TO BE THE CONSTANT `'lab'`, WHICH WAS FINE FOR ONE PERSON ON
+ *  LOCALHOST AND IS NOT FINE NOW. The API holds `_SESSIONS: dict[str, DMAgent]`
+ *  keyed on this, and the agent carries the conversation, so every reader of
+ *  the deployment shared one history: what one of them asked arrived in the
+ *  next one's context, and any reader's Reset emptied it for all of them.
+ *
+ *  PERSISTED RATHER THAN GENERATED PER LOAD, because the id is also the
+ *  bookmark -- a refresh should return to the conversation, not start a new
+ *  one and strand the old agent in the API's memory.
+ */
+export function sessionId(): string {
+  if (typeof window === 'undefined') return 'lab'
+  let found = window.localStorage.getItem(SESSION_KEY)
+  if (!found) {
+    found =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+    window.localStorage.setItem(SESSION_KEY, found)
+  }
+  return found
+}
+
 export const auth = {
   /** Read back what this browser was given. Guarded for the server render,
    *  where `localStorage` does not exist and touching it throws. */
