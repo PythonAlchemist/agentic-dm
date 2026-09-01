@@ -2,6 +2,8 @@
 
     uv run python -m backend.scripts.eval_retrieval
     uv run python -m backend.scripts.eval_retrieval --limit 3 --verbose
+    uv run python -m backend.scripts.eval_retrieval --save evals/baselines/x.json
+    uv run python -m backend.scripts.eval_retrieval --compare before.json after.json
 
 Costs nothing: retrieval is deterministic and no model runs. Re-run it after
 every chapter the loop writes -- the question set is a regression suite, not a
@@ -13,6 +15,20 @@ mechanically checkable, no judge, no fuzzy string matching, no model marking its
 own homework. Whether an answer written from that section would be any good is a
 different question and is not asked here.
 
+`--save` RECORDS A RUN, and the reason is the one `evals/baselines/README.md`
+gives for the answer eval: without a recorded run there is nothing to compare
+against except somebody's memory of a number. It happened here. A day of graph
+repair -- 21 entities created, mentions repointed, dropped and marked -- was
+checked against a remembered "85%/90%", and settling whether anything had moved
+meant grepping commit messages for the last run that printed its figures.
+
+WHAT IT DOES NOT NEED IS AN INTERVAL. The answer eval runs a model, so its
+number moves between runs of identical code and a comparison has to say whether
+zero sits inside the resolvable difference. Retrieval is deterministic: the same
+graph and the same questions give the same rows every time, so a difference of
+one question IS a difference, and `--compare` names the questions that changed
+rather than reporting a range.
+
 THE SPLIT THAT MATTERS IS `no-anchor` VS `missed`. A question naming nothing the
 graph knows failed BEFORE retrieval ranked anything, and no amount of ranking
 work would fix it -- it needs an alias, or an entity that was never extracted.
@@ -23,6 +39,7 @@ One recall number blurs the two and points every reader at the wrong repair.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import yaml
@@ -237,7 +254,20 @@ def main() -> int:
     parser.add_argument(
         "--book", help="run only the questions whose answers are in this book"
     )
+    parser.add_argument(
+        "--save", type=Path, metavar="PATH",
+        help="record this run as JSON, for a later --compare",
+    )
+    parser.add_argument("--label", default="", help="what this run is testing")
+    parser.add_argument(
+        "--compare", nargs=2, type=Path, metavar=("BEFORE", "AFTER"),
+        help="report what moved between two saved runs. Spends nothing and "
+             "reads no graph.",
+    )
     args = parser.parse_args()
+
+    if args.compare:
+        return _compare(*args.compare)
 
     questions = yaml.safe_load(args.questions.read_text())["questions"]
     if args.book:
@@ -282,6 +312,70 @@ def main() -> int:
                 f"anchored {found['anchored']}/{len(subset)}   "
                 f"MRR {found['mrr']:.2f}"
             )
+    if args.save:
+        _save(args.save, args.label, args.limit, questions, rows, books)
+        print(f"\n  saved to {args.save}")
+    return 0
+
+
+def _outcome(row) -> str:
+    """One question's result, as the three states the report distinguishes."""
+    if not row.get("anchored"):
+        return "no-anchor"
+    return "hit" if row.get("hit") else "missed"
+
+
+def _save(path: Path, label: str, limit: int, questions, rows, books) -> None:
+    """The run, per question, plus the headline figures.
+
+    NO PROSE FROM EITHER BOOK, which is why these can be committed while
+    everything under `data/` cannot -- question ids and outcomes only, the same
+    rule the answer baselines keep.
+    """
+    found = summarize(rows)
+    payload = {
+        "label": label,
+        "limit": limit,
+        "questions": len(questions),
+        "recall_overall": found["recall_overall"],
+        "recall_anchored": found["recall_anchored"],
+        "anchored": found["anchored"],
+        "mrr": found["mrr"],
+        "by_book": {
+            book: summarize([r for r, q in zip(rows, questions)
+                             if book_of(q) == book])
+            for book in books
+        },
+        "outcomes": {q["id"]: _outcome(r) for q, r in zip(questions, rows)},
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n")
+
+
+def _compare(before: Path, after: Path) -> int:
+    """What moved, by question. Exact, because retrieval is deterministic."""
+    a = json.loads(before.read_text())
+    b = json.loads(after.read_text())
+    for name, was, now in (
+        ("recall (all)", a["recall_overall"], b["recall_overall"]),
+        ("recall (anchored)", a["recall_anchored"], b["recall_anchored"]),
+        ("MRR", a["mrr"], b["mrr"]),
+    ):
+        arrow = "->" if was != now else "=="
+        print(f"  {name:20} {was:.2%} {arrow} {now:.2%}" if name != "MRR"
+              else f"  {name:20} {was:.2f} {arrow} {now:.2f}")
+    moved = {
+        qid: (a["outcomes"].get(qid, "absent"), b["outcomes"].get(qid, "absent"))
+        for qid in sorted(set(a["outcomes"]) | set(b["outcomes"]))
+        if a["outcomes"].get(qid) != b["outcomes"].get(qid)
+    }
+    if not moved:
+        print("\n  no question changed outcome. Retrieval is deterministic, "
+              "so this is identical rather than indistinguishable.")
+        return 0
+    print(f"\n  {len(moved)} question(s) changed outcome:")
+    for qid, (was, now) in moved.items():
+        print(f"    {qid:6} {was} -> {now}")
     return 0
 
 
