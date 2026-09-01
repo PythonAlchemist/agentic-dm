@@ -1,5 +1,6 @@
 """Chat endpoint for DM Assistant interactions."""
 
+from collections import OrderedDict
 from typing import Optional
 from uuid import uuid4
 
@@ -10,8 +11,24 @@ from backend.agents import DMAgent, DMResponse
 
 router = APIRouter()
 
-# Session storage (in production, use Redis or similar)
-_sessions: dict[str, DMAgent] = {}
+#: How many conversations this router keeps. The same cap and the same reason
+#: as `lab._MAX_SESSIONS`, which is the store the web app actually reaches.
+_MAX_SESSIONS = 64
+
+#: Session storage, oldest use first.
+#:
+#: NOTHING REACHES THIS ROUTER TODAY. The web app posts to `/api/lab/chat` --
+#: `api.ts` prefixes `/lab` -- so these routes and the WebSocket beside them
+#: are unused, and the WebSocket cannot be reached from a browser at all, which
+#: cannot set an `Authorization` header on a handshake. It is left in place
+#: because a non-browser client CAN, so this is dead surface rather than a dead
+#: capability, and deleting a public API is not a tidy-up.
+#:
+#: BOUNDED ANYWAY, because "nothing calls it" is a fact about today. This held
+#: an unbounded dict of agents, each carrying a conversation, with nothing ever
+#: releasing them -- the same leak `lab` had while every client called its
+#: session `'lab'` and the dict happened to hold exactly one.
+_sessions: OrderedDict[str, DMAgent] = OrderedDict()
 
 
 def get_or_create_session(
@@ -30,12 +47,18 @@ def get_or_create_session(
         Tuple of (session_id, DMAgent).
     """
     if session_id and session_id in _sessions:
+        # A READ IS A USE, or the cap evicts by age of creation and drops the
+        # session of whoever has been talking longest.
+        _sessions.move_to_end(session_id)
         return session_id, _sessions[session_id]
 
     # Create new session
     new_id = session_id or str(uuid4())
     agent = DMAgent(campaign_id=campaign_id, campaign_context=campaign_context)
     _sessions[new_id] = agent
+    _sessions.move_to_end(new_id)
+    while len(_sessions) > _MAX_SESSIONS:
+        _sessions.popitem(last=False)
 
     return new_id, agent
 

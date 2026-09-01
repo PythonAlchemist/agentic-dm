@@ -65,3 +65,44 @@ class TestUseIsWhatKeepsASessionAlive:
         lab._remember("s", _Agent())
         lab._remember("s", second)
         assert store["s"] is second
+
+
+class TestTheOtherSessionStore:
+    """`routes/chat.py` holds a second one. Nothing reaches it today -- the web
+    app posts to `/api/lab/chat`, because `api.ts` prefixes `/lab` -- and it
+    had the same unbounded dict of agents, which "nothing calls it" does not
+    fix. It is a fact about today."""
+
+    @pytest.fixture(autouse=True)
+    def chat_store(self):
+        from backend.api.routes import chat
+
+        saved = chat._sessions.copy()
+        chat._sessions.clear()
+        yield chat._sessions
+        chat._sessions.clear()
+        chat._sessions.update(saved)
+
+    def test_it_stays_bounded(self, chat_store):
+        from backend.api.routes import chat
+
+        for i in range(chat._MAX_SESSIONS + 5):
+            chat.get_or_create_session(f"s{i}")
+        assert len(chat_store) == chat._MAX_SESSIONS
+
+    def test_an_existing_session_is_returned_not_rebuilt(self, chat_store):
+        from backend.api.routes import chat
+
+        _, first = chat.get_or_create_session("s")
+        _, again = chat.get_or_create_session("s")
+        assert first is again
+
+    def test_touching_a_session_saves_it(self, chat_store):
+        from backend.api.routes import chat
+
+        for i in range(chat._MAX_SESSIONS):
+            chat.get_or_create_session(f"s{i}")
+        chat.get_or_create_session("s0")          # a cache hit
+        chat.get_or_create_session("fresh")
+        assert "s0" in chat_store
+        assert "s1" not in chat_store

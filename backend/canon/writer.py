@@ -2095,9 +2095,40 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, aliases, replace: bool
         # The census the design asks for, computed where the mentions are so a
         # caller cannot report a different set from the one that was written.
         "mention_counts": _mention_census(mentions, entities),
+        # THE SILENT ZERO, named at the moment it is made. `mention_counts` is
+        # built from a Counter over the mentions, so an entity that got NONE
+        # never appears in it -- and 154 of them accumulated in the graph
+        # unremarked before anyone counted. These are the entities THIS write
+        # minted whose own chapter's prose does not name them.
+        "minted_without_mention": _minted_without_mention(nodes, mentions),
         "deleted_nodes": deleted_nodes,
         "deleted_edges": deleted_edges,
     }
+
+
+def _minted_without_mention(nodes: list["WriteNode"], mentions) -> list[str]:
+    """Names this write minted that its own chapter's prose never says.
+
+    THE DEFECT THIS CATCHES, measured before it existed: 154 canon entities
+    holding no mention at all -- 68 names the extractor described or invented
+    (`Closet 1`, `Side Room 2`, eight spell scrolls named by pattern) and 76
+    common nouns it title-cased, which `mention_pattern` then correctly refused
+    to match in lowercase prose. All from one book; the other produced none of
+    the chapter-scoped kind. Nothing reported them, so they accumulated for as
+    long as the pipeline ran.
+
+    NOT AN ERROR AND NOT A FILTER. The DM's ruling is that these are worth
+    keeping -- `Monodrones GUARDS Abacus Car` says something true about a real
+    train car -- and `mark_unnamed` records the gap on the node afterwards.
+    This only makes the number visible on the write that creates it, which is
+    the difference between a decision and a drift.
+
+    A GLOBAL ENTITY MAY LEGITIMATELY BE NAMED ELSEWHERE, so a name here is not
+    proof of anything on its own; the invariant, which reads the whole graph, is
+    what settles it. This is the early warning.
+    """
+    named = {m.entity_id for m in mentions}
+    return sorted(node.name for node in nodes if node.id not in named)
 
 
 def _mention_census(mentions, entities: list["EntityNames"]) -> list[tuple[str, int]]:

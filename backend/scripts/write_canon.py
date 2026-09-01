@@ -353,6 +353,23 @@ def format_mentions(summary: dict) -> str:
     lines.extend(f"    {count:4d}  {name}" for name, count in counts[:TOP_MENTIONS])
     if len(counts) > TOP_MENTIONS:
         lines.append(f"    ... and {len(counts) - TOP_MENTIONS} more entities with fewer")
+
+    # THE ZERO THE LIST ABOVE CANNOT SHOW. It is built from a Counter over the
+    # mentions, so an entity that got none is simply absent from it -- and that
+    # is how 154 of them reached the graph without anyone counting.
+    silent = summary.get("minted_without_mention", [])
+    if silent:
+        lines.append(
+            f"  {len(silent)} of {summary['nodes']} minted entities are NOT NAMED "
+            "by this chapter's prose:"
+        )
+        lines.extend(f"    {name}" for name in silent[:TOP_MENTIONS])
+        if len(silent) > TOP_MENTIONS:
+            lines.append(f"    ... and {len(silent) - TOP_MENTIONS} more")
+        lines.append(
+            "    Keeping them is fine and is the ruling; keeping them SILENTLY "
+            "is not. `mark_unnamed --apply` records it on each node."
+        )
     return "\n".join(lines)
 
 

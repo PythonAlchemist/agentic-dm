@@ -24,11 +24,18 @@ already cites prose cannot lose any -- which is the difference between this and
 one the scanner would have produced on a full write and did not, because the
 spelling was not there to look for yet.
 
-WHAT IT DOES NOT UPDATE, stated plainly: co-occurrence edges and passage
-derivations are computed on a full write and are not recomputed here. A
-redeemed entity is citable and joins the mention triangle; it does not gain the
-`CO_OCCURS_WITH` edges a re-write would have given it. That is a smaller gap
-than not being able to cite the book at all, and it is a gap.
+CO-OCCURRENCE IS RECOMPUTED FOR THE SECTIONS THAT GAINED A MENTION, and only
+those. A redeemed entity that joined the mention triangle but gained no
+`CO_OCCURS_WITH` edge would be citable and disconnected -- present in a passage
+and absent from every sentence-level neighbourhood the retriever walks. The
+recomputation reads ALL of an affected section's mentions, not only the new
+one, because a pair is a fact about a sentence rather than about the mention
+that happened to arrive last. `_write_co_occurrence` MERGEs on the pair and
+carries no properties, so redoing a section's edges is idempotent.
+
+WHAT IT STILL DOES NOT UPDATE: passage derivations, which are computed on a
+full write. A redeemed entity is citable and connected; its passages are the
+ones the next write derives.
 
 THE DEFAULT TARGET IS `named_by_book: false` -- the entities `mark_unnamed`
 recorded as citing nothing. Those are exactly the ones an alias might redeem,
@@ -39,7 +46,15 @@ from __future__ import annotations
 
 import argparse
 
-from backend.canon.spine import EntityNames, WriteSection, mention_id, scan_mentions
+from backend.canon.cooccurrence import plan_co_occurrences
+from backend.canon.spine import (
+    AliasUse,
+    EntityNames,
+    WriteMention,
+    WriteSection,
+    mention_id,
+    scan_mentions,
+)
 from backend.canon.writer import CANON_PLANE
 from backend.core.database import neo4j_session, read_only_session
 from backend.graph.schema import NAMED_BY_BOOK
@@ -61,6 +76,19 @@ RETURN c.slug AS chapter, s.id AS id, s.heading AS heading, s.text AS text,
 
 #: MERGE, never CREATE. Two runs of this are one run, and a mention that
 #: already exists is left exactly as the write that made it left it.
+#: Every mention already in a section, so a recomputed co-occurrence describes
+#: the whole sentence rather than only what just arrived.
+SECTION_MENTIONS = """
+MATCH (m:Mention {plane:$plane})-[:IN_SECTION]->(s:Section)
+WHERE s.id IN $sections
+MATCH (m)-[:REFERS_TO]->(e:Entity)
+RETURN s.id AS section, m.id AS id, e.id AS entity, e.name AS entity_name,
+       coalesce(m.offsets, []) AS offsets,
+       coalesce(m.occurrences, 1) AS occurrences,
+       coalesce(m.display_name, e.name) AS surface,
+       coalesce(m.chapter_slug, '') AS chapter
+"""
+
 WRITE = """
 MATCH (e:Entity {id:$entity}), (s:Section {id:$section})
 MERGE (m:Mention {id:$id})
@@ -134,9 +162,46 @@ def main() -> int:
                 "occurrences": m.occurrences, "offsets": list(m.offsets),
                 "display_name": m.uses[0].name if m.uses else entity.name,
             }).single()["n"]
-    print(f"\n  wrote {written} mention(s). Run `mark_unnamed --apply` to clear "
-          "the mark from anything that can now cite the book.")
+    pairs = _recompute_co_occurrence(
+        sorted({m.section_id for _, m in found}), by_chapter, args.plane)
+    print(f"\n  wrote {written} mention(s), {pairs} co-occurrence pair(s). "
+          "Run `mark_unnamed --apply` to clear the mark from anything that can "
+          "now cite the book.")
     return 0
+
+
+def _recompute_co_occurrence(section_ids, by_chapter, plane: str) -> int:
+    """Redo the sentence-level pairs for the sections that gained a mention.
+
+    ALL OF A SECTION'S MENTIONS, not only the new one: a pair is a fact about a
+    sentence, and computing it from the arrival alone would record the new
+    entity's neighbours and silently drop everyone else's.
+    """
+    from backend.canon.writer import _write_co_occurrence
+
+    if not section_ids:
+        return 0
+    sections = {s.id: s for group in by_chapter.values() for s in group}
+    wanted = [sections[sid] for sid in section_ids if sid in sections]
+
+    with read_only_session() as session:
+        rows = [dict(r) for r in session.run(
+            SECTION_MENTIONS, {"plane": plane, "sections": section_ids})]
+    mentions = [
+        WriteMention(
+            id=r["id"], entity_id=r["entity"], section_id=r["section"],
+            chapter_slug=r["chapter"], occurrences=r["occurrences"],
+            offsets=tuple(r["offsets"]), entity_name=r["entity_name"],
+            section_heading=sections[r["section"]].heading if r["section"] in sections else "",
+            uses=(AliasUse(name=r["surface"], occurrences=r["occurrences"]),),
+        )
+        for r in rows if r["section"] in sections
+    ]
+    planned = plan_co_occurrences(wanted, mentions)
+    with neo4j_session() as session:
+        for pair in planned:
+            session.execute_write(lambda tx, p=pair: _write_co_occurrence(tx, p))
+    return len(planned)
 
 
 if __name__ == "__main__":
