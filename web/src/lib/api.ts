@@ -192,7 +192,18 @@ export interface RetrievalReport {
 }
 
 export interface SubgraphView {
-  nodes: { id: string; name: string; labels: string[]; how: string; turn: number }[]
+  nodes: {
+    id: string
+    name: string
+    labels: string[]
+    how: string
+    turn: number
+    /** False when no section of the book names this — the node came from
+     *  extraction, holds no mention, and there is no sentence to quote. The
+     *  panel is where a DM sees what an answer was built on, so it has to be
+     *  able to show one of these apart from a thing the book prints. */
+    named_by_book?: boolean
+  }[]
   edges: {
     source: string
     rel_type: string

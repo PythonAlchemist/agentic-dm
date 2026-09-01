@@ -223,7 +223,7 @@ async def chat(request: ChatRequest) -> dict:
         "usage": result.usage,
         "cost": result.cost,
         "retrieval": result.retrieval,
-        "subgraph": result.subgraph,
+        "subgraph": _with_provenance(result.subgraph),
         # AN EXPLICIT ALLOWLIST DROPS WHATEVER IT DOES NOT NAME. The draft
         # cards were generated, cost money, and vanished here -- the model
         # said "a draft is ready for review" and the reader was shown nothing.
@@ -354,6 +354,46 @@ def reset(session_id: str = "lab") -> dict:
     """Drop a session's history. The knobs are per-request, so nothing else."""
     _SESSIONS.pop(session_id, None)
     return {"ok": True, "session_id": session_id}
+
+
+#: Which of these nodes the book does not name. Read here rather than carried
+#: through `subgraph.Held`, because the subgraph is built from anchors and from
+#: names an answer used, and NEITHER KNOWS THIS. Threading a field those call
+#: sites cannot fill would mean defaulting it, and a default of "the book names
+#: this" is the one wrong answer -- it would assert canon over the 154 nodes
+#: that have none.
+_UNNAMED = """
+MATCH (e:Entity) WHERE e.id IN $ids AND e.named_by_book = false
+RETURN collect(e.id) AS ids
+"""
+
+
+def _with_provenance(subgraph: dict | None) -> dict | None:
+    """Mark the subgraph's nodes the book does not name.
+
+    THE PANEL IS WHERE A DM SEES WHAT AN ANSWER WAS BUILT ON, and until now it
+    showed a node the extractor invented exactly like one the book prints. The
+    entity card had said so since the marking landed; this is the same fact at
+    the place the reader actually looks.
+
+    ABSENT MEANS NOT MARKED, NEVER "unknown". Only ids the graph explicitly
+    holds as `false` come back, so a node this cannot find is left alone rather
+    than described either way.
+    """
+    if not subgraph or not subgraph.get("nodes"):
+        return subgraph
+    from backend.core.database import read_only_session
+
+    ids = [n["id"] for n in subgraph["nodes"] if n.get("id")]
+    try:
+        with read_only_session() as session:
+            unnamed = set(session.run(_UNNAMED, {"ids": ids}).single()["ids"])
+    except Exception:  # noqa: BLE001 -- a panel decoration is not worth a 500
+        logger.exception("could not read provenance for the subgraph")
+        return subgraph
+    for node in subgraph["nodes"]:
+        node["named_by_book"] = node.get("id") not in unnamed
+    return subgraph
 
 
 def _agent_for(

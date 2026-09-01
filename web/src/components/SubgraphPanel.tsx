@@ -200,6 +200,16 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                   </Explain>
                   <span className="font-medium text-neutral-200">{n.name}</span>
                   <span className="truncate text-neutral-600">{n.labels.join('/')}</span>
+                  {/* NOT NAMED BY THE BOOK. Explicitly false only: a node the
+                      lookup could not find is left unmarked rather than
+                      described either way. */}
+                  {n.named_by_book === false && (
+                    <Explain text="No section of the book names this. It came from the extraction — a common noun title-cased into a name, or a name written for something the book only describes — so there is no sentence to quote about it. What it connects to may still be right.">
+                      <span className="shrink-0 rounded border border-sky-900/70 px-1 text-[10px] text-sky-300/80">
+                        unnamed
+                      </span>
+                    </Explain>
+                  )}
                   <span className="ml-auto shrink-0">
                     <Explain
                       text={

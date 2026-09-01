@@ -192,6 +192,14 @@ class DMTools:
             carries none, which means unclassified rather than unknown), its
             `mentions` with the sentence the book wrote, and its `accepted` and
             `proposed` edges kept apart.
+
+            `named_by_book` is false when NO SECTION OF THE BOOK NAMES THIS
+            THING. The node came from extraction -- a common noun the extractor
+            title-cased, or a name it wrote for something the book only
+            describes -- so its `mentions` list is empty and there is no
+            sentence to quote. What it connects to may still be right. Say so
+            when you use one: the DM must be able to tell it from a thing the
+            book prints.
         """
         return self.canon.lookup(name)
 

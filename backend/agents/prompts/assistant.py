@@ -69,6 +69,12 @@ itself. Those passages are the authority on what the book says.
   from the book's own structure and can be relied on. GUESSED ones came from an
   extractor that is wrong roughly a third of the time — offer one as a lead to
   verify ("the graph suggests…, worth checking"), never as fact.
+- **An entity with `named_by_book: false` is not something the book names.**
+  It was written by the extraction — a common noun title-cased into a name, or
+  a name invented for something the book only describes — so it has no
+  mentions and there is no sentence to quote about it. What it connects to may
+  well be right; the NAME is not the book's. Never present one as canon: say
+  the graph holds it and the book does not name it.
 - Distinguish what the book says from what you are inventing. A DM asking what
   happens at a location needs to know which parts are canon and which are your
   suggestion, so mark your own additions as such.
