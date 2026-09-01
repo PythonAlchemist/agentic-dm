@@ -32,14 +32,15 @@ def _ids(session, query):
     return {r["id"] for r in session.run(query, PARAMS)}
 
 
-def _named(session, entity_id: str, section_id: str):
+def _named(session, entity_id: str, section_id: str, plane: str = "canon"):
     """The mention triangle: an entity, a section, and the node joining them."""
     session.run(
-        f"MATCH (e:Entity {{id:$e}}) "
-        f"CREATE (s:Section {{id:$s, plane:'canon'}}) "
-        f"CREATE (m:Mention {{id:$e + '@' + $s, plane:'canon'}}) "
+        "MATCH (e:Entity {id:$e}) "
+        "CREATE (s:Section {id:$s, plane:$plane, campaign:$camp}) "
+        "CREATE (m:Mention {id:$e + '@' + $s, plane:$plane, campaign:$camp}) "
         "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)",
-        {"e": entity_id, "s": section_id},
+        {"e": entity_id, "s": section_id, "plane": plane,
+         "camp": None if plane == "canon" else PREFIX},
     )
 
 
@@ -97,3 +98,42 @@ class TestItClearsTheStaleOnes:
                   f"{NAMED_BY_BOOK}:false}})")
         _named(graph, f"{PREFIX}:b", f"{PREFIX}:sec4")
         assert not (_ids(graph, TO_MARK) & _ids(graph, TO_CLEAR))
+
+
+class TestOnlyTheBookCountsAsTheBookNamingIt:
+    """THE DOOR ON THE OTHER SIDE OF THE GATE.
+
+    `expand` fleshes an entity out into a CAMPAIGN-plane section and writes a
+    campaign-plane mention pointing at it -- and the entity it expands is
+    frequently the book's. A mention is a mention to Cypher, so a query that
+    does not name the plane reads the DM's own generated prose as the book
+    naming the thing, and flips `named_by_book` from false to true.
+
+    That is this project's one promise failing in the direction nobody would
+    check: not authored material mistaken for canon somewhere obvious, but a
+    canon node quietly acquiring the book's authority from a scene the DM
+    wrote last night.
+    """
+
+    def test_a_campaign_mention_does_not_clear_the_mark(self, graph):
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:mono', plane:'canon', "
+                  f"name:'Monodrones', {NAMED_BY_BOOK}:false}})")
+        _named(graph, f"{PREFIX}:mono", f"{PREFIX}:scene", plane="campaign")
+        assert f"{PREFIX}:mono" not in _ids(graph, TO_CLEAR), (
+            "the DM fleshing this out is not the book naming it"
+        )
+
+    def test_a_canon_mention_still_clears_the_mark(self, graph):
+        """The fix must not break the case the clearing exists for."""
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:real', plane:'canon', "
+                  f"name:'Gunther Arasek', {NAMED_BY_BOOK}:false}})")
+        _named(graph, f"{PREFIX}:real", f"{PREFIX}:sec9", plane="canon")
+        assert f"{PREFIX}:real" in _ids(graph, TO_CLEAR)
+
+    def test_an_entity_with_only_a_campaign_mention_is_still_marked(self, graph):
+        """The same hole on the way in: an unmarked entity whose only mention
+        is the DM's must still be selected for marking."""
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:closet', plane:'canon', "
+                  "name:'Closet 1'})")
+        _named(graph, f"{PREFIX}:closet", f"{PREFIX}:scene2", plane="campaign")
+        assert f"{PREFIX}:closet" in _ids(graph, TO_MARK)

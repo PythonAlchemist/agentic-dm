@@ -145,6 +145,13 @@ LIMIT 50
 #: Keeping such a node is then a decision the graph states out loud rather
 #: than a gap a reader has to notice.
 #:
+#: THE MENTION MUST BE THE BOOK'S OWN. `expand` writes a CAMPAIGN-plane
+#: section and a campaign-plane mention pointing at the entity it fleshes out,
+#: and that entity is often the book's. Without `{plane:'canon'}` here, a DM
+#: writing up `Monodrones` would satisfy this check on their own prose and the
+#: node would report that the book names it. The gate would have had a door on
+#: one side only.
+#:
 #: QUEST IS NOT EXEMPT, though twelve rows are quests phrased as objectives
 #: rather than named in the text. Exempting them would carve out the class most
 #: likely to be read as canon at the table, and whether an authored objective
@@ -157,7 +164,8 @@ LIMIT 50
 #: two agree, which is this file's own rule applied to itself.
 UNSUPPORTED_ENTITIES = """
 MATCH (e:Entity {plane:'canon'})
-WHERE NOT (e)<-[:REFERS_TO]-(:Mention) AND e.named_by_book IS NULL
+WHERE NOT (e)<-[:REFERS_TO]-(:Mention {plane:'canon'})
+  AND e.named_by_book IS NULL
 RETURN e.id AS id, e.campaign AS campaign,
        'no section names ' + coalesce(e.name, e.id) +
        ', and it does not say so' AS why

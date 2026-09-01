@@ -24,6 +24,15 @@ that earns a mention -- from a new alias, a re-scan, a chapter written since --
 is named by the book now, and a stale `named_by_book: false` on it would be the
 graph lying in the safe direction. Both moves are counted and printed.
 
+ONLY THE BOOK'S OWN PROSE COUNTS, and the plane on every `Mention` here is
+what says so. `expand` fleshes an entity out into a CAMPAIGN-plane section and
+writes a campaign-plane mention pointing at it -- and the entity it expands is
+often the book's. A mention is a mention to Cypher, so a query that does not
+name the plane reads the DM's generated scene as the book naming the thing and
+clears the mark. That is this project's promise failing in the direction
+nobody would check: a canon node quietly taking on the book's authority from
+prose written last night.
+
 IT TOUCHES NO EDGE, NO MENTION AND NO NAME. One property, on entities of the
 canon plane, and nothing else.
 """
@@ -39,7 +48,7 @@ from backend.graph.schema import NAMED_BY_BOOK
 #: Unmarked and unnamed: the rows the invariant fails on.
 TO_MARK = f"""
 MATCH (e:Entity {{plane:$plane}})
-WHERE NOT (e)<-[:REFERS_TO]-(:Mention) AND e.{NAMED_BY_BOOK} IS NULL
+WHERE NOT (e)<-[:REFERS_TO]-(:Mention {{plane:$plane}}) AND e.{NAMED_BY_BOOK} IS NULL
   AND ($prefix = '' OR e.id STARTS WITH $prefix)
 RETURN e.id AS id, e.name AS name,
        [l IN labels(e) WHERE l <> 'Entity'] AS kind
@@ -48,7 +57,7 @@ ORDER BY e.id
 
 #: Marked but named after all -- the mark went stale and would now be a lie.
 TO_CLEAR = f"""
-MATCH (e:Entity {{plane:$plane}})<-[:REFERS_TO]-(:Mention)
+MATCH (e:Entity {{plane:$plane}})<-[:REFERS_TO]-(:Mention {{plane:$plane}})
 WHERE e.{NAMED_BY_BOOK} IS NOT NULL
   AND ($prefix = '' OR e.id STARTS WITH $prefix)
 RETURN e.id AS id, e.name AS name,
@@ -58,14 +67,14 @@ ORDER BY e.id
 
 MARK = f"""
 MATCH (e:Entity {{plane:$plane}}) WHERE e.id IN $ids
-  AND NOT (e)<-[:REFERS_TO]-(:Mention)
+  AND NOT (e)<-[:REFERS_TO]-(:Mention {{plane:$plane}})
 SET e.{NAMED_BY_BOOK} = false
 RETURN count(*) AS n
 """
 
 CLEAR = f"""
 MATCH (e:Entity {{plane:$plane}}) WHERE e.id IN $ids
-  AND (e)<-[:REFERS_TO]-(:Mention)
+  AND (e)<-[:REFERS_TO]-(:Mention {{plane:$plane}})
 REMOVE e.{NAMED_BY_BOOK}
 RETURN count(*) AS n
 """

@@ -260,6 +260,26 @@ class TestACanonEntitySaysWhetherTheBookNamesIt:
         for, one file over."""
         assert self.NAME in {c.name for c, _ in invariants.run(graph)}
 
+    def test_only_the_books_own_prose_answers_for_it(self, graph):
+        """`expand` writes a CAMPAIGN-plane section and mention pointing at the
+        entity it fleshes out, and that entity is often the book's. Without the
+        plane on the mention, a DM writing up `Monodrones` would satisfy this
+        check with their own prose -- the promise failing in the direction
+        nobody would check."""
+        graph.run(
+            f"CREATE (e:Entity {{id:'{PREFIX}:mono', plane:'canon', "
+            "name:'Monodrones'}) "
+            f"CREATE (s:Section {{id:'{PREFIX}:scene', plane:'campaign', "
+            f"campaign:'{PREFIX}'}}) "
+            f"CREATE (m:Mention {{id:'{PREFIX}:mm', plane:'campaign', "
+            f"campaign:'{PREFIX}'}}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)"
+        )
+        rows = self._scoped(graph)
+        assert any(r["id"] == f"{PREFIX}:mono" for r in rows), (
+            "a campaign-plane mention is the DM naming it, not the book"
+        )
+
     def test_an_entity_that_admits_it_is_not_caught(self, graph):
         """The whole point of the reshape: a node the DM chose to keep, which
         says on itself that the book does not name it, is not a violation."""
