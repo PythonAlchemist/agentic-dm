@@ -223,6 +223,27 @@ AUTHORED_LOCATION_SUBTYPES: frozenset[LocationSubtype] = (
 # design decision, not an entry to append here.
 ARTIFACT_LABEL = "Artifact"
 
+#: SET WHEN NO SECTION OF THE BOOK NAMES AN ENTITY, and absent otherwise.
+#:
+#: A mention is how a canon entity cites the prose that says it. 154 entities
+#: hold none: the extractor title-cased common nouns the book only ever writes
+#: in lowercase (`Spellbook`, `Cabinet`, `Amethyst`), and it authored names for
+#: things the book describes without naming (`Side Room 2`, `Painting by famous
+#: artist`). They were nearly deleted, and the DM's ruling was that they are
+#: worth keeping -- `Monodrones GUARDS Abacus Car` is a true thing about a real
+#: train car, and the graph is poorer without it.
+#:
+#: SO THE DEFECT WAS NEVER THAT THEY EXIST. It is that a read could not tell
+#: them from an entity the book names, which is the one promise this project
+#: makes. This property is that distinction, recorded on the node and returned
+#: by `lookup`, so keeping them costs nothing the DM has to take on trust.
+#:
+#: FALSE OR ABSENT, NEVER TRUE. An entity a mention names needs no property to
+#: say so -- the mention is the saying -- and a second place recording the same
+#: fact is a second place for it to be wrong. `mark_unnamed` clears the
+#: property from any entity that has since earned a mention.
+NAMED_BY_BOOK = "named_by_book"
+
 # The narrative spine, and the mention triangle hanging off it.
 #
 #   (:Book)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section)

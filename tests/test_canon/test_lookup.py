@@ -46,7 +46,7 @@ from backend.canon.writer import (
     write_chapter,
 )
 from backend.core.database import neo4j_session
-from backend.graph.schema import RelationshipType
+from backend.graph.schema import NAMED_BY_BOOK, RelationshipType
 
 CHAPTER = "pytest-lookup-chapter"
 BOOK = "pytest-lookup-book"
@@ -805,3 +805,30 @@ class TestTheRealBook:
 def test_the_default_log_path_is_under_data():
     """Gitignored, and where the previous run's log already lives."""
     assert CanonLookup().log_path.as_posix().endswith("data/query-log.jsonl")
+
+
+@pytest.mark.neo4j
+class TestALookupSaysWhetherTheBookNamesIt:
+    """The one promise this project makes, delivered at the point of reading.
+
+    154 canon entities cite no prose and the DM ruled them worth keeping, so
+    the graph records the gap instead of deleting the node -- which is only
+    worth anything if a read actually carries it out to the caller.
+    """
+
+    def test_an_entity_the_book_names_says_so(self, graph, canon):
+        assert canon.lookup(CHURCH.name)["entities"][0]["named_by_book"] is True
+
+    def test_an_entity_that_admits_the_gap_says_so(self, graph, canon):
+        graph.run(
+            f"MATCH (e:Entity {{id:$id}}) SET e.{NAMED_BY_BOOK} = false",
+            {"id": CHURCH.id},
+        )
+        assert canon.lookup(CHURCH.name)["entities"][0]["named_by_book"] is False
+
+    def test_it_is_a_boolean_and_not_the_stored_value(self, graph, canon):
+        """An unmarked node holds nothing, and a caller must not have to tell
+        `None` from `False` to know whether the book names the thing."""
+        entity = canon.lookup(CHURCH.name)["entities"][0]
+        assert entity["named_by_book"] is not None
+        assert isinstance(entity["named_by_book"], bool)

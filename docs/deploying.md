@@ -73,6 +73,15 @@ NEO4J_URI=bolt+s://<host>:7687 NEO4J_PASSWORD='<pw>' \
   uv run python -m backend.scripts.check_invariants
 ```
 
+All seven must hold. If one is red the copy is wrong; stop and read
+`backend/campaign/invariants.py`, which says what each one means.
+
+`a canon entity says whether the book names it` is the one to expect on a
+fresh copy: 154 entities cite no prose, and they are legitimate -- the DM
+ruled them worth keeping -- but each has to say so on itself before the check
+passes. `uv run python -m backend.scripts.mark_unnamed --apply` writes that,
+and `lookup` then returns `named_by_book` so a reader can see it.
+
 ## 4. Issue tokens
 
 One per person, so a token can be revoked without disturbing anyone else and a

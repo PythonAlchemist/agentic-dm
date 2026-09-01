@@ -42,7 +42,11 @@ def main() -> int:
                 print(f"  ok      {check.name}")
             continue
         broken += 1
-        print(f"  BROKEN  {check.name} -- {len(rows)} row(s)")
+        # A CAPPED RESULT IS NOT A COUNT. The queries take `LIMIT ROW_LIMIT`,
+        # so a full page means "at least this many" -- printing it as a total
+        # told a reader 154 unsupported entities were 50.
+        capped = "at least " if len(rows) >= invariants.ROW_LIMIT else ""
+        print(f"  BROKEN  {check.name} -- {capped}{len(rows)} row(s)")
         # A HANDFUL, NOT ALL OF THEM. The rows are evidence a person reads, and
         # fifty lines of the same shape teaches them to skip the next run.
         for row in rows[:5]:

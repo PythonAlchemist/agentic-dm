@@ -13,6 +13,8 @@ half-broken mentions the sweep for the second was too narrow to see.
 import pytest
 
 from backend.campaign import invariants
+from backend.canon.writer import CANON_PLANE
+from backend.graph.schema import NAMED_BY_BOOK
 from backend.core.database import neo4j_session
 
 PREFIX = "pytest-inv"
@@ -203,3 +205,101 @@ class TestAClaimOutlivesNoProse:
             f"from_section:'{PREFIX}:live#0'}}]->(b)"
         )
         assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]
+
+
+class TestACanonEntitySaysWhetherTheBookNamesIt:
+    """An entity holding no mention cites no prose, and reads like one that
+    does. 154 of them were sitting in the graph when this was written -- eight
+    spell scrolls named by pattern, `Closet 1`, `Potion of Far Realm Surprise`.
+
+    KEEPING ONE IS FINE; keeping one SILENTLY is not. The DM ruled these worth
+    having, so the rule is not that every entity is named by the book but that
+    none stays unsupported without saying so."""
+
+    NAME = "a canon entity says whether the book names it"
+
+    #: THE REAL PREDICATE, NARROWED TO THIS FILE'S NODES. `invariants.run` is
+    #: not used here as it is above: this check has 154 true rows in any graph
+    #: with the books loaded, and its `LIMIT 50` means a seeded node is not
+    #: reliably among them. Narrowing the file's own WHERE keeps the thing
+    #: under test the thing that ships, rather than a copy that can drift.
+    @staticmethod
+    def _scoped(session):
+        cypher = invariants.UNSUPPORTED_ENTITIES.replace(
+            "RETURN", f"AND e.id STARTS WITH '{PREFIX}' RETURN", 1
+        )
+        return [dict(r) for r in session.run(cypher)]
+
+    def test_an_entity_no_mention_names_is_caught(self, graph):
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:invented', plane:'canon', "
+                  "name:'Potion of Far Realm Surprise'})")
+        rows = self._scoped(graph)
+        assert any(r["id"] == f"{PREFIX}:invented" for r in rows), rows
+        assert any("Potion of Far Realm Surprise" in (r["why"] or "") for r in rows)
+
+    def test_an_entity_a_mention_names_is_not(self, graph):
+        graph.run(
+            f"CREATE (e:Entity {{id:'{PREFIX}:said', plane:'canon', name:'Ireena'}}) "
+            f"CREATE (s:Section {{id:'{PREFIX}:sec9', plane:'canon'}}) "
+            f"CREATE (m:Mention {{id:'{PREFIX}:said@{PREFIX}:sec9', plane:'canon'}}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)"
+        )
+        assert not self._scoped(graph)
+
+    def test_a_campaign_entity_is_not(self, graph):
+        """AUTHORED NPCs ARE NOT THE DEFECT. The DM inventing someone is the
+        campaign plane working; the check is about the canon plane claiming
+        the book said something it did not."""
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:authored', plane:'campaign', "
+                  f"name:'Someone the DM made up', campaign:'{PREFIX}'}})")
+        assert not self._scoped(graph)
+
+    def test_the_check_is_wired_in(self, graph):
+        """`run` reports it, so adding the constant without registering it
+        cannot pass -- the failure the route sweep in `test_auth` was written
+        for, one file over."""
+        assert self.NAME in {c.name for c, _ in invariants.run(graph)}
+
+    def test_an_entity_that_admits_it_is_not_caught(self, graph):
+        """The whole point of the reshape: a node the DM chose to keep, which
+        says on itself that the book does not name it, is not a violation."""
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:kept', plane:'canon', "
+                  f"name:'Monodrones', {NAMED_BY_BOOK}:false}})")
+        assert not self._scoped(graph)
+
+    def test_the_mark_does_not_excuse_a_campaign_entity_of_anything(self, graph):
+        """Guarding the reshape against the obvious over-reach: marking is a
+        statement about canon, and setting it true is not a way to silence the
+        check -- only `false` or absent are states this recognises."""
+        graph.run(f"CREATE (:Entity {{id:'{PREFIX}:sneaky', plane:'canon', "
+                  f"name:'Closet 1', {NAMED_BY_BOOK}:true}})")
+        assert not self._scoped(graph), (
+            "any non-null value counts as the node having answered; if this "
+            "ever needs to be stricter, the query is the place"
+        )
+
+    def test_the_property_spelled_here_is_the_real_one(self):
+        """As with the plane below: the constant lives in `graph.schema` and
+        this module stays free of it, so the duplication is checked."""
+        assert NAMED_BY_BOOK in invariants.UNSUPPORTED_ENTITIES
+
+    def test_the_plane_spelled_here_is_the_real_one(self):
+        """The constant hardcodes `canon` to keep this module free of
+        `canon.writer` and everything behind it. That duplication is checked
+        rather than remembered, which is what the rest of the file is for."""
+        assert f"plane:'{CANON_PLANE}'" in invariants.UNSUPPORTED_ENTITIES
+
+
+class TestEveryCheckAgreesWithTheRowLimit:
+    """`check_invariants` distinguishes a capped page from a total by counting
+    to `ROW_LIMIT`, which only works while the queries and the constant say the
+    same number."""
+
+    def test_every_query_takes_the_shared_limit(self):
+        for check in invariants.CHECKS:
+            assert f"LIMIT {invariants.ROW_LIMIT}" in check.cypher, check.name
+
+    def test_every_check_says_what_to_do(self):
+        """A violation nobody can act on is a check they learn to skip."""
+        for check in invariants.CHECKS:
+            assert check.fix.strip(), check.name

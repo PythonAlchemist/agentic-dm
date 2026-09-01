@@ -22,6 +22,12 @@ SO THE RULE IS WRITTEN DOWN INSTEAD. These are cheap queries over shapes that
 should never occur, and what they buy is that the FIFTH instance is a failing
 check rather than another afternoon of noticing.
 
+THE SEVENTH IS NOT ONE OF THE FOUR. The six below are all that one
+sentence, and each assumes the entity on the end of the edge is a thing the
+book says. `UNSUPPORTED_ENTITIES` checks the assumption -- a canon entity no
+mention names, which does not admit it -- and it is the only rule here that guards the promise the
+project is for rather than the plumbing beneath it.
+
 EACH RETURNS ROWS, NOT A BOOLEAN. A count says something is wrong; the rows
 say what, which is the difference between a check a person can act on and one
 they learn to skip.
@@ -106,6 +112,67 @@ RETURN m.id AS id, m.campaign AS campaign,
 LIMIT 50
 """
 
+#: A CANON ENTITY THE BOOK NEVER NAMES. The six above are all one sentence -- a
+#: campaign-plane thing joining nodes the campaign does not own, outliving
+#: whatever made it -- and every one of them assumes the entity on the end of
+#: the edge is real. This is that assumption, checked. It is also the only
+#: shape here that breaks the promise the whole project is for: that a DM can
+#: tell what the published book says from what a model invented.
+#:
+#: A MENTION IS THE WHOLE OF THAT EVIDENCE. The triangle
+#: `(:Entity)<-[:REFERS_TO]-(:Mention)-[:IN_SECTION]->(:Section)` is how an
+#: entity cites the prose that says it, so an entity holding none cannot be
+#: traced to a word of the book -- while reading, in `expand` and every other
+#: tool that returns it, exactly like one that can.
+#:
+#: MEASURED WHEN THIS WAS WRITTEN: 154 of 2,213 canon entities. 144 from
+#: `kftgv` against 10 from `cos`, and none of the `cos` ten are chapter-scoped
+#: -- so this is not a property of the design but of how one book was
+#: extracted. `Closet 1`, `Side Room 2`, eight spell scrolls named by pattern,
+#: `Painting by famous artist`, `Potion of Far Realm Surprise`. Descriptions
+#: and inventions, carrying aliases and edges.
+#:
+#: IT FAILS ON THE SILENT ONES, NOT ON ALL OF THEM, and the difference is the
+#: whole rule. The first version of this check failed on every unsupported
+#: entity, which made it red on 154 nodes the DM then ruled were worth keeping:
+#: `Monodrones GUARDS Abacus Car` says something true about a real train car.
+#: A check that is red on data everybody has agreed is fine is a check people
+#: learn to skip, which is the failure this file opens by warning about.
+#:
+#: So the rule is not "every canon entity is named by the book". It is that
+#: none is UNSUPPORTED AND UNMARKED -- `schema.NAMED_BY_BOOK` records the
+#: entity's own admission, `mark_unnamed` writes it, and `lookup` returns it.
+#: Keeping such a node is then a decision the graph states out loud rather
+#: than a gap a reader has to notice.
+#:
+#: QUEST IS NOT EXEMPT, though twelve rows are quests phrased as objectives
+#: rather than named in the text. Exempting them would carve out the class most
+#: likely to be read as canon at the table, and whether an authored objective
+#: belongs in this plane at all is the question those rows are asking.
+#:
+#: `canon` IS SPELLED HERE rather than imported. This module is strings and a
+#: dataclass; `CANON_PLANE` lives in `canon.writer`, which pulls the gazetteer
+#: and the whole schema behind it -- weight a check meant to be safe to point
+#: at a live table mid-session should not carry. `test_invariants` asserts the
+#: two agree, which is this file's own rule applied to itself.
+UNSUPPORTED_ENTITIES = """
+MATCH (e:Entity {plane:'canon'})
+WHERE NOT (e)<-[:REFERS_TO]-(:Mention) AND e.named_by_book IS NULL
+RETURN e.id AS id, e.campaign AS campaign,
+       'no section names ' + coalesce(e.name, e.id) +
+       ', and it does not say so' AS why
+LIMIT 50
+"""
+
+
+#: HOW MANY ROWS A CHECK RETURNS. Every query above ends `LIMIT ROW_LIMIT`,
+#: and the reason it is named here rather than only spelled there is that the
+#: runner has to tell a capped result from a complete one: the seventh check
+#: found 154 rows the day it was written and reported "50", which reads as the
+#: size of the problem and is not. `test_invariants` asserts the queries and
+#: this number agree.
+ROW_LIMIT = 50
+
 
 @dataclass(frozen=True)
 class Check:
@@ -134,6 +201,9 @@ CHECKS: tuple[Check, ...] = (
           "`delete_campaign` removes these; one run by hand leaves them"),
     Check("a mention's id spells its pair", MISFILED_MENTIONS,
           "rename them -- `merge_duplicates --mention-ids` does exactly this"),
+    Check("a canon entity says whether the book names it", UNSUPPORTED_ENTITIES,
+          "`mark_unnamed --apply` records it on the node, which is what makes "
+          "keeping one a stated decision rather than a gap a reader must spot"),
 )
 
 

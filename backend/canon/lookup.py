@@ -63,7 +63,7 @@ from backend.canon.aliases import resolve_name
 from backend.canon.gazetteer import load_gazetteer
 from backend.canon.passage import derive_passage
 from backend.canon.writer import ACCEPTED, CANON_PLANE, LOCATION_SUBTYPE_LABELS
-from backend.graph.schema import ARTIFACT_LABEL
+from backend.graph.schema import ARTIFACT_LABEL, NAMED_BY_BOOK
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +178,10 @@ def split_by_status(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 # Labels are never interpolated: the only label text these carry is this
 # module's own constants, and a rung or a type is read back with `labels(n)`.
 
-SUBJECTS = """
-MATCH (n:Entity {plane:$plane}) WHERE n.id IN $ids
-RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.status AS node_status
+SUBJECTS = f"""
+MATCH (n:Entity {{plane:$plane}}) WHERE n.id IN $ids
+RETURN n.id AS id, n.name AS name, labels(n) AS labels, n.status AS node_status,
+       n.{NAMED_BY_BOOK} AS named_by_book
 ORDER BY n.id
 """
 
@@ -512,6 +513,12 @@ class CanonLookup:
                 "rung": rung_of(row["labels"]),
                 "artifact": ARTIFACT_LABEL in row["labels"],
                 "node_status": row["node_status"],
+                # TRUE UNLESS THE NODE SAYS OTHERWISE. The property is only
+                # ever set to false, so absence is the ordinary case and an
+                # entity the book names carries nothing extra. Answering with
+                # a plain boolean means a caller cannot mistake "not marked"
+                # for "not known" -- see `schema.NAMED_BY_BOOK`.
+                "named_by_book": row["named_by_book"] is not False,
             }
             for row in self._rows(session, SUBJECTS, {"ids": ids})
         ]
