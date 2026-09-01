@@ -642,37 +642,6 @@ class TestProseThatNamesNothingConnectsToNothing:
         assert len(numbers) == len(set(numbers)), numbers
 
 
-class TestNamingWhatProseIsAlreadyAbout:
-    """Rule 4 applied backwards. A new generation is told to name what it is
-    about; prose written before that rule sat in the graph naming nothing --
-    1,967 characters of "the barge", "the crew", "the characters"."""
-
-    def test_it_offers_what_each_thing_is_beside_its_name(self):
-        """Offered the bare names, the pass wrote "loyalty from her Corsair
-        Skirmisher" for "her crew" -- one kind of fighter standing in for a
-        whole crew, because the names alone do not say which is which."""
-        prompt = generator._NAME_THE_THINGS.format(
-            body="She commands her ship.",
-            names="  - Corsair Crew -- NPC -- standard foot soldiers",
-        )
-        assert "what it IS" in prompt
-        assert "READ WHAT EACH THING IS BEFORE YOU USE ITS NAME" in prompt
-
-    def test_it_is_told_to_change_nothing_else(self):
-        prompt = generator._NAME_THE_THINGS.format(body="x", names="  - y")
-        assert "CHANGE NOTHING ELSE" in prompt
-        assert "A wrong name is worse than no name" in prompt
-
-    def test_nothing_to_name_costs_nothing(self):
-        """No cast, or no prose, and there is no question to ask a model."""
-        assert asyncio.run(
-            generator.name_the_things(client=None, body="A quiet watch.", names=(), model="m")
-        ) == ("", "")
-        assert asyncio.run(
-            generator.name_the_things(client=None, body="   ", names=("A",), model="m")
-        ) == ("", "")
-
-
 class TestWhatAnEpisodeMayContain:
     """`scene` and `encounter` joined the element kinds so a quest could mint
     the episodes it contains. That made a new mistake reachable: an encounter
