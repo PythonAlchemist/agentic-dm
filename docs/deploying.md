@@ -108,6 +108,27 @@ Vercel, root directory `web`. One variable:
 
 Then put that Vercel URL into the API's `ALLOWED_ORIGINS` and redeploy it.
 
+**The root directory is load-bearing and easy to get wrong.** `vercel --prod`
+run from `web/` uploads that folder as the deployment root, so it works even
+when the project's Root Directory is `.` -- and a git-triggered build does not,
+because Vercel clones the whole repo and there is no `package.json` at the top.
+The two paths disagree silently: CLI deploys succeed, pushes build nothing.
+
+That is what happened here. The API auto-deploys from GitHub and the web app
+did not, so a push updated one half of the app and left the other on a build
+from the previous day, with no failure anywhere to notice. If the UI is not
+showing a change you know you pushed, check this first.
+
+Once Root Directory is `web`, connect the repo so pushes build:
+
+```bash
+cd web && vercel git connect
+```
+
+After that, deploy from the REPO ROOT rather than `web/` if you deploy by hand
+at all -- Root Directory is applied to CLI uploads too, so `vercel --prod` from
+inside `web/` would then look for `web/web`.
+
 ## Checking it worked
 
 ```bash
