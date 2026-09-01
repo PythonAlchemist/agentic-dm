@@ -1,7 +1,8 @@
 """Give back the rooms an alias merge took across adventure lines.
 
-    uv run python -m backend.scripts.unmerge_scoped              # plan
+    uv run python -m backend.scripts.unmerge_scoped              # plan, keyed only
     uv run python -m backend.scripts.unmerge_scoped --apply
+    uv run python -m backend.scripts.unmerge_scoped --unkeyed     # every scope violation
 
 
 `Prison Tower` in Fire and Darkness holds four mentions in Heart of Ashes,
@@ -20,11 +21,26 @@ that spelling is what the vanished entity was called: `Prison Tower` held
 `Mage Tower` in one chapter and `Vault Tower` in another, and those are two
 different towers.
 
-RUN `audit_scope` FIRST. This handles only the KEYED rooms, which are the
-cases that need no judgement -- the book keys rooms per adventure, so `C10` in
-one heist and `C10` in another are different rooms and a foreign mention of one
-is always a bad merge. The rest of what the audit reports is a decision about
-whether a name is genuinely book-wide, and this script has no opinion about it.
+RUN `audit_scope` FIRST. By default this handles only the KEYED rooms, which
+need no judgement on the book's own terms: it keys rooms per adventure, so
+`C10` in one heist and `C10` in another are different rooms and a foreign
+mention of one is always a bad merge.
+
+`--unkeyed` TAKES THE REST, and it is a DM's ruling that makes that safe rather
+than anything in the text. Asked whether a stone golem guarding Paliset Hall
+and one in Fire and Darkness are one monster or two, the answer was two -- the
+same answer `kftgv.yaml` already records for loot ("two piles of amethysts are
+two piles"), extended to creatures and gear. With that settled, every row
+`audit_scope` reports is a per-adventure instance and none of them is a
+judgement call any more. A name the book really does use book-wide is not
+reachable from here: `global_names` rescopes those to two-segment ids, which
+carry no chapter and so never appear as a violation.
+
+IT MOVES BY SCOPE, NOT BY NAME, which is why it reaches cases `split_entity`
+cannot. That script separates two things by what the section calls them, and
+gives up when the source already carries the foreign spelling as an alias --
+eight of these did, because `apply_aliases` folded it on. Which chapter a
+mention sits in is not a matter of spelling at all.
 
 AND FIX THE SEED AFTERWARDS. `data/aliases/<book>.yaml` still holds the group
 that caused the merge. `apply_aliases` now refuses a group spanning adventures,
@@ -37,7 +53,6 @@ import sys
 from backend.canon.assembler import slugify
 from backend.core.database import neo4j_session, read_only_session
 
-APPLY = "--apply" in sys.argv
 KEYED = re.compile(r"^[a-z]{1,2}\d+[a-z]?-")
 
 FOREIGN = """
@@ -54,33 +69,32 @@ RETURN e.id AS source, e.name AS name,
 ORDER BY e.id, found
 """
 
-with read_only_session() as s:
-    groups = [
-        dict(r) for r in s.run(FOREIGN)
-        if KEYED.match(r["source"].rsplit(":", 1)[-1])
-    ]
+def wanted(source_id: str, *, unkeyed: bool) -> bool:
+    """Whether this violation is one this script will act on.
 
-plan = []
-for g in groups:
-    surfaces = [x for x in g["surfaces"] if x]
-    if not surfaces:
-        print(f"  SKIP {g['name']} -> {g['found']}: no surface to name it by")
-        continue
-    # The longest spelling, which is the most specific thing the section called
-    # it. `Private Room` and `Private Rooms` are one room said twice.
-    name = max(surfaces, key=len)
-    book = g["source"].split(":", 1)[0]
-    plan.append({**g, "new_name": name,
-                 "new_id": f"{book}:{g['found']}:{slugify(name)}"})
+    The keyed test reads the ENTITY's id, where `c10-` marks a room the book
+    numbered. `--unkeyed` drops the test entirely rather than widening it,
+    because what makes the rest safe is the DM's ruling, not a better regex.
+    """
+    return unkeyed or bool(KEYED.match(source_id.rsplit(":", 1)[-1]))
 
-print(f"  {len(plan)} rooms to give back\n")
-for p in plan:
-    print(f"    {p['name']}  ({p['scope']})")
-    print(f"      -> {p['new_name']!r} as {p['new_id']}  [{p['label']}]  "
-          f"{len(p['mentions'])} mention(s)")
-if not APPLY:
-    print("\n  dry run: nothing written. Re-run with --apply.")
-    raise SystemExit(0)
+
+def plan_groups(groups: list[dict]) -> tuple[list[dict], list[str]]:
+    """`(plan, skipped)` -- pure, so a run can be printed without a session."""
+    plan, skipped = [], []
+    for g in groups:
+        surfaces = [x for x in g["surfaces"] if x]
+        if not surfaces:
+            skipped.append(f"{g['name']} -> {g['found']}: no surface to name it by")
+            continue
+        # The longest spelling, which is the most specific thing the section
+        # called it. `Private Room` and `Private Rooms` are one room said twice.
+        name = max(surfaces, key=len)
+        book = g["source"].split(":", 1)[0]
+        plan.append({**g, "new_name": name,
+                     "new_id": f"{book}:{g['found']}:{slugify(name)}"})
+    return plan, skipped
+
 
 def write(tx, p):
     tx.run(
@@ -104,9 +118,33 @@ def write(tx, p):
         {"new": p["new_id"], "name": p["new_name"],
          "normalized": p["new_name"].casefold()},
     )
-    # REPOINT, not recreate: the mention keeps its offsets and occurrences,
-    # which are facts about the section and unaffected by whose room it is.
-    return tx.run(
+    # THE TARGET ID MAY BE TAKEN, and a rename is only safe while it is free --
+    # the same guard `merge_duplicates` states. It happens whenever the entity
+    # being given back already exists and already holds a mention in the very
+    # section this one is moving to: `split_entity` had already made
+    # `Braith Broadfoot`, so repointing the last `Mayor Broadfoot` collided on
+    # `...braith-broadfoot@...#4` and the uniqueness constraint aborted the run.
+    #
+    # A collision is not an error, it is a DUPLICATE OF ONE PAIR. `mention_id`
+    # is `<entity>@<section>` by construction, so two mentions wanting one id
+    # are two spellings of the same entity in the same section -- which is a
+    # single mention with two offsets. So the offsets are carried over and the
+    # spare goes, which is what `merge_duplicates` calls folding.
+    taken = {
+        r["mid"]: r["wanted"]
+        for r in tx.run(
+            """
+            MATCH (m:Mention) WHERE m.id IN $mentions
+            WITH m, $new + '@' + split(m.id, '@')[1] AS wanted
+            MATCH (:Mention {id: wanted})
+            RETURN m.id AS mid, wanted AS wanted
+            """,
+            {"new": p["new_id"], "mentions": p["mentions"]},
+        )
+    }
+    free = [m for m in p["mentions"] if m not in taken]
+
+    moved = tx.run(
         """
         MATCH (m:Mention)-[r:REFERS_TO]->(:Entity {id:$source})
         WHERE m.id IN $mentions
@@ -116,9 +154,61 @@ def write(tx, p):
         SET m.id = $new + '@' + split(m.id, '@')[1]
         RETURN count(m) AS n
         """,
-        {"source": p["source"], "new": p["new_id"], "mentions": p["mentions"]},
-    ).single()["n"]
+        {"source": p["source"], "new": p["new_id"], "mentions": free},
+    ).single()["n"] if free else 0
 
-with neo4j_session() as s:
-    moved = sum(s.execute_write(lambda tx, p=p: write(tx, p)) for p in plan)
-print(f"\n  gave back {len(plan)} rooms, {moved} mentions repointed")
+    folded = 0
+    for mid, wanted in taken.items():
+        folded += tx.run(
+            """
+            MATCH (m:Mention {id:$mid}), (t:Mention {id:$wanted})
+            SET t.offsets = coalesce(t.offsets, []) +
+                    [x IN coalesce(m.offsets, []) WHERE NOT x IN coalesce(t.offsets, [])]
+            SET t.occurrences = size(t.offsets)
+            DETACH DELETE m
+            RETURN count(t) AS n
+            """,
+            {"mid": mid, "wanted": wanted},
+        ).single()["n"]
+    return {"moved": moved, "folded": folded}
+
+def main() -> int:
+    unkeyed = "--unkeyed" in sys.argv
+    apply_it = "--apply" in sys.argv
+    with read_only_session() as session:
+        groups = [dict(r) for r in session.run(FOREIGN)
+                  if wanted(r["source"], unkeyed=unkeyed)]
+    plan, skipped = plan_groups(groups)
+    for line in skipped:
+        print(f"  SKIP {line}")
+    what = "violations" if unkeyed else "rooms"
+    print(f"  {len(plan)} {what} to give back\n")
+    for p in plan:
+        print(f"    {p['name']}  ({p['scope']})")
+        print(f"      -> {p['new_name']!r} as {p['new_id']}  [{p['label']}]  "
+              f"{len(p['mentions'])} mention(s)")
+    if not apply_it:
+        print("\n  dry run: nothing written. Re-run with --apply.")
+        return 0
+    moved = folded = failed = 0
+    with neo4j_session() as session:
+        for p in plan:
+            # ONE FAILURE IS NOT ALL OF THEM. The first version aborted the
+            # whole run on the first collision, leaving one row applied and
+            # eighteen not -- a half-done state nothing reported.
+            try:
+                counts = session.execute_write(lambda tx, p=p: write(tx, p))
+            except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+                failed += 1
+                print(f"    FAILED {p['name']} -> {p['new_id']}: {exc}")
+                continue
+            moved += counts["moved"]
+            folded += counts["folded"]
+    print(f"\n  gave back {len(plan) - failed} {what}, {moved} mentions repointed"
+          + (f", {folded} folded into a mention that already existed" if folded else "")
+          + (f", {failed} FAILED" if failed else ""))
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
