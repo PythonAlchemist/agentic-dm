@@ -41,7 +41,7 @@ export default function LogPage() {
 
   return (
     <Shell campaign={campaign} section="log">
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="text-title font-medium text-ink">The adventure so far</h1>
         <p className="mt-1 text-ui text-ink-dim">
           What your table has been told, and the night you were told it.

@@ -260,7 +260,7 @@ export function SectionReader({
                   <button
                     onClick={save}
                     disabled={saving}
-                    className="rounded-md bg-chrome px-3 py-1.5 font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
+                    className="rounded-md bg-chrome px-3 py-1 font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
                   >
                     {saving ? 'Saving…' : 'Save'}
                   </button>
@@ -289,7 +289,7 @@ export function SectionReader({
               shown.from_yours.length > 0 ||
               shown.from_context.length > 0 ||
               shown.invented.length > 0) && (
-              <div className="mt-5 space-y-3 border-t border-line pt-4 text-meta">
+              <div className="mt-6 space-y-3 border-t border-line pt-4 text-meta">
                 <Split
                   label="From the book"
                   items={shown.from_canon.map((c) => `${c.claim} ${c.cite}`)}
@@ -337,7 +337,7 @@ export function SectionReader({
                 which the prose mentions in passing, and nothing to do with the
                 scene. */}
             {connected.length > 0 && (
-              <div className="mt-5 border-t border-line pt-4">
+              <div className="mt-6 border-t border-line pt-4">
                 <div className="text-label font-medium uppercase tracking-wide text-ink-dim">
                   Connected ({connected.length})
                 </div>
@@ -663,7 +663,7 @@ function EntityCard({
                 >
                   {where.heading}
                 </button>
-                <ul className="mt-0.5 space-y-0.5">
+                <ul className="mt-1 space-y-0.5">
                   {where.says.map((line, index) => (
                     <li key={index} className="text-meta leading-relaxed text-ink-dim">
                       {line}

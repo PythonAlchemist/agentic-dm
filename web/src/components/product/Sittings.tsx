@@ -76,7 +76,7 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
             // six people in the group, and a picker would refuse the shorthand
             // they actually use while adding no correctness anybody wanted.
             placeholder="another evening"
-            className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
+            className={`min-w-0 flex-1 rounded-md bg-surface px-2 py-1 text-ui text-ink`}
           />
           <button
             onClick={propose}

@@ -81,7 +81,7 @@ export default function Home() {
 
   return (
     <Shell>
-      <div className="mx-auto max-w-3xl px-6 py-14">
+      <div className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="text-title font-medium text-ink">Your tables</h1>
         <p className="mt-2 max-w-prose text-ui leading-relaxed text-ink-dim">
           Each one draws on the books it was set up with. What the book says and
@@ -132,12 +132,12 @@ export default function Home() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="what do you call it?"
-                className="rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink focus:border-line"
+                className="rounded-md bg-surface px-2 py-1 text-ui text-ink focus:border-line"
               />
               <select
                 value={book}
                 onChange={(e) => setBook(e.target.value)}
-                className="rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink-dim"
+                className="rounded-md bg-surface px-2 py-1 text-ui text-ink-dim"
               >
                 <option value="">no book yet</option>
                 {books.map((b) => (
@@ -150,7 +150,7 @@ export default function Home() {
                 <button
                   onClick={make}
                   disabled={!slug}
-                  className="rounded-md bg-chrome px-3 py-1.5 text-meta text-ground transition-colors hover:bg-white disabled:opacity-30"
+                  className="rounded-md bg-chrome px-3 py-1 text-meta text-ground transition-colors hover:bg-white disabled:opacity-30"
                 >
                   make it
                 </button>

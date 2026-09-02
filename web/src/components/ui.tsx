@@ -50,7 +50,7 @@ export function Slider({
           className="block h-4 w-4 rounded-full bg-chrome shadow transition-shadow focus:focus-visible:ring-2 focus-visible:ring-amber-400"
         />
       </RadixSlider.Root>
-      {hint && <p className="mt-1.5 text-meta leading-relaxed text-ink-dim">{hint}</p>}
+      {hint && <p className="mt-2 text-meta leading-relaxed text-ink-dim">{hint}</p>}
     </div>
   )
 }
@@ -134,7 +134,7 @@ export function TabBar<T extends string>({
           role="tab"
           aria-selected={tab.id === active}
           onClick={() => onChange(tab.id)}
-          className={`rounded-md px-3 py-1.5 text-ui transition-colors ${
+          className={`rounded-md px-3 py-1 text-ui transition-colors ${
             tab.id === active
               ? 'bg-overlay text-ink'
               : 'text-ink-dim hover:bg-overlay/60 hover:text-ink'

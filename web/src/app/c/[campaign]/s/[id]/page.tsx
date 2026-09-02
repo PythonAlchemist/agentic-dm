@@ -74,13 +74,13 @@ export default function SectionPage() {
   return (
     <Shell campaign={campaign} section="library">
       {failed && (
-        <p className="mx-auto max-w-3xl px-6 py-10 text-ui text-ink-dim">
+        <p className="mx-auto max-w-3xl px-6 py-12 text-ui text-ink-dim">
           Could not open that section.
         </p>
       )}
 
       {section && (
-        <div className="mx-auto grid max-w-5xl gap-10 px-6 py-12 lg:grid-cols-[42rem_1fr]">
+        <div className="mx-auto grid max-w-5xl gap-8 px-6 py-12 lg:grid-cols-[42rem_1fr]">
         <article>
           {/* WHOSE WORDS THESE ARE, before the words -- in all three channels
               the grammar requires: the glyph, the word, and the hue. */}

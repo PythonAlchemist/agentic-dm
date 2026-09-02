@@ -52,11 +52,11 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && setAsked(q)}
           placeholder="who was the burgomaster again?"
-          className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink`}
+          className={`min-w-0 flex-1 rounded-md bg-surface px-2 py-1 text-ui text-ink`}
         />
         <button
           onClick={() => setAsked(q)}
-          className="shrink-0 rounded-md border border-line px-3 py-1.5 text-meta text-ink-dim hover:text-ink"
+          className="shrink-0 rounded-md border border-line px-3 py-1 text-meta text-ink-dim hover:text-ink"
         >
           look it up
         </button>

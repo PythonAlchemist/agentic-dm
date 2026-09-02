@@ -71,7 +71,7 @@ export function Reveal({
       {/* STACKED, NOT A ROW. This sits in the section reader's narrow rail as
           well as under a profile heading, and a horizontal row wrapped "tell
           them" onto two lines mid-phrase. */}
-      <div className="flex flex-col items-start gap-1.5">
+      <div className="flex flex-col items-start gap-2">
         <span className="text-meta text-ink-faint">
           {grant
             ? grant.as_name
@@ -121,7 +121,7 @@ export function Reveal({
             // How a party actually meets somebody: the coachman for three
             // sessions before Strahd.
             placeholder={`what they call ${name}`}
-            className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-0.5 text-label text-ink`}
+            className={`min-w-0 flex-1 rounded-md bg-surface px-2 py-0.5 text-label text-ink`}
           />
           <button
             onClick={() => alias.trim() && act(tableAPI.tellTable(campaign, target, alias.trim()))}

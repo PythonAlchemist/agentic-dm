@@ -118,7 +118,7 @@ export default function PlayPage() {
           rather than read, so it takes the width -- but the scene list is
           still a list of sentences and stretching it to 1440px would make
           every row a tracking exercise. */}
-      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-10 md:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="mx-auto grid max-w-7xl gap-8 px-6 py-12 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside>
           <div className="flex items-baseline justify-between">
             <h2 className="label text-ink-faint">
@@ -137,7 +137,7 @@ export default function PlayPage() {
               <li key={s.id}>
                 <button
                   onClick={() => setOpen(s.id)}
-                  className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-ui ${
+                  className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-ui ${
                     s.id === open ? CHROME.selected : 'text-ink-dim hover:text-ink'
                   }`}
                 >
@@ -181,7 +181,7 @@ export default function PlayPage() {
               </p>
               <button
                 onClick={start}
-                className={`mt-4 rounded-md px-3 py-1.5 text-ui ${CHROME.primary}`}
+                className={`mt-4 rounded-md px-3 py-1 text-ui ${CHROME.primary}`}
               >
                 Start the first session
               </button>
@@ -193,7 +193,7 @@ export default function PlayPage() {
               {/* WHAT ACTUALLY HAPPENED. A recording is the one document here
                   that may not assert: it becomes prose and mentions, and every
                   claim it seems to make stays a suggestion below. */}
-              <div className="mt-5 flex items-baseline gap-3">
+              <div className="mt-6 flex items-baseline gap-3">
                 <input
                   ref={file}
                   type="file"

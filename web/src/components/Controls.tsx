@@ -61,7 +61,7 @@ export function Controls({
               }`}
             >
               <span className="text-ui font-medium text-ink">{b.title}</span>
-              <span className="mt-0.5 block text-meta tabular-nums text-ink-faint">
+              <span className="mt-1 block text-meta tabular-nums text-ink-faint">
                 {b.chapters} chapters loaded
               </span>
             </button>
@@ -83,7 +83,7 @@ export function Controls({
             }`}
           >
             <span className="text-ui font-medium text-ink">Canon only</span>
-            <span className="mt-0.5 block text-meta leading-relaxed text-ink-dim">
+            <span className="mt-1 block text-meta leading-relaxed text-ink-dim">
               The published book, with nothing of yours in it.
             </span>
           </button>
@@ -98,7 +98,7 @@ export function Controls({
               }`}
             >
               <span className="text-ui font-medium text-ink">{c.name}</span>
-              <span className="mt-0.5 block text-meta tabular-nums text-ink-faint">
+              <span className="mt-1 block text-meta tabular-nums text-ink-faint">
                 {c.sections} sections in your running order
               </span>
             </button>
@@ -120,7 +120,7 @@ export function Controls({
               }`}
             >
               <span className="text-ui font-medium text-ink">{m.label}</span>
-              <span className="mt-0.5 block text-meta leading-relaxed text-ink-dim">
+              <span className="mt-1 block text-meta leading-relaxed text-ink-dim">
                 {m.note}
               </span>
               <span className="mt-1 block text-meta tabular-nums text-ink-faint">
@@ -180,7 +180,7 @@ export function Controls({
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-meta leading-relaxed text-ink-dim">
+            <p className="mt-2 text-meta leading-relaxed text-ink-dim">
               A sentence is cheap and often too narrow: the tavern&apos;s owners
               are named 3,300 characters after its first mention, in the same
               section.
@@ -196,7 +196,7 @@ export function Controls({
             />
             <span className="text-ui text-ink-dim">
               Include unverified relationships
-              <span className="mt-0.5 block text-meta leading-relaxed text-ink-dim">
+              <span className="mt-1 block text-meta leading-relaxed text-ink-dim">
                 Extractor guesses, wrong about a third of the time. Turn off and
                 re-ask to see whether a bad answer came from the model or from a
                 false edge fed to it.

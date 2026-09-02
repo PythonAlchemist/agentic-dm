@@ -62,7 +62,7 @@ export default function PartyPage() {
 
   return (
     <Shell campaign={campaign} section="party">
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-6 py-12">
         <div className="flex items-baseline gap-3">
           <h1 className="text-title font-medium text-ink">Carried</h1>
           <button
@@ -85,7 +85,7 @@ export default function PartyPage() {
         {failed && <p className="mt-3 text-meta text-ink-dim">⚠ {failed}</p>}
 
         {[...byHolder.entries()].map(([holder, items]) => (
-          <section key={holder} className="mt-7">
+          <section key={holder} className="mt-8">
             <h2 className="label text-ink-faint">
               {holder}
             </h2>
@@ -252,7 +252,7 @@ function Picker({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder={label}
-        className={`w-full rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
+        className={`w-full rounded-md bg-surface px-2 py-1 text-ui text-ink`}
       />
       <ul className="mt-1 flex max-h-48 flex-col overflow-y-auto">
         {rows.map((entity) => (

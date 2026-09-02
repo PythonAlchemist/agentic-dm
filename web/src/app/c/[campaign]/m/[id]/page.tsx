@@ -174,7 +174,7 @@ export default function MapPage() {
                     : 'border-ink-dim bg-transparent'
                 }`}
               />
-              <span className="mt-0.5 block whitespace-nowrap rounded-md bg-ground/80 px-1 text-label text-ink">
+              <span className="mt-1 block whitespace-nowrap rounded-md bg-ground/80 px-1 text-label text-ink">
                 {pin.name}
               </span>
             </button>
@@ -290,7 +290,7 @@ function PinPicker({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="what is here?"
-          className={`flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
+          className={`flex-1 rounded-md bg-surface px-2 py-1 text-ui text-ink`}
         />
         <button onClick={onCancel} className="text-label text-ink-dim hover:text-ink">
           cancel

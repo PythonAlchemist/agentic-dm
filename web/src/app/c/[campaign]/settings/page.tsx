@@ -68,18 +68,18 @@ export default function SettingsPage() {
 
   return (
     <Shell campaign={campaign} section="settings">
-      <div className="mx-auto flex max-w-3xl flex-col gap-10 px-6 py-10">
+      <div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-12">
         <section>
           <h1 className="text-title font-medium text-ink">This table</h1>
           <div className="mt-4 flex gap-2">
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink`}
+              className={`min-w-0 flex-1 rounded-md bg-surface px-2 py-1 text-ui text-ink`}
             />
             <button
               onClick={() => save({ name })}
-              className="shrink-0 rounded-md border border-line px-3 py-1.5 text-meta text-ink-dim hover:text-ink"
+              className="shrink-0 rounded-md border border-line px-3 py-1 text-meta text-ink-dim hover:text-ink"
             >
               rename
             </button>
@@ -105,11 +105,11 @@ export default function SettingsPage() {
             onChange={(e) => setPremise(e.target.value)}
             rows={6}
             placeholder="The pitch, the house rules, what happened before session one."
-            className={`mt-2 w-full resize-y rounded-md border border-line bg-ground px-3 py-2 text-ui leading-relaxed text-ink`}
+            className={`mt-2 w-full resize-y rounded-md bg-surface px-3 py-2 text-ui leading-relaxed text-ink`}
           />
           <button
             onClick={() => save({ premise })}
-            className={`mt-3 rounded-md px-3 py-1.5 text-ui ${CHROME.primary}`}
+            className={`mt-3 rounded-md px-3 py-1 text-ui ${CHROME.primary}`}
           >
             save
           </button>
@@ -184,12 +184,12 @@ export default function SettingsPage() {
               value={who}
               onChange={(e) => setWho(e.target.value)}
               placeholder="reader name"
-              className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
+              className={`min-w-0 flex-1 rounded-md bg-surface px-2 py-1 text-ui text-ink`}
             />
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="shrink-0 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink-dim"
+              className="shrink-0 rounded-md bg-surface px-2 py-1 text-ui text-ink-dim"
             >
               <option value="player">player</option>
               <option value="dm">dm</option>

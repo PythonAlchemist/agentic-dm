@@ -59,7 +59,7 @@ export default function LibraryPage() {
 
   return (
     <Shell campaign={campaign} section="library">
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-6 py-12">
         <div>
           <h1 className="text-title font-medium text-ink">The whole book</h1>
           <p className="mt-1 text-ui text-ink-dim">
@@ -214,7 +214,7 @@ function NewMap({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="which place?"
-          className={`w-full rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
+          className={`w-full rounded-md bg-surface px-2 py-1 text-ui text-ink`}
         />
       )}
 

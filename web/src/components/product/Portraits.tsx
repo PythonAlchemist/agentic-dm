@@ -272,7 +272,7 @@ export function Portraits({
               // THE BOOK'S SENTENCES ARE ALREADY IN THE PROMPT and this only
               // refines them, which is why it is an afterthought of a field
               // rather than the main event.
-              className={`w-36 rounded-md border border-line bg-ground px-1.5 py-0.5 text-label text-ink-dim`}
+              className={`w-36 rounded-md bg-surface px-1.5 py-0.5 text-label text-ink-dim`}
             />
           )}
           {failed && (

@@ -59,7 +59,7 @@ export function EntityProfile({
   const connections = compact ? entity.connections.slice(0, 5) : entity.connections
 
   return (
-    <article className={compact ? '' : 'mx-auto max-w-3xl px-6 py-10'}>
+    <article className={compact ? '' : 'mx-auto max-w-3xl px-6 py-12'}>
       <header className="flex gap-4">
         <Portraits
           entityId={entity.entity_id}
@@ -283,7 +283,7 @@ export function EntityProfile({
       {compact && (
         <Link
           href={`/c/${campaign}/e/${encodeURIComponent(entity.entity_id)}`}
-          className="mt-5 inline-block text-meta text-ink-dim underline hover:text-ink"
+          className="mt-6 inline-block text-meta text-ink-dim underline hover:text-ink"
         >
           Open profile
         </Link>

@@ -319,7 +319,7 @@ export function GenerationCard({
             <button
               onClick={store}
               disabled={busy || !!stored}
-              className="rounded-md bg-chrome px-3 py-1.5 text-meta font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
+              className="rounded-md bg-chrome px-3 py-1 text-meta font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
             >
               {stored ? 'Replaced' : busy ? 'Replacing…' : 'Replace what you have'}
             </button>
@@ -366,7 +366,7 @@ export function GenerationCard({
             <select
               value={anchor}
               onChange={(e) => setAnchor(e.target.value)}
-              className="mt-1 w-full rounded-md border border-line bg-surface px-2 py-1.5 text-meta text-ink"
+              className="mt-1 w-full rounded-md border border-line bg-surface px-2 py-1 text-meta text-ink"
             >
               <option value="">Nowhere in particular</option>
               {/* THE PASSAGES THIS WAS WRITTEN AGAINST, first and by
@@ -418,7 +418,7 @@ export function GenerationCard({
             <button
               onClick={store}
               disabled={busy || !!stored || blocked}
-              className="rounded-md bg-chrome px-3 py-1.5 text-meta font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
+              className="rounded-md bg-chrome px-3 py-1 text-meta font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
             >
               {stored ? 'Stored' : busy ? 'Storing…' : 'Store in my campaign'}
             </button>

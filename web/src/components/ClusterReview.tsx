@@ -109,7 +109,7 @@ export function ClusterReview({
           return (
             <li
               key={element.name}
-              className={`rounded-md border px-2 py-1.5 ${
+              className={`rounded-md border px-2 py-1 ${
                 collision
                   ? 'border-line bg-overlay/60'
                   : 'border-line/80'
@@ -143,7 +143,7 @@ export function ClusterReview({
                 </span>
               </div>
               {element.role && (
-                <p className="ml-6 mt-0.5 text-label text-ink-dim">{element.role}</p>
+                <p className="ml-6 mt-1 text-label text-ink-dim">{element.role}</p>
               )}
               {/* A COLLISION BLOCKS THE WRITE. `hb:` and the book's prefix are
                   different namespaces, so this would otherwise mint quietly and

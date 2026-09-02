@@ -161,7 +161,7 @@ function Tab({ href, on, children }: { href: string; on: boolean; children: Reac
       // THE CHROME LADDER, not a hand-picked pair. Rest is dim; hover lifts
       // one step; selected lifts further AND gains weight, so the current tab
       // is legible in a screenshot with the colour removed.
-      className={`rounded-md px-2.5 py-1 text-ui ${CHROME.row} ${
+      className={`rounded-md px-2 py-1 text-ui ${CHROME.row} ${
         on ? CHROME.selected : 'text-ink-dim'
       }`}
     >

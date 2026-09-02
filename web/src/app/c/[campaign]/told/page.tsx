@@ -63,7 +63,7 @@ export default function ToldPage() {
 
   return (
     <Shell campaign={campaign} section="told">
-      <div className="mx-auto max-w-3xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-6 py-12">
         <h1 className="text-title font-medium text-ink">What your table knows</h1>
         <p className="mt-1 text-ui text-ink-dim">
           Everything else is hidden from them until you say otherwise.
@@ -73,7 +73,7 @@ export default function ToldPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="tell them about someone…"
-          className={`mt-5 w-full rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink`}
+          className={`mt-6 w-full rounded-md bg-surface px-2 py-1 text-ui text-ink`}
         />
 
         {shown.length > 0 && (
@@ -82,7 +82,7 @@ export default function ToldPage() {
               <li key={one.entity_id}>
                 <button
                   onClick={() => act(tableAPI.tellTable(campaign, one.entity_id))}
-                  className="flex w-full items-baseline gap-2 px-2 py-1.5 text-left text-ui hover:bg-overlay"
+                  className="flex w-full items-baseline gap-2 px-2 py-1 text-left text-ui hover:bg-overlay"
                 >
                   <span className="text-ink">{one.name}</span>
                   {one.plane === 'campaign' && (
@@ -101,7 +101,7 @@ export default function ToldPage() {
 
         {/* NO HAIRLINE PER ROW. Rhythm separates them; a rule per row at any
             length beyond a handful stops dividing and starts fogging. */}
-        <ul className="mt-7 flex flex-col">
+        <ul className="mt-8 flex flex-col">
           {grants.map((grant) => (
             <li
               key={grant.id}

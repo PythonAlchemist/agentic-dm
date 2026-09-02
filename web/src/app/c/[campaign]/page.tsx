@@ -61,7 +61,7 @@ export default function CampaignHome() {
 
   return (
     <Shell campaign={campaign} section="prep">
-      <div className="mx-auto grid max-w-5xl gap-10 px-6 py-10 md:grid-cols-[1fr_18rem]">
+      <div className="mx-auto grid max-w-5xl gap-8 px-6 py-12 md:grid-cols-[1fr_18rem]">
         {/* A PLAYER GETS THEIR OWN COLUMN, not the absence of the DM's. An
             empty page reads as a product that does not work; the last night's
             worth of what they were told is the thing they actually came back
@@ -126,7 +126,7 @@ export default function CampaignHome() {
             The book&rsquo;s order, with your scenes where you put them.
           </p>
 
-          <ol className="mt-5 flex flex-col">
+          <ol className="mt-6 flex flex-col">
             {next.map((row) => (
               <li key={row.section_id}>
                 <Link
