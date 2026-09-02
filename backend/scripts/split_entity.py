@@ -216,10 +216,19 @@ def _write(tx, args, grouped: dict, edges: list[dict]) -> tuple[int, int, int]:
             MATCH (e:Entity {{id:$new}}), (src:Entity {{id:$source}})
             MERGE (e)-[r:{args.relate}]->(src)
             ON CREATE SET r.plane = src.plane, r.chapter_slug = src.chapter_slug,
-                          r.status = 'proposed', r.layer = $layer
+                          r.status = 'proposed', r.layer = $layer,
+                          r.evidence = $evidence
             """,
             {"new": args.new_id, "source": args.source,
-             "layer": layer.value if layer else ""},
+             "layer": layer.value if layer else "",
+             # IT SAYS WHERE IT CAME FROM, because every other canon edge does.
+             # The writer stamps the sentence it read the claim out of; this one
+             # was read out of no sentence at all -- a person decided it while
+             # undoing a merge -- and without saying so it sat in the graph
+             # looking exactly like the book's own. The `a canon claim carries
+             # its evidence` invariant found the two that already had.
+             "evidence": f"proposed by split_entity, pulling {args.name!r} out "
+                         f"of {args.source}"},
         )
     return created, removed, moved
 

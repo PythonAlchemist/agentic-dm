@@ -1952,8 +1952,8 @@ def _write_edge(tx, edge: WriteEdge) -> None:
         )
 
 
-def _known_entities(tx) -> list["EntityNames"]:
-    """Every canon entity the graph holds and every name it answers to.
+def _known_entities(tx, book_prefix: str = "") -> list["EntityNames"]:
+    """Every canon entity OF THIS BOOK and every name it answers to.
 
     Read INSIDE the write transaction, after this chapter's nodes and aliases
     have landed, so the scan sees both the entities this chapter minted and every
@@ -1961,6 +1961,17 @@ def _known_entities(tx) -> list["EntityNames"]:
     naming Castle Ravenloft is a fact about chapter 3 whichever chapter minted
     the castle, and scanning only the chapter's own plan would rebuild, one level
     up, the very defect this replaces.
+
+    TO THE BOOK, WHICH THIS ONCE SAID AND DID NOT DO. The query filtered on
+    `plane` alone, so writing a chapter of one book scanned every entity of the
+    other against it -- and `mention_pattern` folds case for multi-word forms,
+    so common nouns matched. It left 332 mentions asserting that Keys from the
+    Golden Vault names Curse of Strahd entities: `cos:key` 82 times, `cos:light`
+    47, `cos:trapdoor` 10. Every one false, because the two books share no
+    continuity; that is the premise the whole anthology rule rests on. The
+    retriever's per-book filter hid them from a DM rather than surfacing them,
+    which is why they sat there. It also made each write O(every book's
+    entities) instead of O(this book's).
 
     The names come through `ALIAS_OF` and nowhere else -- ONE path, which is the
     whole reason an entity's canonical name is itself an `:Alias`. Reading
@@ -1987,10 +1998,11 @@ def _known_entities(tx) -> list["EntityNames"]:
     for record in tx.run(
         f"""
         MATCH (e:Entity {{plane:$plane}})
+        WHERE $prefix = '' OR e.id STARTS WITH $prefix
         OPTIONAL MATCH (a:{ALIAS_LABEL})-[:{ALIAS_OF}]->(e)
         RETURN e.id AS id, e.name AS name, collect(DISTINCT a.name) AS aliases
         """,
-        {"plane": CANON_PLANE},
+        {"plane": CANON_PLANE, "prefix": book_prefix},
     ):
         aliases = tuple(sorted(n for n in record["aliases"] if n))
         if not aliases:
@@ -2063,7 +2075,19 @@ def _write_tx(tx, chapter_slug: str, nodes, edges, spine, aliases, replace: bool
     for edge in edges:
         _write_edge(tx, edge)
 
-    entities = _known_entities(tx)
+    # THE BOOK THIS CHAPTER BELONGS TO, read off the ids being written.
+    #
+    # FROM THE NODES, NOT THE SPINE. `plan_spine` takes `book_slug` for the
+    # `:Book` node and a separate `book: BookScheme` for `section_id`, and a
+    # caller passing only the first gets sections prefixed `cos:` under any
+    # book slug -- so a section id is not a reliable answer to "which book is
+    # this". A node's id comes from `mint_id`, which takes the scheme, so it is.
+    #
+    # EMPTY MEANS UNFILTERED, deliberately: a chapter that mints no nodes is
+    # scanning only for entities earlier chapters made, and guessing a prefix
+    # from nothing would scan for none of them.
+    book_prefix = f"{nodes[0].id.split(':', 1)[0]}:" if nodes else ""
+    entities = _known_entities(tx, book_prefix)
     mentions = scan_mentions(spine.sections, entities, chapter_slug)
     for mention in mentions:
         _write_mention(tx, mention)

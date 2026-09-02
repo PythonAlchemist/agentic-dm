@@ -323,3 +323,93 @@ class TestEveryCheckAgreesWithTheRowLimit:
         """A violation nobody can act on is a check they learn to skip."""
         for check in invariants.CHECKS:
             assert check.fix.strip(), check.name
+
+
+class TestAMentionJoinsOneBook:
+    """`mint_id` promises entities "merge across the chapters of one book but
+    never across books". The scan did not keep it: `_known_entities` filtered on
+    plane alone, so writing one book's chapter scanned the other book's entities
+    against its prose, and multi-word forms fold case. 332 mentions claimed that
+    Keys from the Golden Vault names Curse of Strahd entities -- `cos:key` 82
+    times. The retriever's book filter hid them from a DM instead of surfacing
+    them, which is why they sat there."""
+
+    NAME = "a mention joins one book"
+
+    def _seed(self, graph, entity_id, section_id):
+        graph.run(
+            "CREATE (e:Entity {id:$e, plane:'canon'}) "
+            "CREATE (s:Section {id:$s, plane:'canon'}) "
+            "CREATE (m:Mention {id:$e + '@' + $s, plane:'canon'}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)",
+            {"e": entity_id, "s": section_id},
+        )
+
+    def test_a_mention_across_two_books_is_caught(self, graph):
+        self._seed(graph, f"{PREFIX}A:key", f"{PREFIX}B:ch#1")
+        rows = _rows(graph, self.NAME)
+        assert any(PREFIX in str(r["id"]) for r in rows), rows
+
+    def test_a_mention_inside_one_book_is_not(self, graph):
+        self._seed(graph, f"{PREFIX}A:key", f"{PREFIX}A:ch#1")
+        assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]
+
+    def test_a_campaign_mention_of_a_canon_entity_is_not(self, graph):
+        """The normal, wanted case: a DM's scene naming the Jolly Pelican.
+        Seven of those existed the day this was written."""
+        graph.run(
+            f"CREATE (e:Entity {{id:'{PREFIX}A:pelican', plane:'canon'}}) "
+            # THE ID MUST START WITH THE PREFIX. `hb:{PREFIX}:...` does not,
+            # so the fixture's sweep never saw it and the next run collided on
+            # the uniqueness constraint.
+            f"CREATE (s:Section {{id:'{PREFIX}:hb-scene#0', plane:'campaign'}}) "
+            f"CREATE (m:Mention {{id:'{PREFIX}:m', plane:'campaign'}}) "
+            "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)"
+        )
+        assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]
+
+
+class TestACanonClaimCarriesItsEvidence:
+    """Every edge the canon writer makes between two book entities carries the
+    sentence it was read from. An edge minted any other way carries none -- and
+    `POST /api/campaign/relationships` could MERGE one between two canon
+    entities and stamp it accepted, after which `lookup.EDGES` served it to a DM
+    as the book's own derived fact. A forged NODE trips
+    `UNSUPPORTED_ENTITIES`; a forged EDGE tripped nothing."""
+
+    NAME = "a canon claim carries its evidence"
+
+    def test_a_canon_edge_citing_nothing_is_caught(self, graph):
+        graph.run(
+            f"CREATE (a:Entity {{id:'{PREFIX}:from', plane:'canon'}}) "
+            f"CREATE (b:Entity {{id:'{PREFIX}:to', plane:'canon'}}) "
+            "CREATE (a)-[:KNOWS {plane:'canon', status:'accepted'}]->(b)"
+        )
+        assert any(r["id"] == f"{PREFIX}:from" for r in _rows(graph, self.NAME))
+
+    def test_a_canon_edge_that_cites_a_sentence_is_not(self, graph):
+        graph.run(
+            f"CREATE (a:Entity {{id:'{PREFIX}:src', plane:'canon'}}) "
+            f"CREATE (b:Entity {{id:'{PREFIX}:dst', plane:'canon'}}) "
+            "CREATE (a)-[:KNOWS {plane:'canon', evidence:'the book says so'}]->(b)"
+        )
+        assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]
+
+    def test_the_mention_plumbing_is_not_a_claim(self, graph):
+        """`REFERS_TO` and its kin join the triangle; they assert nothing about
+        the world and carry no evidence by design."""
+        graph.run(
+            f"CREATE (a:Entity {{id:'{PREFIX}:m1', plane:'canon'}}) "
+            f"CREATE (b:Entity {{id:'{PREFIX}:m2', plane:'canon'}}) "
+            "CREATE (a)-[:CO_OCCURS_WITH {plane:'canon'}]->(b)"
+        )
+        assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]
+
+    def test_a_campaign_edge_is_not_a_canon_claim(self, graph):
+        """The DM's own assertions are theirs to make, and are marked as such."""
+        graph.run(
+            f"CREATE (a:Entity {{id:'{PREFIX}:c1', plane:'canon'}}) "
+            f"CREATE (b:Entity {{id:'{PREFIX}:c2', plane:'canon'}}) "
+            f"CREATE (a)-[:KNOWS {{plane:'campaign', campaign:'{PREFIX}'}}]->(b)"
+        )
+        assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]

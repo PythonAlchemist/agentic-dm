@@ -179,6 +179,54 @@ LIMIT 50
 #: found 154 rows the day it was written and reported "50", which reads as the
 #: size of the problem and is not. `test_invariants` asserts the queries and
 #: this number agree.
+#: A MENTION JOINS ONE BOOK. `mint_id` promises entities "merge across the
+#: chapters of one book but never across books", and the scan did not keep it:
+#: `_known_entities` filtered on `plane` alone, so writing a chapter of one book
+#: scanned every entity of the other against its prose. `mention_pattern` folds
+#: case for multi-word forms, so common nouns matched, and the graph ended up
+#: holding 332 mentions asserting that Keys from the Golden Vault names Curse of
+#: Strahd entities -- `cos:key` 82 times, `cos:light` 47.
+#:
+#: NOTHING SURFACED THEM. The retriever filters passages by book, so a DM never
+#: saw one; they simply sat there, and each chapter write grew slower by every
+#: entity in every other book. This is the check that would have failed on the
+#: first one.
+#:
+#: THE CANON PLANE ONLY. A campaign mention pointing at a canon entity is the
+#: normal, wanted case -- a DM's scene naming the Jolly Pelican -- and there
+#: were seven of those the day this was written.
+CROSS_BOOK_MENTIONS = """
+MATCH (m:Mention {plane:'canon'})-[:REFERS_TO]->(e:Entity)
+MATCH (m)-[:IN_SECTION]->(sec:Section)
+WITH m, e, sec, split(e.id,':')[0] AS ebook, split(sec.id,':')[0] AS sbook
+WHERE ebook <> sbook
+RETURN m.id AS id, m.campaign AS campaign,
+       ebook + ' entity named by a ' + sbook + ' section' AS why
+LIMIT 50
+"""
+
+#: A CANON CLAIM CARRIES ITS EVIDENCE. Every edge the canon writer makes between
+#: two book entities carries `evidence` -- the sentence it was read from -- and
+#: `chapter_slug`. An edge minted any other way carries neither.
+#:
+#: WHY THAT IS WORTH A CHECK. `CampaignGraphOps.create_relationship` MERGEs an
+#: edge between any two entities and applies the caller's own properties, and
+#: `POST /api/campaign/relationships` hands the request body straight to it. A
+#: forged NODE is caught by `UNSUPPORTED_ENTITIES`, which fails on a canon
+#: entity no mention names; a forged EDGE was caught by nothing, and
+#: `lookup.EDGES` serves it to a DM as the book's own derived fact. The write
+#: path now pins `plane` and drops `status`, and this is the check that says so
+#: rather than the fix being remembered.
+UNSOURCED_CANON_CLAIMS = """
+MATCH (a:Entity {plane:'canon'})-[r]->(b:Entity {plane:'canon'})
+WHERE r.plane = 'canon'
+  AND NOT type(r) IN ['REFERS_TO','IN_SECTION','ALIAS_OF','CO_OCCURS_WITH']
+  AND r.evidence IS NULL
+RETURN a.id AS id, r.campaign AS campaign,
+       type(r) + ' to ' + b.id + ' cites no sentence' AS why
+LIMIT 50
+"""
+
 ROW_LIMIT = 50
 
 
@@ -209,6 +257,12 @@ CHECKS: tuple[Check, ...] = (
           "`delete_campaign` removes these; one run by hand leaves them"),
     Check("a mention's id spells its pair", MISFILED_MENTIONS,
           "rename them -- `merge_duplicates --mention-ids` does exactly this"),
+    Check("a mention joins one book", CROSS_BOOK_MENTIONS,
+          "delete them; the scan that made them read every book's entities "
+          "against one book's prose, and `_known_entities` now filters"),
+    Check("a canon claim carries its evidence", UNSOURCED_CANON_CLAIMS,
+          "delete them -- a canon edge citing no sentence was not written by "
+          "the canon writer, and reads to a DM exactly like one that was"),
     Check("a canon entity says whether the book names it", UNSUPPORTED_ENTITIES,
           "`mark_unnamed --apply` records it on the node, which is what makes "
           "keeping one a stated decision rather than a gap a reader must spot"),

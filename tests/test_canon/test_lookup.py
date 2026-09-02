@@ -26,6 +26,7 @@ from dataclasses import dataclass
 import pytest
 
 from backend.canon.aliases import WriteAlias
+from backend.canon.books import BookScheme
 from backend.canon.lookup import (
     CHAPTER_NOT_EXTRACTED,
     NAME_NOT_IN_GRAPH,
@@ -51,8 +52,13 @@ from backend.graph.schema import NAMED_BY_BOOK, RelationshipType
 
 CHAPTER = "pytest-lookup-chapter"
 BOOK = "pytest-lookup-book"
+#: ONE BOOK, WHICH THIS FILE DID NOT HAVE. Unkeyed nodes were minted `pytest:`
+#: and keyed ones `cos:`, so the fixture described a chapter whose entities
+#: belonged to two different books -- a state `mint_id` cannot produce, since it
+#: takes one `BookScheme`. It went unnoticed while the mention scan read the
+#: whole plane; book-scoping the scan made the fixture's own inconsistency fail.
 ID_PREFIX = "pytest:"
-KEYED_PREFIX = f"cos:{CHAPTER}:"
+KEYED_PREFIX = f"pytest:{CHAPTER}:"
 
 
 # -- the pure half, which needs no database ---------------------------------
@@ -248,6 +254,12 @@ def graph():
         ensure_schema(session)
         _clean(session)
         spine = plan_spine(
+            # THE SCHEME, NOT ONLY THE SLUG. `plan_spine` takes `book_slug` for
+            # the `:Book` node and a separate `book: BookScheme` for
+            # `section_id` and `mint_id`; passing only the first left this
+            # fixture minting keyed places under `cos:` while its own nodes said
+            # `pytest:`, so `DESCRIBES` matched by accident of a shared default.
+            book=BookScheme(prefix="pytest"),
             book_slug=BOOK,
             book_title="A Lookup Book",
             chapter_slug=CHAPTER,
