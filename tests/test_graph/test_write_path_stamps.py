@@ -17,8 +17,19 @@ class TestEntityPlaneStamp:
         )
         assert created["plane"] == "campaign"
 
-    def test_explicit_plane_is_respected(self, graph):
-        """The seed loader writes canon; an explicit plane must not be overwritten."""
+    def test_a_caller_cannot_ask_for_the_canon_plane(self, graph):
+        """This asserted the opposite, on a premise that was not true.
+
+        Its docstring said "the seed loader writes canon; an explicit plane
+        must not be overwritten" -- but no seed loader uses this class. Canon is
+        written by `canon/writer.py`, which has its own Cypher; every caller of
+        `CampaignGraphOps` is campaign-side (the Discord registry, the NER
+        linker, the transcript processor, shop, players). What the old
+        `setdefault` actually bought was a route -- `POST /api/campaign/entities`
+        passes the request body's `properties` straight through -- by which any
+        token-holder could mint a node on the book's own plane, which `lookup`
+        then serves as the book's.
+        """
         ops = CampaignGraphOps()
         created = ops.create_entity(
             name="Canon NPC",
@@ -26,7 +37,7 @@ class TestEntityPlaneStamp:
             entity_id="pytest:npc:canon-stamp",
             properties={"plane": "canon"},
         )
-        assert created["plane"] == "canon"
+        assert created["plane"] == "campaign"
 
 
 class TestRelationshipLayerStamp:
