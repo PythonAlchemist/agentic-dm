@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { EntityProfile } from '@/components/product/EntityProfile'
+import { Reveal } from '@/components/product/Reveal'
 import { Shell } from '@/components/product/Shell'
 import { labAPI, type EntityRead, type SectionRead } from '@/lib/api'
 import { readingBlocks } from '@/lib/reading'
@@ -87,6 +88,20 @@ export default function SectionPage() {
           <h1 className="mt-1 text-2xl font-medium text-neutral-100">
             {section.heading}
           </h1>
+
+          {/* THE OTHER HALF OF THE GRANT, and the half the whole design rests
+              on. Telling the table an NPC exists is not letting them read what
+              the book says about him -- a party can know Strahd for ten
+              sessions before they may read the passage. Without this control a
+              DM could reveal people and never a scene, which would make the
+              section grant a thing only the tests could exercise. */}
+          <div className="mt-3">
+            <Reveal
+              campaign={campaign}
+              target={section.section_id}
+              name={section.heading}
+            />
+          </div>
 
           <div className="mt-6 flex flex-col gap-5">
             {readingBlocks(section.text, section.heading).map((block, i) =>
