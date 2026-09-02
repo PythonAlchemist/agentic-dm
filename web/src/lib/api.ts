@@ -351,6 +351,19 @@ export interface EntityRead {
     /** What that section actually says about it, quoted exactly. */
     says: string[]
   }[]
+  /** What it is connected to. The card never needed these — it answers "who is
+   *  this again" — but a profile is where a DM grooms an entity's
+   *  relationships, and `status` travels so a guess can never be rendered as a
+   *  derived fact. */
+  connections: {
+    dir: 'in' | 'out'
+    rel: string
+    status: string | null
+    other: string
+    other_id: string
+    other_labels: string[]
+    other_plane: 'canon' | 'campaign'
+  }[]
 }
 
 export interface CampaignElement {

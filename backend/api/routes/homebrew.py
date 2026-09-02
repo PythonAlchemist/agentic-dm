@@ -824,9 +824,37 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
                      // The TEXT and the offsets, so the card can quote what
                      // each place actually says rather than only naming it.
                      text: sec.text, offsets: m.offsets
-                   }) AS named_in
+                   }) AS named_in,
+                   // WHAT IT IS CONNECTED TO, for the profile's rail. The card
+                   // never needed these -- it answers "who is this again" -- but
+                   // a profile is where a DM grooms an entity's relationships,
+                   // and forty edges scattered across the sections that mention
+                   // it is not somewhere anyone can groom.
+                   //
+                   // `status` TRAVELS. A guessed edge renders dim and says so;
+                   // laundering one into a tidy strip would make the profile the
+                   // one screen that presents an extractor's guess as a fact.
+                   [(e)-[r]->(far:Entity)
+                     WHERE NOT type(r) IN $plumbing
+                       AND (far.plane = 'canon' OR far.campaign = $campaign)
+                     | {dir: 'out', rel: type(r), status: r.status,
+                        other: far.name, other_id: far.id,
+                        other_labels: labels(far), other_plane: far.plane}]
+                   +
+                   [(e)<-[r]-(near:Entity)
+                     WHERE NOT type(r) IN $plumbing
+                       AND (near.plane = 'canon' OR near.campaign = $campaign)
+                     | {dir: 'in', rel: type(r), status: r.status,
+                        other: near.name, other_id: near.id,
+                        other_labels: labels(near), other_plane: near.plane}]
+                   AS connections
             """,
-            {"id": entity_id, "campaign": campaign},
+            {"id": entity_id, "campaign": campaign,
+             # The mention triangle and its kin join the graph; they assert
+             # nothing about the world and are not connections a DM curates.
+             "plumbing": ["REFERS_TO", "IN_SECTION", "ALIAS_OF",
+                          "CO_OCCURS_WITH", "USES_ALIAS", "DESCRIBES",
+                          "HAS_SECTION", "HAS_CHAPTER", "NEXT"]},
         ).single()
     if row is None:
         raise HTTPException(status_code=404, detail=f"no entity {entity_id!r} here")

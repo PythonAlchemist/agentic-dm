@@ -6,8 +6,11 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Agent Lab',
-  description: 'Grounded answers from a D&D canon graph, with their provenance.',
+  // THE PRODUCT'S NAME, NOT THE INSTRUMENT'S. Players will read this tab. The
+  // lab still exists and is still called that, at `/lab`.
+  title: 'Table',
+  description:
+    'Run your game from the book, and always know which part is the book.',
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
