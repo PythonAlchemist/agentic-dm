@@ -3,7 +3,7 @@
 Atomicity in particular cannot be asserted against a fake: a stub session that
 records calls passes whether or not the calls shared a transaction, which is
 precisely the bug. Every test here runs against the live local database and is
-marked `neo4j`, which the suite deselects by default.
+marked `neo4j`, which `-m 'not neo4j'` deselects them, which `conftest` now marks automatically.
 
 Test nodes carry the `pytest:` BOOK prefix in their ids rather than `cos:`, so
 the fixture's cleanup can never reach a real chapter's canon -- and, now that

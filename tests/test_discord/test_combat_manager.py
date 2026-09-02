@@ -2,6 +2,12 @@
 
 import pytest
 
+#: MARKED BY HAND, because the auto-marker in `conftest.py` reads the fixtures a
+#: test asks for and this file builds its own -- `manager` constructs a
+#: `CombatManager`, which reaches the graph itself. The heuristic covers the
+#: shared fixtures; a module whose own fixture opens a session says so here.
+pytestmark = pytest.mark.neo4j
+
 from backend.discord.combat_manager import (
     CombatManager,
     CombatConfig,

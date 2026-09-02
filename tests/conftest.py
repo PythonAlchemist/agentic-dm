@@ -72,10 +72,22 @@ def _refuse_to_run_against_real_material():
     """
     try:
         with neo4j_session() as session:
+            # BOOKS TOO, NOT ONLY CAMPAIGNS. A database holding both ingested
+            # books and no campaign passed this guard -- the canon-only
+            # default -- and the suite would then write `pytest:` nodes into it
+            # and run global sweeps like the orphan-alias delete in
+            # `test_retrieval_overlay`. Re-ingesting a book is hours of model
+            # time; the guard should refuse for that too.
             live = [
-                row["slug"]
+                f"campaign {row['slug']}"
                 for row in session.run(
                     "MATCH (c:Campaign) RETURN c.slug AS slug ORDER BY c.slug"
+                )
+                if row["slug"] and not row["slug"].startswith("pytest")
+            ] + [
+                f"book {row['slug']}"
+                for row in session.run(
+                    "MATCH (b:Book) RETURN b.slug AS slug ORDER BY b.slug"
                 )
                 if row["slug"] and not row["slug"].startswith("pytest")
             ]
@@ -85,13 +97,45 @@ def _refuse_to_run_against_real_material():
         return
     if live:
         pytest.exit(
-            f"refusing to run: {settings.neo4j_uri} holds real campaigns "
+            f"refusing to run: {settings.neo4j_uri} holds real material "
             f"({', '.join(live)}). The suite writes and deletes by id prefix, and "
-            "one wrong prefix takes a table's material with it.\n"
+            "one wrong prefix takes a table's campaign or a re-ingest with it.\n"
             "  Start the test instance:  docker compose up -d neo4j-test\n"
             "  Or point elsewhere:       NEO4J_URI=bolt://host:port uv run pytest",
             returncode=1,
         )
+
+
+#: Fixtures that hand a test a live database. A test using one cannot run
+#: without Neo4j, whatever anybody remembered to write above it.
+_LIVE_FIXTURES = frozenset({"graph", "table", "overlaid", "linked", "chat_store"})
+
+
+def _mark_the_neo4j_tests(items) -> None:
+    """Mark every test that touches a live database, by what it asks for.
+
+    `pyproject.toml` advertises `deselect with -m 'not neo4j'` and one file's
+    docstring claims the suite deselects by default. NEITHER WAS TRUE: there is
+    no `addopts`, and twelve files opening live sessions carried no marker at
+    all -- so a contributor without Docker who ran the documented command got a
+    wall of `ServiceUnavailable` instead of a smaller suite.
+
+    Derived from the fixtures a test requests rather than hand-written, because
+    a hand-written marker is a thing to forget and this contract has already
+    rotted once.
+
+    IT COVERS THE SHARED FIXTURES AND NOT EVERY CASE. A module whose own
+    fixture builds something that reaches the graph -- `test_combat_manager`
+    constructs a `CombatManager` -- is invisible to a name check and marks
+    itself with `pytestmark`. The proof either way is running
+    `NEO4J_URI=bolt://localhost:9999 uv run pytest -m 'not neo4j'`, which is how
+    the eleven this missed were found.
+    """
+    for item in items:
+        if item.get_closest_marker("neo4j"):
+            continue
+        if _LIVE_FIXTURES & set(getattr(item, "fixturenames", ())):
+            item.add_marker(pytest.mark.neo4j)
 
 
 def pytest_collection_modifyitems(config, items):
@@ -112,6 +156,7 @@ def pytest_collection_modifyitems(config, items):
     They only ever read, so pointing them at a populated database is safe --
     which is what makes the skip the right shape rather than a loss.
     """
+    _mark_the_neo4j_tests(items)
     if not any(item.get_closest_marker("corpus") for item in items):
         return
     try:
