@@ -26,13 +26,18 @@ def graph():
                   {"p": PREFIX}).consume()
             s.run("MATCH (a:Asset) WHERE a.sha256 STARTS WITH 'pytestmap' "
                   "DETACH DELETE a").consume()
+            s.run("MATCH (c:Campaign {slug:$c}) DETACH DELETE c",
+                  {"c": SLUG}).consume()
 
         clean(session)
         session.run(
+            # A MAP BELONGS TO A TABLE, and revealing a pin now writes the
+            # table's grant, so the `:Campaign` has to be here as it is in life.
+            "CREATE (:Campaign {slug:$slug, name:'Maps', campaign:$slug}) "
             "CREATE (:Entity:LOCATION {id:$p, plane:'canon', name:'Barovia'}) "
             "CREATE (:Entity:NPC {id:$n, plane:'canon', name:'Strahd von Zarovich'}) "
             "CREATE (:Entity:ITEM {id:$i, plane:'canon', name:'Tome'})",
-            {"p": PLACE, "n": NPC, "i": f"{PREFIX}:tome"},
+            {"slug": SLUG, "p": PLACE, "n": NPC, "i": f"{PREFIX}:tome"},
         ).consume()
         yield session
         clean(session)
@@ -192,3 +197,94 @@ class TestRevealingUnderAnotherName:
             tx, slug=SLUG, map_ref=m, for_player=False))[0]
         assert found["name"] == "Strahd von Zarovich"
         assert found["as_name"] == "the coachman"
+
+
+class TestTheMapAndTheGrantAgree:
+    """One authority on whether the table knows a name.
+
+    These were two independent records -- a pin's `revealed` and a `REVEALED`
+    grant -- and nothing joined them. Concealing Strahd left his name on the
+    player's map, and a DM had to remember to do both. Two sources of truth for
+    one fact is the shape this codebase has been burned by four times.
+    """
+
+    def test_showing_a_pin_tells_the_table_the_name(self, graph):
+        """There is no way to show somebody a token labelled Strahd and not
+        have told them about Strahd."""
+        from backend.player import reader as visibility
+
+        m = _map(graph)
+        graph.execute_write(lambda tx: maps.pin(
+            tx, slug=SLUG, map_ref=m, entity=NPC, x=0.5, y=0.5))
+        graph.execute_write(lambda tx: maps.reveal(
+            tx, slug=SLUG, map_ref=m, entity=NPC))
+        assert visibility.may_see(
+            graph, slug=SLUG, reader="somebody", target=NPC)
+
+    def test_concealing_takes_the_pin_off_the_players_map(self, graph):
+        """The fix. `player.conceal` reaches the map for free, because the
+        player query asks the grant rather than keeping its own copy."""
+        from backend.player import reader as visibility
+
+        m = _map(graph)
+        graph.execute_write(lambda tx: maps.pin(
+            tx, slug=SLUG, map_ref=m, entity=NPC, x=0.5, y=0.5))
+        graph.execute_write(lambda tx: maps.reveal(
+            tx, slug=SLUG, map_ref=m, entity=NPC))
+        graph.execute_write(lambda tx: visibility.conceal(
+            tx, slug=SLUG, target=NPC))
+        assert graph.execute_read(lambda tx: maps.pins(
+            tx, slug=SLUG, map_ref=m, for_player=True)) == []
+
+    def test_hiding_a_pin_does_not_untell_them(self, graph):
+        """They still know he exists; they just cannot see where he is.
+        Placement and knowledge are separate claims, which is why this is a
+        join and not a merge."""
+        from backend.player import reader as visibility
+
+        m = _map(graph)
+        graph.execute_write(lambda tx: maps.pin(
+            tx, slug=SLUG, map_ref=m, entity=NPC, x=0.5, y=0.5))
+        graph.execute_write(lambda tx: maps.reveal(
+            tx, slug=SLUG, map_ref=m, entity=NPC))
+        graph.execute_write(lambda tx: maps.reveal(
+            tx, slug=SLUG, map_ref=m, entity=NPC, revealed=False))
+        assert graph.execute_read(lambda tx: maps.pins(
+            tx, slug=SLUG, map_ref=m, for_player=True)) == []
+        assert visibility.may_see(
+            graph, slug=SLUG, reader="somebody", target=NPC)
+
+    def test_a_known_entity_pinned_face_down_stays_face_down(self, graph):
+        """The other direction: being told Strahd exists is not being shown
+        where he is."""
+        from backend.player import reader as visibility
+
+        m = _map(graph)
+        graph.execute_write(lambda tx: maps.pin(
+            tx, slug=SLUG, map_ref=m, entity=NPC, x=0.5, y=0.5))
+        graph.execute_write(lambda tx: visibility.reveal(
+            tx, slug=SLUG, target=NPC))
+        assert graph.execute_read(lambda tx: maps.pins(
+            tx, slug=SLUG, map_ref=m, for_player=True)) == []
+
+    def test_the_dm_is_told_which_half_is_missing(self, graph):
+        """A face-up pin that does not render for the table is otherwise a
+        mystery the DM has to reason out."""
+        m = _map(graph)
+        graph.execute_write(lambda tx: maps.pin(
+            tx, slug=SLUG, map_ref=m, entity=NPC, x=0.5, y=0.5))
+        found = graph.execute_read(lambda tx: maps.pins(
+            tx, slug=SLUG, map_ref=m, for_player=False))[0]
+        assert found["revealed"] is False and found["known"] is False
+
+    def test_the_alias_lives_in_one_place(self, graph):
+        """The map and the entity page cannot call him two things."""
+        from backend.player import reader as visibility
+
+        m = _map(graph)
+        graph.execute_write(lambda tx: maps.pin(
+            tx, slug=SLUG, map_ref=m, entity=NPC, x=0.5, y=0.5))
+        graph.execute_write(lambda tx: maps.reveal(
+            tx, slug=SLUG, map_ref=m, entity=NPC, as_name="the coachman"))
+        granted = graph.execute_read(lambda tx: visibility.revealed(tx, slug=SLUG))
+        assert [g["as_name"] for g in granted] == ["the coachman"]

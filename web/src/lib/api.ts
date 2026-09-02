@@ -770,7 +770,12 @@ export interface Pin {
   /** DM view only. */
   plane?: string
   note?: string
+  /** The pin is face-up on the map. */
   revealed?: boolean
+  /** The table has been told this thing exists. BOTH are needed for a player
+   *  to see the pin, and neither implies the other: a party can know Strahd
+   *  for ten sessions without being shown where he is. */
+  known?: boolean
   as_name?: string
 }
 

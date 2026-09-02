@@ -70,27 +70,48 @@ DELETE p RETURN count(p) AS n
 
 #: Every pin a DM sees. `revealed` and the alias travel so the DM view can show
 #: both what the players are looking at and what it really is.
+#:
+#: `known` IS THE SECOND HALF OF THE ANSWER. A pin can be face-up on a map the
+#: table has never been told the subject of, and then it does not render for
+#: them -- so the DM view says which of the two is missing rather than leaving
+#: them to wonder why a revealed pin is invisible.
 PINS_DM = """
 MATCH (e:Entity)-[p:PINNED_ON]->(:Map {id:$map, campaign:$slug})
+OPTIONAL MATCH (:Campaign {slug:$slug})-[g:REVEALED]->(e)
 RETURN e.id AS entity_id, e.name AS name, e.plane AS plane,
        [l IN labels(e) WHERE l <> 'Entity'] AS labels,
        p.x AS x, p.y AS y, p.note AS note,
        coalesce(p.revealed, false) AS revealed,
-       coalesce(p.as_name, '') AS as_name
+       g IS NOT NULL AS known,
+       coalesce(g.as_name, p.as_name, '') AS as_name
 ORDER BY e.name
 """
 
 #: What the table may see. THE FILTER IS IN THE PATTERN, not in a `WHERE` a
 #: caller could forget: a query anchored on `revealed = true` cannot be made to
 #: return a hidden pin by getting an argument wrong.
+#:
+#: AND IT ASKS THE GRANT, WHICH IS THE ONE AUTHORITY ON A NAME. This query used
+#: to answer out of the pin alone, which made two independent records of "the
+#: table knows about this" -- so concealing Strahd through `player.conceal` left
+#: his name sitting on the player's map, and a DM had to remember both. Two
+#: sources of truth for one fact is the shape this codebase has been burned by
+#: four times.
+#:
+#: THE PLACEMENT AND THE KNOWLEDGE ARE STILL SEPARATE, which is why this is a
+#: join rather than a merge. `p.revealed` says "this token is on the map they
+#: are looking at"; the grant says "they know this thing exists". A party can
+#: know Strahd for ten sessions without seeing where he is, so BOTH are
+#: required and neither implies the other.
 PINS_PLAYER = """
-MATCH (e:Entity)-[p:PINNED_ON]->(:Map {id:$map, campaign:$slug})
+MATCH (c:Campaign {slug:$slug})-[g:REVEALED]->(e:Entity)
+MATCH (e)-[p:PINNED_ON]->(:Map {id:$map, campaign:$slug})
 WHERE p.revealed = true
 RETURN e.id AS entity_id,
-       // THE NAME THE TABLE KNOWS IT BY. A DM showing Strahd as "the coachman"
-       // is the ordinary case, not an edge one -- and the true name must not
-       // travel to a client that is only allowed the alias.
-       CASE WHEN coalesce(p.as_name, '') <> '' THEN p.as_name ELSE e.name END
+       // THE NAME THE TABLE KNOWS IT BY, read off the GRANT. A DM showing
+       // Strahd as "the coachman" is the ordinary case, and the alias lives in
+       // one place so the map and the entity page cannot call him two things.
+       CASE WHEN coalesce(g.as_name, '') <> '' THEN g.as_name ELSE e.name END
          AS name,
        [l IN labels(e) WHERE l <> 'Entity'] AS labels,
        p.x AS x, p.y AS y
@@ -170,7 +191,23 @@ def reveal(tx, *, slug: str, map_ref: str, entity: str, revealed: bool = True,
     the players know the coachman for three sessions before they know Strahd.
     The mention system already separates a surface from an entity's name; this
     is the same idea pointed at a map.
+
+    PUTTING A PIN FACE-UP TELLS THE TABLE THE NAME, so it writes the grant too.
+    There is no way to show somebody a token labelled "Strahd" and not have told
+    them about Strahd, and requiring a DM to record the same disclosure twice is
+    how the two records drift apart.
+
+    HIDING IT AGAIN DOES NOT UNTELL THEM. The pin comes off the map; the grant
+    stays, because they still know he exists -- they just cannot see where he
+    is. `player.conceal` is the separate, deliberate act of taking the knowledge
+    back, and it hides every pin of that entity for free, since the player query
+    asks the grant.
     """
+    # IMPORTED HERE, not at module scope. `player.reader` reads `campaign.roles`
+    # and this is `campaign`; a top-level import would close the circle for the
+    # sake of one call.
+    from backend.player import reader as visibility
+
     row = tx.run(REVEAL, {
         "slug": slug, "map": map_ref, "entity": entity,
         "revealed": bool(revealed), "as_name": as_name,
@@ -178,4 +215,7 @@ def reveal(tx, *, slug: str, map_ref: str, entity: str, revealed: bool = True,
     }).single()
     if row is None:
         raise ValueError(f"no pin for {entity!r} on {map_ref!r}")
+    if revealed:
+        visibility.reveal(tx, slug=slug, target=entity, as_name=as_name,
+                          at_session=at_session)
     return bool(row["revealed"])

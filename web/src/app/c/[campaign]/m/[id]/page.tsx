@@ -159,15 +159,19 @@ export default function MapPage() {
               title={
                 asPlayer
                   ? pin.name
-                  : `${pin.name} — ${pin.revealed ? 'the table can see this' : 'hidden'}`
+                  : `${pin.name} — ${pinState(pin)}`
               }
               className="absolute -translate-x-1/2 -translate-y-1/2"
             >
+              {/* FILLED ONLY WHEN THE TABLE ACTUALLY SEES IT, which takes
+                  both halves: the pin face-up AND the thing known. A pin
+                  face-up on a subject nobody has been told about renders for
+                  nobody, and a hollow token is the honest drawing of that. */}
               <span
                 className={`block h-3 w-3 rounded-full border-2 ${
-                  pin.revealed === false
-                    ? 'border-neutral-400 bg-transparent'
-                    : 'border-neutral-950 bg-neutral-200'
+                  pin.revealed && pin.known
+                    ? 'border-neutral-950 bg-neutral-200'
+                    : 'border-neutral-400 bg-transparent'
                 }`}
               />
               <span className="mt-0.5 block whitespace-nowrap rounded bg-neutral-950/80 px-1 text-[10px] text-neutral-200">
@@ -211,6 +215,13 @@ export default function MapPage() {
                     the table knows it as &ldquo;{pin.as_name}&rdquo;
                   </span>
                 )}
+                {/* WHY A FACE-UP PIN IS STILL INVISIBLE, said rather than left
+                    for the DM to work out. */}
+                {pin.revealed && !pin.known && (
+                  <span className="text-[11px] text-neutral-500">
+                    face-up, but your table has not been told this exists
+                  </span>
+                )}
                 <button
                   onClick={() => toggleReveal(pin)}
                   className="ml-auto text-[11px] text-neutral-500 hover:text-neutral-300"
@@ -232,6 +243,13 @@ export default function MapPage() {
       </div>
     </Shell>
   )
+}
+
+/** Why a pin does or does not reach the table's screen. */
+function pinState(pin: Pin): string {
+  if (!pin.revealed) return 'hidden'
+  if (!pin.known) return 'face-up, but the table has not been told this exists'
+  return 'the table can see this'
 }
 
 /** What goes on the spot you just clicked. */
