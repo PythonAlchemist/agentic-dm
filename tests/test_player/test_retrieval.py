@@ -165,3 +165,33 @@ class TestTheShapeThatKeepsItTrue:
         for name in ("GRANTED_ENTITIES", "GRANTED_PASSAGES", "GRANTED_TEXT"):
             first = getattr(retrieval, name).strip().splitlines()[0]
             assert "REVEALED" in first, f"{name} starts at {first!r}"
+
+
+class TestPeopleSaySurnames:
+    """"What do we know about Saltmarrow" is the question a player asks.
+    Matching only the full name answers it with silence, which reads as "your
+    DM has told you nothing"."""
+
+    def test_part_of_a_name_anchors(self, graph):
+        _reveal(graph, COACHMAN)
+        assert [a.name for a in _ask("what about Pytestrand?").anchors] == [
+            "Pytestrand the Grim"]
+
+    def test_a_title_alone_does_not(self, graph):
+        """A title is not an identity, and matching one would anchor "who is
+        the captain" to whichever captain the table has met."""
+        _reveal(graph, COACHMAN, as_name="the Captain of the Guard")
+        assert _ask("who is the captain?").anchors == ()
+
+    def test_a_loose_match_still_cannot_reach_an_ungranted_name(self, graph):
+        """Generous, and only among things already revealed."""
+        assert _ask("what about Pytestrand?").anchors == ()
+
+    def test_knowing_of_somebody_reads_differently_from_never_hearing_of_them(
+            self, graph):
+        """Two empty answers that lead to different next questions."""
+        _reveal(graph, COACHMAN)
+        known = _ask("what about Pytestrand?")
+        unknown = _ask("what about the archmage?")
+        assert "but nothing your table has been shown" in known.miss_reason
+        assert "nothing your table has been told about" in unknown.miss_reason

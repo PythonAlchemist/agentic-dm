@@ -36,7 +36,11 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
 
   useEffect(load, [load])
 
-  const isDM = who?.role === 'dm'
+  // AN UNIDENTIFIED READER IS THE DM HERE, matching `player.audience` and
+  // `roles.role_of`: `ACCESS_TOKENS` unset is the documented local case -- one
+  // person at the machine, running their own game. Reading only `role === 'dm'`
+  // left the local DM with no way to propose an evening at their own table.
+  const isDM = who !== null && (who.role === 'dm' || !who.identified)
 
   const propose = () => {
     if (!on.trim()) return
@@ -110,7 +114,10 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
               </p>
             )}
 
-            {who?.identified && (
+            {/* SOMEBODY HAS TO BE IDENTIFIED TO ANSWER, because an answer is a claim
+          by a person. On an open deployment there is nobody to record it
+          against, so the buttons are absent rather than anonymous. */}
+      {who?.identified && (
               <div className="mt-1 flex gap-1">
                 {(['yes', 'maybe', 'no'] as const).map((answer) => (
                   <button

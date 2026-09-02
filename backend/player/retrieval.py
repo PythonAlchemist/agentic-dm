@@ -144,6 +144,8 @@ class PlayerRetriever(CanonRetriever):
             )
 
             named = find_names(question, forms, fold_case=True)
+            if not named:
+                named = _by_part(question, by_form)
             anchors = tuple(
                 Anchor(
                     entity_id=by_form[surface.lower()]["id"],
@@ -184,9 +186,61 @@ class PlayerRetriever(CanonRetriever):
             path=PATH_GRAPH if passages else PATH_NONE,
             terms=tuple(terms),
             book_title=self.title,
-            miss_reason="" if passages else
-                        "nothing your table has been told about covers that",
+            # TWO DIFFERENT EMPTY ANSWERS, and a player needs to be able to
+            # tell them apart. "We have never heard of that" and "we know who
+            # they are but have been shown nothing about them" lead to
+            # different next questions -- and the second one, rendered as the
+            # first, tells a player their DM has said nothing when in fact
+            # they have.
+            miss_reason=(
+                "" if passages else
+                f"you know of {anchors[0].name}, but nothing your table has "
+                "been shown says any more than that" if anchors else
+                "nothing your table has been told about covers that"
+            ),
         )
+
+
+#: Words that name nobody on their own. A title is not an identity, and
+#: matching one would anchor "who is the captain" to whichever captain the
+#: table happens to have met.
+TITLES = frozenset({
+    "captain", "lord", "lady", "sir", "baron", "burgomaster", "father",
+    "mother", "brother", "sister", "master", "doctor", "professor", "king",
+    "queen", "prince", "princess", "count", "countess", "the",
+})
+
+
+def _by_part(question: str, by_form: dict) -> list[str]:
+    """Anchor on part of a name when the whole one was not typed.
+
+    PEOPLE SAY SURNAMES. "What do we know about Saltmarrow" is the question a
+    player actually asks, and matching only the full "Captain Saltmarrow"
+    answers it with silence -- which reads as "your DM has told you nothing".
+    The DM's retriever leans on the book's own aliases for this; a player has
+    only what they were granted, so the parts of it have to count.
+
+    SAFE TO BE GENEROUS HERE, and only here. Every candidate is already
+    revealed, so a loose match can surface the wrong revealed thing but can
+    never surface an unrevealed one. That is a usability risk, not a leak.
+
+    LONGEST PART WINS, so "Saltmarrow" beats "Captain" when both are in the
+    same name and only one is in the question.
+    """
+    asked = {
+        word for word in
+        "".join(c.lower() if c.isalnum() else " " for c in question).split()
+        if len(word) > 3 and word not in TITLES
+    }
+    hits: dict[str, str] = {}
+    for form in by_form:
+        for part in form.split():
+            cleaned = "".join(c for c in part.lower() if c.isalnum())
+            if len(cleaned) > 3 and cleaned in asked and cleaned not in TITLES:
+                if len(cleaned) > len(hits.get(form, "")):
+                    hits[form] = cleaned
+    return [by_form[form]["name"] for form in hits
+            if by_form[form]["name"].lower() in by_form]
 
 
 def _terms(question: str) -> list[str]:
