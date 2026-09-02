@@ -726,7 +726,18 @@ async def draft_expansion(request: DraftRequest) -> dict:
             entities=(element["name"],), note=". ".join(told) + "."
         ),
     )
+    # THE SAME REFINEMENT THE CHAT CARD GETS. This kept only the deterministic
+    # answer, so an expansion drafted here was filed by a worse rule than the
+    # identical thing drafted in conversation.
     anchor, chapters = canon_context.suggest_anchor(retrieval)
+    try:
+        anchor = await canon_context.place_it(
+            _client(), subject=element["name"],
+            body=str(drafted.as_dict().get("body") or ""),
+            shown=canon_context.sources(retrieval), model=model,
+        ) or anchor
+    except Exception:  # noqa: BLE001 -- a better anchor is not worth a 500
+        logger.exception("could not place the expansion in the running order")
     return drafted.as_dict() | {
         "model": model,
         # The card routes Store to `/expand` on seeing this, so a draft about

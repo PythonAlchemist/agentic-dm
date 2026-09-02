@@ -50,6 +50,25 @@ _MAX_SESSIONS = 64
 _SESSIONS: OrderedDict[str, DMAgent] = OrderedDict()
 
 
+async def _placed(client, subject: str, body: str, retrieval, model: str) -> str:
+    """The model's read of which beat this comes after, or `""`.
+
+    NEVER FAILS THE GENERATION. The DM has already paid for the card; a
+    placement call that errors costs them a better anchor and nothing else, and
+    `suggest_anchor`'s answer is still there to fall back on.
+    """
+    from backend.agents import canon_context
+
+    try:
+        return await canon_context.place_it(
+            client, subject=subject, body=body,
+            shown=canon_context.sources(retrieval), model=model,
+        )
+    except Exception:  # noqa: BLE001 -- a better anchor is not worth a 500
+        logger.exception("could not place the generation in the running order")
+        return ""
+
+
 def _remember(session_id: str, agent: DMAgent) -> DMAgent:
     """Store the agent as most-recently-used, evicting the coldest over the cap."""
     _SESSIONS[session_id] = agent
@@ -274,7 +293,18 @@ async def generate(request: GenerateRequest) -> dict:
 
     # The Generate tab gets the same suggestion the chat card does: one
     # generator, two callers, neither left guessing where a scene belongs.
+    #
+    # AND THE SAME REFINEMENT, WHICH IT DID NOT GET. The chat card asks
+    # `place_it` over the shown passages and kept only the deterministic answer
+    # here -- so the same generation, made from the same retrieval, was filed by
+    # a better rule in one tab than the other. `suggest_anchor` answers "which
+    # section names the subject most", which is right 4 times in 10 on the
+    # hand-authored cases, and is wrong in one direction: a scene about getting
+    # somewhere files where the party arrives.
     anchor, chapters = canon_context.suggest_anchor(retrieval)
+    anchor = await _placed(agent.openai, request.subject,
+                           str(result.as_dict().get("body") or ""),
+                           retrieval, model) or anchor
     return result.as_dict() | {
         "model": model,
         "anchor": anchor,
