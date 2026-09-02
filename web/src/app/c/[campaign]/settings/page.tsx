@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type BookRow, type Seat, type Settings } from '@/lib/api'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { CHROME } from '@/lib/palette'
 
 /**
  * What is true of the whole table.
@@ -79,7 +79,7 @@ export default function SettingsPage() {
             />
             <button
               onClick={() => save({ name })}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-meta ${CHROME.primary}`}
+              className="shrink-0 rounded-md border border-line px-3 py-1.5 text-meta text-ink-dim hover:text-ink"
             >
               rename
             </button>
@@ -109,7 +109,7 @@ export default function SettingsPage() {
           />
           <button
             onClick={() => save({ premise })}
-            className={`mt-2 rounded-md px-3 py-1.5 text-meta ${CHROME.primary}`}
+            className={`mt-3 rounded-md px-3 py-1.5 text-ui ${CHROME.primary}`}
           >
             save
           </button>
@@ -122,7 +122,13 @@ export default function SettingsPage() {
           <ul className="mt-2 flex flex-col gap-1">
             {books.map((book) => (
               <li key={book.slug} className="flex items-baseline gap-3 text-ui">
-                <span className={drawn.has(book.slug) ? SOURCE.book : 'text-ink-dim'}>
+                {/* THE HUE WAS MARKING SELECTION, not source. Every row here
+                    is a book, so colouring only the ones in play made emerald
+                    mean "chosen" on this screen and "the published book"
+                    everywhere else -- the same borrowing the rule forbids.
+                    Whether a table plays from it is chrome, and reads from the
+                    weight and the action beside it. */}
+                <span className={drawn.has(book.slug) ? 'text-ink' : 'text-ink-dim'}>
                   {book.title}
                 </span>
                 <span className="text-label text-ink-faint">
@@ -198,7 +204,7 @@ export default function SettingsPage() {
                   })
                   .catch((error) => setFailed(String(error).replace(/^Error:\s*/, '')))
               }
-              className={`shrink-0 rounded-md px-3 py-1 text-meta ${CHROME.primary}`}
+              className="shrink-0 rounded-md border border-line px-3 py-1 text-meta text-ink-dim hover:text-ink"
             >
               seat
             </button>

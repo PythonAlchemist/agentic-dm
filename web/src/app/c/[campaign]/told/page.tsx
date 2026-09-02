@@ -62,7 +62,7 @@ export default function ToldPage() {
     call.then(load).catch((error) => setFailed(String(error).replace(/^Error:\s*/, '')))
 
   return (
-    <Shell campaign={campaign} section="settings">
+    <Shell campaign={campaign} section="told">
       <div className="mx-auto max-w-3xl px-6 py-10">
         <h1 className="text-title font-medium text-ink">What your table knows</h1>
         <p className="mt-1 text-ui text-ink-dim">
