@@ -15,7 +15,7 @@ import {
   type OrderRow,
   type Whoami,
 } from '@/lib/api'
-import { SOURCE } from '@/lib/palette'
+import { CHROME, SOURCE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * The table's own page: what is coming, and who is in it.
@@ -111,7 +111,7 @@ export default function CampaignHome() {
             {recent.length > 2 && (
               <Link
                 href={`/c/${campaign}/log`}
-                className="mt-6 inline-block text-meta text-ink-dim hover:text-ink-dim"
+                className="mt-6 inline-block text-meta text-ink-dim hover:text-ink"
               >
                 the whole log →
               </Link>
@@ -131,7 +131,7 @@ export default function CampaignHome() {
               <li key={row.section_id}>
                 <Link
                   href={`/c/${campaign}/s/${encodeURIComponent(row.section_id)}`}
-                  className="flex items-baseline gap-3 border-b border-line py-2.5 hover:bg-surface/40"
+                  className={`flex h-9 items-center gap-3 rounded-md px-2 ${CHROME.row}`}
                 >
                   <span
                     className={`text-ui ${
@@ -158,20 +158,26 @@ export default function CampaignHome() {
         <aside>
           {runs && (
           <>
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
-            Your cast
+          {/* SAID ONCE, AT THE TOP. Every name in this list is the DM's own,
+              so colouring all fourteen amber marked nothing and made the
+              loudest thing on the screen the one carrying no information. A
+              hue earns its place by distinguishing; where there is nothing to
+              distinguish it is decoration, which is the one thing the rule
+              forbids it from being. */}
+          <h2 className={`text-label uppercase tracking-widest ${SOURCE.yours}`}>
+            {SOURCE_GLYPH.yours} your cast
           </h2>
           <ul className="mt-3 flex flex-col gap-1">
             {cast.slice(0, 14).map((element) => (
-              <li key={element.entity_id}>
+              <li key={element.entity_id} className="leading-6">
                 <Link
                   href={`/c/${campaign}/e/${encodeURIComponent(element.entity_id)}`}
-                  className={`text-ui hover:underline ${SOURCE.yours}`}
+                  className="text-ui text-ink hover:underline"
                 >
                   {element.name}
                 </Link>
                 {element.role && (
-                  <span className="ml-2 text-label text-ink-faint">
+                  <span className="ml-2 text-meta text-ink-faint">
                     {element.role}
                   </span>
                 )}

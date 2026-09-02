@@ -114,14 +114,21 @@ export default function PlayPage() {
 
   return (
     <Shell campaign={campaign} section="play">
-      <div className="mx-auto grid max-w-5xl gap-10 px-6 py-10 md:grid-cols-[16rem_1fr]">
+      {/* FULL WIDTH, WITH THE CONTENT KEPT TO A MEASURE. Play is operated
+          rather than read, so it takes the width -- but the scene list is
+          still a list of sentences and stretching it to 1440px would make
+          every row a tracking exercise. */}
+      <div className="mx-auto grid max-w-6xl gap-10 px-6 py-10 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside>
           <div className="flex items-baseline justify-between">
             <h2 className="text-label uppercase tracking-widest text-ink-faint">
               Sessions
             </h2>
-            <button onClick={start} className={`rounded-md px-2 py-0.5 text-label ${CHROME.primary}`}>
-              start one
+            <button
+              onClick={start}
+              className="text-label uppercase tracking-widest text-ink-dim hover:text-ink"
+            >
+              new
             </button>
           </div>
 
@@ -144,7 +151,7 @@ export default function PlayPage() {
             ))}
             {sessions.length === 0 && (
               <li className="px-2 py-1 text-ui text-ink-faint">
-                No sessions yet.
+                Nothing yet.
               </li>
             )}
           </ul>
@@ -160,10 +167,25 @@ export default function PlayPage() {
             Plan a scene before you run it; mark it played when you have.
           </p>
 
+          {/* ONE EMPTY STATE, NOT TWO. The sidebar said "No sessions yet" and
+              this said "Start a session to plan against it" -- the same fact,
+              twice, on one screen. The sidebar keeps the quiet version; this
+              is where the answer to it lives. */}
           {!open && (
-            <p className="mt-6 text-ui text-ink-faint">
-              Start a session to plan against it.
-            </p>
+            <div className="mt-10 max-w-md">
+              <p className="text-body text-ink-dim">
+                A session is the night you play. Open one and this becomes
+                tonight&rsquo;s running order: plan the scenes you mean to
+                reach, mark what you actually ran, and upload the transcript
+                afterwards.
+              </p>
+              <button
+                onClick={start}
+                className={`mt-4 rounded-md px-3 py-1.5 text-ui ${CHROME.primary}`}
+              >
+                Start the first session
+              </button>
+            </div>
           )}
 
           {open && (

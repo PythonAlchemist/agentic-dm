@@ -80,7 +80,7 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
           />
           <button
             onClick={propose}
-            className={`shrink-0 rounded-md px-2 py-1 text-label ${CHROME.primary}`}
+            className="shrink-0 rounded-md border border-line px-2 py-1 text-label uppercase tracking-widest text-ink-dim hover:text-ink"
           >
             propose
           </button>

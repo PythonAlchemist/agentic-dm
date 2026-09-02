@@ -67,7 +67,7 @@ export default function PartyPage() {
           <h1 className="text-title font-medium text-ink">Carried</h1>
           <button
             onClick={() => setAdding((was) => !was)}
-            className="text-label text-ink-dim hover:text-ink-dim"
+            className="text-label text-ink-dim hover:text-ink"
           >
             {adding ? 'cancel' : 'give the party something'}
           </button>
@@ -122,7 +122,7 @@ export default function PartyPage() {
                     </button>
                     <button
                       onClick={() => setGiving(one)}
-                      className="text-label text-ink-dim hover:text-ink-dim"
+                      className="text-label text-ink-dim hover:text-ink"
                     >
                       hand over
                     </button>

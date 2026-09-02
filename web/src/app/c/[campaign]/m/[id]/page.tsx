@@ -95,7 +95,7 @@ export default function MapPage() {
           onClick={() => setPreview((was) => !was)}
           aria-pressed={preview}
           className={`rounded-md px-2 py-1 text-meta ${
-            preview ? CHROME.selected : 'text-ink-dim hover:text-ink-dim'
+            preview ? CHROME.selected : 'text-ink-dim hover:text-ink'
           }`}
           title="What the table sees. Asks the API for the player's view."
         >
@@ -103,7 +103,7 @@ export default function MapPage() {
         </button>
       }
     >
-      <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="mx-auto max-w-7xl px-6 py-8">
         <div className="flex items-baseline gap-3">
           <h1 className="text-title font-medium text-ink">
             {sheet?.name ?? mapId}
@@ -224,7 +224,7 @@ export default function MapPage() {
                 )}
                 <button
                   onClick={() => toggleReveal(pin)}
-                  className="ml-auto text-label text-ink-dim hover:text-ink-dim"
+                  className="ml-auto text-label text-ink-dim hover:text-ink"
                 >
                   {pin.revealed ? 'hide' : 'reveal'}
                 </button>
@@ -292,7 +292,7 @@ function PinPicker({
           placeholder="what is here?"
           className={`flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
         />
-        <button onClick={onCancel} className="text-label text-ink-dim hover:text-ink-dim">
+        <button onClick={onCancel} className="text-label text-ink-dim hover:text-ink">
           cancel
         </button>
       </div>

@@ -266,7 +266,7 @@ export function SectionReader({
                   </button>
                   <button
                     onClick={() => setDraft(null)}
-                    className="text-ink-dim hover:text-ink-dim"
+                    className="text-ink-dim hover:text-ink"
                   >
                     cancel (esc)
                   </button>
@@ -585,7 +585,7 @@ function EntityCard({
         </h3>
         <button
           onClick={onBack}
-          className="shrink-0 text-meta text-ink-dim hover:text-ink-dim"
+          className="shrink-0 text-meta text-ink-dim hover:text-ink"
         >
           back (esc)
         </button>

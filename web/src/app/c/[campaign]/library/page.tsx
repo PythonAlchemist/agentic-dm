@@ -114,7 +114,7 @@ export default function LibraryPage() {
             </h2>
             <button
               onClick={() => setMaking((was) => !was)}
-              className="text-label text-ink-dim hover:text-ink-dim"
+              className="text-label text-ink-dim hover:text-ink"
             >
               {making ? 'cancel' : 'add one'}
             </button>
@@ -206,7 +206,7 @@ function NewMap({
           {place.name}{' '}
           <button
             onClick={() => setPlace(null)}
-            className="ml-1 text-label text-ink-dim hover:text-ink-dim"
+            className="ml-1 text-label text-ink-dim hover:text-ink"
           >
             change
           </button>

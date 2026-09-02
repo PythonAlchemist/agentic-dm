@@ -6,7 +6,7 @@ import type { EntityRead } from '@/lib/api'
 import { Portraits } from '@/components/product/Portraits'
 import { Reveal } from '@/components/product/Reveal'
 import { useRuns } from '@/lib/role'
-import { SOURCE } from '@/lib/palette'
+import { SOURCE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
 
 /**
  * An entity, as a DM reads it.
@@ -72,34 +72,39 @@ export function EntityProfile({
             {entity.name}
           </h1>
 
-          <p className="mt-1 text-meta">
+          {/* THE GLYPH IS MANDATORY. A hue with no second channel is a bug,
+              not a style choice -- it is the whole of the promise for a reader
+              who cannot use colour. */}
+          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-label uppercase tracking-widest">
             {yours ? (
               <>
                 <span className={SOURCE.yours}>
-                  {runs === false ? 'Your DM wrote this.' : 'Yours.'}
-                </span>{' '}
-                <span className="text-ink-dim">
-                  {runs === false
-                    ? 'It is not in the book.'
-                    : 'Written for this campaign.'}
+                  {SOURCE_GLYPH.yours} {runs === false ? 'YOUR DM WROTE THIS' : SOURCE_WORD.yours}
+                </span>
+                <span className="text-ink-faint">
+                  {runs === false ? 'not in the book' : 'written for this campaign'}
                 </span>
               </>
             ) : unnamed ? (
               <>
-                <span className={SOURCE.invented}>Not named in the book.</span>{' '}
-                <span className="text-ink-dim">Came from extraction.</span>
+                <span className={SOURCE.invented}>
+                  {SOURCE_GLYPH.invented} {SOURCE_WORD.invented}
+                </span>
+                <span className="text-ink-faint">not named in the book</span>
               </>
             ) : (
               <>
-                <span className={SOURCE.book}>The book.</span>{' '}
-                <span className="text-ink-dim">
-                  Named in {quotes.length} section{quotes.length === 1 ? '' : 's'}.
+                <span className={SOURCE.book}>
+                  {SOURCE_GLYPH.book} {SOURCE_WORD.book}
+                </span>
+                <span className="text-ink-faint">
+                  named in {quotes.length} section{quotes.length === 1 ? '' : 's'}
                 </span>
               </>
             )}
           </p>
 
-          <p className="mt-1.5 text-meta uppercase tracking-wide text-ink-faint">
+          <p className="mt-2 text-meta text-ink-faint">
             {entity.labels.join(' · ').toLowerCase() || 'unclassified'}
           </p>
 
@@ -154,7 +159,17 @@ export function EntityProfile({
                   >
                     {where.heading || where.section_id}
                   </span>
-                  <p className="mt-0.5 text-ui leading-relaxed text-ink-dim">
+                  {/* THE BOOK'S SENTENCE, IN THE BOOK'S FACE. This is the
+                      one thing on the profile a DM reads aloud, and it was
+                      set in the app's own 13px UI face -- indistinguishable
+                      from a tooltip. */}
+                  <p
+                    className={`mt-1 ${
+                      where.plane === 'campaign'
+                        ? 'text-body text-ink-dim'
+                        : 'font-serif text-canon text-ink'
+                    }`}
+                  >
                     {where.says[0]}
                   </p>
                 </button>

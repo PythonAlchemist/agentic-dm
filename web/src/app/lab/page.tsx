@@ -172,7 +172,7 @@ export default function Lab() {
           <h1 className="text-body font-medium">Agent Lab</h1>
           <button
             onClick={() => setSetupOpen(true)}
-            className="text-meta text-ink-dim hover:text-ink-dim"
+            className="text-meta text-ink-dim hover:text-ink"
           >
             {here ? here.title : 'no books loaded'}
             <span className="text-ink-faint"> · </span>

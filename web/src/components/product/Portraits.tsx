@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { tableAPI, type Portrait } from '@/lib/api'
 import { useRuns } from '@/lib/role'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { CHROME, SOURCE, SOURCE_GLYPH } from '@/lib/palette'
 
 /** A draft nobody has kept. It lives in the browser and nowhere else -- see
  *  `/table/portrait/draft`, which stores nothing. */
@@ -193,10 +193,13 @@ export function Portraits({
             className="hidden"
             onChange={(event) => onPick(event.target.files?.[0])}
           />
+          {/* NOT THE SCREEN'S PRIMARY ACTION. A chrome fill is spent once per
+              screen on the thing the screen is for, and a profile is for
+              reading -- adding a picture is housekeeping. */}
           <button
             onClick={() => file.current?.click()}
             disabled={busy}
-            className={`rounded-md px-2 py-1 text-label ${CHROME.primary}`}
+            className="text-left text-meta text-ink-dim hover:text-ink disabled:opacity-40"
           >
             {busy ? 'working…' : found.length ? 'another picture' : 'add a picture'}
           </button>
@@ -205,10 +208,16 @@ export function Portraits({
               slot -- that is what would make invention ambient, which is the
               drift the whole colour rule exists to stop. It sits under the
               upload, in plain text, on the full profile only. */}
+          {/* A CONTROL IS NOT A SOURCE. This button was rose -- the hue that
+              means "a model invented this" -- which is the exact violation the
+              palette rule exists to prevent: the colour stopped naming where
+              something came from and started naming what a button does. The
+              PICTURE it produces is marked invented; the button that asks for
+              one is chrome like every other control. */}
           <button
             onClick={imagine}
             disabled={busy}
-            className={`text-left text-label ${SOURCE.invented} hover:underline disabled:opacity-40`}
+            className="text-left text-meta text-ink-dim hover:text-ink disabled:opacity-40"
           >
             {busy ? '…' : 'imagine one'}
           </button>
@@ -223,8 +232,8 @@ export function Portraits({
               />
               {/* NOTHING HAS BEEN STORED YET, and the words say so. A DM who
                   walks away here leaves the graph exactly as they found it. */}
-              <p className={`text-label leading-tight ${SOURCE.invented}`}>
-                Imagined. Not kept yet.
+              <p className={`text-label uppercase tracking-widest ${SOURCE.invented}`}>
+                {SOURCE_GLYPH.invented} imagined — not kept yet
               </p>
               <div className="flex gap-2">
                 <button

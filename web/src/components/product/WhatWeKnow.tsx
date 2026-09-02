@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 import { tableAPI, type Known } from '@/lib/api'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { SOURCE } from '@/lib/palette'
 
 /**
  * What the table has been told, searched and quoted back.
@@ -56,7 +56,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
         />
         <button
           onClick={() => setAsked(q)}
-          className={`shrink-0 rounded-md px-3 py-1.5 text-meta ${CHROME.primary}`}
+          className="shrink-0 rounded-md border border-line px-3 py-1.5 text-meta text-ink-dim hover:text-ink"
         >
           look it up
         </button>

@@ -163,7 +163,7 @@ export default function Home() {
           ) : (
             <button
               onClick={() => setMaking(true)}
-              className="text-ui text-ink-dim hover:text-ink-dim"
+              className="text-ui text-ink-dim hover:text-ink"
             >
               Start a table
             </button>

@@ -5,6 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 import { Door } from '@/components/Door'
 import { auth, tableAPI } from '@/lib/api'
+import { CHROME } from '@/lib/palette'
 
 /**
  * The frame every product screen sits in.
@@ -84,17 +85,17 @@ export function Shell({
 
   return (
     <div className="flex h-full flex-col bg-ground text-ink">
-      <header className="flex shrink-0 items-center gap-1 border-b border-line px-4 py-2">
+      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-4">
         <Link
           href="/"
-          className="mr-3 text-ui font-medium text-ink-dim hover:text-ink"
+          className="mr-3 text-ui font-medium text-ink hover:text-chrome"
         >
           Table
         </Link>
 
         {campaign && role !== null && (
           <>
-            <span className="mr-3 truncate text-meta text-ink-dim">{campaign}</span>
+            <span className="mr-3 truncate text-meta text-ink-faint">{campaign}</span>
             <Tab href={`/c/${campaign}`} on={section === 'prep'}>
               {runs ? 'Prep' : 'Your table'}
             </Tab>
@@ -157,10 +158,11 @@ function Tab({ href, on, children }: { href: string; on: boolean; children: Reac
       // CONTRAST, NEVER HUE. `palette.ts` reserves every hue for a source, so
       // a selected tab may not borrow one -- a brighter neutral against a dark
       // ground is legible without competing for meaning.
-      className={`rounded-md px-2.5 py-1 text-ui transition-colors ${
-        on
-          ? 'bg-overlay text-ink'
-          : 'text-ink-dim hover:text-ink-dim'
+      // THE CHROME LADDER, not a hand-picked pair. Rest is dim; hover lifts
+      // one step; selected lifts further AND gains weight, so the current tab
+      // is legible in a screenshot with the colour removed.
+      className={`rounded-md px-2.5 py-1 text-ui ${CHROME.row} ${
+        on ? CHROME.selected : 'text-ink-dim'
       }`}
     >
       {children}

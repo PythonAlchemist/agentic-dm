@@ -68,7 +68,7 @@ export default function SettingsPage() {
 
   return (
     <Shell campaign={campaign} section="settings">
-      <div className="mx-auto flex max-w-2xl flex-col gap-10 px-6 py-10">
+      <div className="mx-auto flex max-w-3xl flex-col gap-10 px-6 py-10">
         <section>
           <h1 className="text-title font-medium text-ink">This table</h1>
           <div className="mt-4 flex gap-2">
@@ -134,7 +134,7 @@ export default function SettingsPage() {
                       ? tableAPI.dropBook(campaign, book.slug).then(load)
                       : save({ book: book.slug })
                   }
-                  className="ml-auto text-label text-ink-dim hover:text-ink-dim"
+                  className="ml-auto text-label text-ink-dim hover:text-ink"
                 >
                   {drawn.has(book.slug) ? 'stop playing from it' : 'play from it'}
                 </button>

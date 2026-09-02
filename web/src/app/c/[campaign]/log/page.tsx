@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type LogNight } from '@/lib/api'
-import { SOURCE } from '@/lib/palette'
+import { SOURCE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * The adventure so far, by the night it happened.
@@ -42,7 +42,7 @@ export default function LogPage() {
 
   return (
     <Shell campaign={campaign} section="log">
-      <div className="mx-auto max-w-2xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-6 py-10">
         <h1 className="text-title font-medium text-ink">The adventure so far</h1>
         <p className="mt-1 text-ui text-ink-dim">
           What your table has been told, and the night you were told it.
@@ -67,9 +67,9 @@ export default function LogPage() {
                 )}
               </div>
 
-              <ul className="mt-2 flex flex-col gap-1 border-l border-line pl-3">
+              <ul className="mt-3 flex flex-col border-l border-line pl-4">
                 {night.learned.map((one) => (
-                  <li key={one.id} className="flex items-baseline gap-2">
+                  <li key={one.id} className="flex h-11 items-center gap-2">
                     <Link
                       href={
                         one.kind === 'scene'
@@ -80,8 +80,18 @@ export default function LogPage() {
                     >
                       {one.name}
                     </Link>
-                    <span className="text-label uppercase tracking-wide text-ink-faint">
-                      {one.kind === 'scene' ? 'read' : 'met'}
+                    {/* THE GLYPH IS THE SECOND CHANNEL. A scene the table has
+                        read is the book's words; a person they met is a thing
+                        they know exists -- different claims, and the grammar
+                        says so without relying on the colour. */}
+                    <span
+                      className={`text-label uppercase tracking-widest ${
+                        one.kind === 'scene' ? SOURCE.book : SOURCE.table
+                      }`}
+                    >
+                      {one.kind === 'scene'
+                        ? `${SOURCE_GLYPH.book} read`
+                        : `${SOURCE_GLYPH.table} met`}
                     </span>
                   </li>
                 ))}

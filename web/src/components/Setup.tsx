@@ -59,7 +59,7 @@ export function Setup({
           <h2 className="text-body font-medium text-ink">Setup</h2>
           <button
             onClick={onClose}
-            className="text-meta text-ink-dim hover:text-ink-dim"
+            className="text-meta text-ink-dim hover:text-ink"
           >
             close (esc)
           </button>

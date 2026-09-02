@@ -63,7 +63,7 @@ export default function ToldPage() {
 
   return (
     <Shell campaign={campaign} section="settings">
-      <div className="mx-auto max-w-2xl px-6 py-10">
+      <div className="mx-auto max-w-3xl px-6 py-10">
         <h1 className="text-title font-medium text-ink">What your table knows</h1>
         <p className="mt-1 text-ui text-ink-dim">
           Everything else is hidden from them until you say otherwise.
@@ -100,11 +100,13 @@ export default function ToldPage() {
           </ul>
         )}
 
+        {/* NO HAIRLINE PER ROW. Rhythm separates them; a rule per row at any
+            length beyond a handful stops dividing and starts fogging. */}
         <ul className="mt-7 flex flex-col">
           {grants.map((grant) => (
             <li
               key={grant.id}
-              className="flex items-baseline gap-3 border-b border-line py-2"
+              className="flex h-11 items-center gap-3 rounded-md pl-3 pr-2 chrome-row"
             >
               <Link
                 href={
@@ -131,7 +133,7 @@ export default function ToldPage() {
               )}
               <button
                 onClick={() => act(tableAPI.conceal(campaign, grant.id))}
-                className="ml-auto shrink-0 text-label text-ink-dim hover:text-ink-dim"
+                className="ml-auto shrink-0 text-label text-ink-dim hover:text-ink"
               >
                 take it back
               </button>
