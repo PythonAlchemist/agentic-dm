@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
@@ -38,7 +38,12 @@ export default function PlayPage() {
   const [open, setOpen] = useState<string>('')
   const [diff, setDiff] = useState<SessionDiff | null>(null)
   const [order, setOrder] = useState<OrderRow[]>([])
+  const [touched, setTouched] = useState<
+    { section_id: string; heading: string; names: string[] }[]
+  >([])
+  const [note, setNote] = useState('')
   const [failed, setFailed] = useState('')
+  const file = useRef<HTMLInputElement>(null)
 
   const loadSessions = useCallback(() => {
     tableAPI
@@ -76,6 +81,24 @@ export default function PlayPage() {
         loadSessions()
       })
       .catch((error) => setFailed(String(error)))
+  }
+
+  const upload = (chosen: File | undefined) => {
+    if (!chosen || !open) return
+    setFailed('')
+    chosen
+      .text()
+      .then((content) => tableAPI.transcript(campaign, open, content))
+      .then((stored) => {
+        setNote(
+          `${stored.turns} turns became ${stored.sections} section` +
+            `${stored.sections === 1 ? '' : 's'} and ${stored.mentions} mention` +
+            `${stored.mentions === 1 ? '' : 's'}.`,
+        )
+        return tableAPI.touched(campaign, open)
+      })
+      .then((r) => setTouched(r.touched))
+      .catch((error) => setFailed(String(error).replace(/^Error:\s*/, '')))
   }
 
   const planned = new Set((diff?.planned ?? []).map((s) => s.id))
@@ -145,6 +168,53 @@ export default function PlayPage() {
 
           {open && (
             <>
+              {/* WHAT ACTUALLY HAPPENED. A recording is the one document here
+                  that may not assert: it becomes prose and mentions, and every
+                  claim it seems to make stays a suggestion below. */}
+              <div className="mt-5 flex items-baseline gap-3">
+                <input
+                  ref={file}
+                  type="file"
+                  accept=".txt,.json,.md,text/plain,application/json"
+                  className="hidden"
+                  onChange={(event) => upload(event.target.files?.[0])}
+                />
+                <button
+                  onClick={() => file.current?.click()}
+                  className={`rounded px-2 py-1 text-[11px] ${CHROME.primary}`}
+                >
+                  upload the transcript
+                </button>
+                {note && <span className="text-[11px] text-neutral-500">{note}</span>}
+              </div>
+
+              {touched.length > 0 && (
+                <div className="mt-4 rounded border border-neutral-800 bg-neutral-900/40 p-3">
+                  <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+                    The recording names these
+                  </h2>
+                  <p className="mt-1 text-[11px] text-neutral-600">
+                    Evidence, not a verdict. Mark what you actually ran.
+                  </p>
+                  <ul className="mt-2 flex flex-col gap-1">
+                    {touched.map((t) => (
+                      <li key={t.section_id} className="flex items-baseline gap-2 text-sm">
+                        <span className="text-neutral-300">{t.heading}</span>
+                        <span className="text-[11px] text-neutral-600">
+                          {t.names.slice(0, 4).join(', ')}
+                        </span>
+                        <button
+                          onClick={() => mark(t.section_id, 'covered')}
+                          className="ml-auto text-[11px] text-neutral-400 hover:text-neutral-200"
+                        >
+                          mark played
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <ol className="mt-6 flex flex-col">
                 {order
                   .filter((row) => !row.skipped)

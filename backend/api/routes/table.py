@@ -209,6 +209,73 @@ def session_diff(campaign: str, session_id: str) -> dict:
         return sessions.diff(session, slug=campaign, session=session_id)
 
 
+class TranscriptRequest(BaseModel):
+    campaign: str
+    session: str
+    content: str
+    #: `json`, `discord`, `timestamped`, `plain` -- or unset, and the parser
+    #: works it out. Kept because a caller who KNOWS should not have to hope.
+    format_hint: str = ""
+
+
+@router.post("/session/transcript")
+def store_transcript(http: Request, request: TranscriptRequest) -> dict:
+    """Store what was actually said, and link it to names the graph knows.
+
+    IT WRITES SECTIONS AND MENTIONS, AND NOTHING ELSE. No entity is minted and
+    no relationship is written -- see `campaign/transcripts.py` for why a
+    recording is the one document in this system that may not assert.
+    """
+    guard(http, request.campaign)
+    from backend.campaign import transcripts
+    from backend.transcript.parser import TranscriptParser
+
+    parsed = TranscriptParser().parse(
+        request.content, request.format_hint or None, None)
+    said = [
+        transcripts.Said(speaker=segment.speaker or "",
+                         text=segment.text or "",
+                         role=getattr(segment.speaker_role, "value", "") or "")
+        for segment in parsed.segments
+        if (segment.text or "").strip()
+    ]
+    if not said:
+        raise HTTPException(
+            status_code=400,
+            detail="nothing was said in that file -- the parser found no turns")
+
+    with read_only_session() as session:
+        row = session.run(
+            "MATCH (s:Session {id:$id, campaign:$slug}) RETURN s.number AS n",
+            {"id": request.session, "slug": request.campaign}).single()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail=f"no session {request.session!r}")
+
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(lambda tx: transcripts.record(
+                tx, slug=request.campaign, session=request.session,
+                number=row["n"], said=said))
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad)) from bad
+
+
+@router.get("/session/touched")
+def transcript_touched(campaign: str, session_id: str) -> dict:
+    """Planned scenes the recording appears to have reached.
+
+    EVIDENCE, NOT A VERDICT. `COVERED` is a DM's claim about their own evening;
+    deriving it from name overlap would be a model deciding what happened at a
+    table it was not at. So this comes back as a list to press.
+    """
+    from backend.campaign import transcripts
+
+    with read_only_session() as session:
+        return {"touched": transcripts.touched(
+            session, slug=campaign, session=session_id)}
+
+
 # --------------------------------------------------------------- lookup
 
 #: Entities a table may reach: the books it draws on, plus what it wrote.

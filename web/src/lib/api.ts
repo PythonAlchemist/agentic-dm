@@ -850,6 +850,24 @@ export const tableAPI = {
     })
   },
 
+  /** What was actually said. Writes sections and mentions; mints nothing. */
+  transcript(campaign: string, session: string, content: string) {
+    return postTo<{
+      replaced: number
+      sections: number
+      mentions: number
+      turns: number
+    }>('/table/session/transcript', { campaign, session, content })
+  },
+
+  /** Planned scenes the recording appears to have reached. A list to press,
+   *  never an edge somebody else wrote for you. */
+  touched(campaign: string, sessionId: string): Promise<{
+    touched: { section_id: string; heading: string; names: string[]; shared: number }[]
+  }> {
+    return getJSON(`/table/session/touched?${query({ campaign, session_id: sessionId })}`)
+  },
+
   diff(campaign: string, sessionId: string): Promise<SessionDiff> {
     return getJSON(`/table/session/diff?${query({ campaign, session_id: sessionId })}`)
   },

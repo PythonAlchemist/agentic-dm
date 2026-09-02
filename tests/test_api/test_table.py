@@ -268,3 +268,54 @@ class TestSearch:
         got = client.get("/api/table/search", params={
             "campaign": SLUG, "q": "a", "limit": 5000})
         assert got.status_code == 200 and len(got.json()["found"]) <= 50
+
+
+class TestTranscripts:
+    """The least reliable prose in the system, on the tightest write path."""
+
+    LINES = "Ana: Strahd is waiting for us.\nBen: Then we ride at dawn.\n"
+
+    def _session(self) -> str:
+        return client.post("/api/table/session", json={"campaign": SLUG}).json()["id"]
+
+    def test_it_stores_what_was_said(self, table):
+        got = client.post("/api/table/session/transcript", json={
+            "campaign": SLUG, "session": self._session(), "content": self.LINES})
+        assert got.status_code == 200
+        assert got.json()["sections"] == 1 and got.json()["turns"] == 2
+
+    def test_a_name_the_graph_knows_becomes_a_mention(self, table):
+        got = client.post("/api/table/session/transcript", json={
+            "campaign": SLUG, "session": self._session(), "content": self.LINES})
+        assert got.json()["mentions"] == 1
+
+    def test_it_mints_no_entity(self, table):
+        before = table.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
+        client.post("/api/table/session/transcript", json={
+            "campaign": SLUG, "session": self._session(),
+            "content": "Ana: Then Gorbo the Unmentioned appeared.\n"})
+        after = table.run("MATCH (e:Entity) RETURN count(e) AS n").single()["n"]
+        assert after == before
+
+    def test_an_empty_file_says_so(self, table):
+        got = client.post("/api/table/session/transcript", json={
+            "campaign": SLUG, "session": self._session(), "content": "   "})
+        assert got.status_code == 400
+
+    def test_a_session_that_is_not_this_table_s_is_a_404(self, table):
+        got = client.post("/api/table/session/transcript", json={
+            "campaign": SLUG, "session": f"hb:{SLUG}:session-99",
+            "content": self.LINES})
+        assert got.status_code == 404
+
+    def test_the_touched_list_writes_nothing(self, table):
+        session = self._session()
+        client.post("/api/table/session/transcript", json={
+            "campaign": SLUG, "session": session, "content": self.LINES})
+        got = client.get("/api/table/session/touched", params={
+            "campaign": SLUG, "session_id": session})
+        assert got.status_code == 200
+        covered = table.run(
+            "MATCH (:Session {id:$s})-[r:COVERED]->() RETURN count(r) AS n",
+            {"s": session}).single()["n"]
+        assert covered == 0
