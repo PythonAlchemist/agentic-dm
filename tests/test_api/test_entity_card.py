@@ -28,6 +28,21 @@ def graph():
 
 
 
+class _Anonymous:
+    """A request the gate did not identify.
+
+    THE OPEN DEPLOYMENT, which is what these tests are about: `ACCESS_TOKENS`
+    unset means nobody is identified and the reader gets the DM view. The
+    visibility layer's own tests cover the other chair.
+    """
+
+    scope: dict = {}
+
+
+def _read(entity_id: str, campaign: str | None = None) -> dict:
+    return read_entity(_Anonymous(), entity_id, campaign)
+
+
 def _entity(session, suffix: str, name: str, **props):
     extra = "".join(f", {k}:{v}" for k, v in props.items())
     session.run(
@@ -52,11 +67,11 @@ class TestTheCardIsToldWhetherTheBookNamesIt:
             "CREATE (m)-[:REFERS_TO]->(e) CREATE (m)-[:IN_SECTION]->(s)",
             {"id": eid},
         )
-        assert read_entity(eid)["named_by_book"] is True
+        assert _read(eid)["named_by_book"] is True
 
     def test_an_entity_marked_unnamed_reports_false(self, graph):
         eid = _entity(graph, "quiet", "Side Room 2", **{NAMED_BY_BOOK: "false"})
-        assert read_entity(eid)["named_by_book"] is False
+        assert _read(eid)["named_by_book"] is False
 
     def test_an_unmarked_entity_with_no_mention_still_reports_true(self, graph):
         """ABSENCE IS NOT A CLAIM OF ABSENCE. A node nobody has marked yet is
@@ -64,10 +79,10 @@ class TestTheCardIsToldWhetherTheBookNamesIt:
         seventh invariant fails on exactly that state -- the graph is not
         allowed to sit in it quietly."""
         eid = _entity(graph, "unmarked", "Something")
-        assert read_entity(eid)["named_by_book"] is True
+        assert _read(eid)["named_by_book"] is True
 
     def test_it_is_always_a_bool_never_the_stored_value(self, graph):
         """The reader has no way to tell `null` from `false`, so the endpoint
         does not make them try."""
         eid = _entity(graph, "plain", "A Thing")
-        assert isinstance(read_entity(eid)["named_by_book"], bool)
+        assert isinstance(_read(eid)["named_by_book"], bool)

@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.api import auth
+from backend import player
 from backend.api.routes.homebrew import guard
 from backend.campaign import (
     assets,
@@ -95,6 +96,56 @@ def _for_player(http: Request, campaign: str, preview: bool = False) -> bool:
     with read_only_session() as session:
         role = roles.role_of(session, slug=campaign, reader=reader)
     return role != roles.DM
+
+
+# ------------------------------------------------------------ what they know
+
+
+class RevealRequest2(BaseModel):
+    campaign: str
+    target: str
+    at_session: str = ""
+    as_name: str = ""
+
+
+@router.get("/revealed")
+def read_revealed(campaign: str) -> dict:
+    """Everything this table has been shown.
+
+    THE DM'S AUDIT OF THEIR OWN GAME, and the reason grants are positive: a
+    list of what the players know is readable in one screen, while a list of
+    what they do NOT know is the whole graph minus a set nobody can hold in
+    their head.
+    """
+    with read_only_session() as session:
+        return {"revealed": player.revealed(session, slug=campaign)}
+
+
+@router.post("/reveal")
+def reveal_to_table(http: Request, request: RevealRequest2) -> dict:
+    """Hand something to the table, optionally under another name."""
+    guard(http, request.campaign)
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(lambda tx: player.reveal(
+                tx, slug=request.campaign, target=request.target,
+                at_session=request.at_session, as_name=request.as_name))
+    except ValueError as bad:
+        raise HTTPException(status_code=404, detail=str(bad)) from bad
+
+
+@router.delete("/reveal")
+def conceal_from_table(http: Request, campaign: str, target: str) -> dict:
+    """Take it back off the table.
+
+    IT CANNOT UNDO A READING, and no screen should imply otherwise. Concealing
+    removes the grant; the players still remember. That is not a defect to fix
+    -- it is the whole argument for the default being deny.
+    """
+    guard(http, campaign)
+    with neo4j_session() as session:
+        return {"concealed": session.execute_write(lambda tx: player.conceal(
+            tx, slug=campaign, target=target))}
 
 
 # ---------------------------------------------------------------- setup
@@ -409,8 +460,29 @@ LIMIT $limit
 """
 
 
+#: The same search, narrowed to what this table has been shown.
+#:
+#: A SEARCH BOX IS THE EASIEST LEAK IN ANY PRODUCT. Every screen can be gated
+#: and the box still answers "does an entity called Strahd exist" with a yes.
+#: So the player's query is anchored on the reveal, like every other player
+#: query here, and it returns the name the table knows rather than the true one.
+SEARCH_PLAYER = """
+MATCH (c:Campaign {slug:$slug})-[g:REVEALED]->(e:Entity)
+WHERE toLower(coalesce(g.as_name, e.name)) CONTAINS toLower($q)
+  AND ($label = '' OR $label IN labels(e))
+RETURN e.id AS entity_id,
+       CASE WHEN coalesce(g.as_name, '') <> '' THEN g.as_name ELSE e.name END
+         AS name,
+       e.plane AS plane,
+       [l IN labels(e) WHERE l <> 'Entity'] AS labels,
+       coalesce(e.named_by_book, true) AS named_by_book
+ORDER BY name
+LIMIT $limit
+"""
+
+
 @router.get("/search")
-def search_entities(campaign: str, q: str, label: str = "",
+def search_entities(http: Request, campaign: str, q: str, label: str = "",
                     limit: int = 20) -> dict:
     """Find something to pin, to portray, or to open.
 
@@ -422,7 +494,9 @@ def search_entities(campaign: str, q: str, label: str = "",
     if not q.strip():
         return {"found": []}
     with read_only_session() as session:
-        rows = session.run(SEARCH, {
+        as_dm = player.audience(
+            session, slug=campaign, reader=_reader(http)) == player.DM
+        rows = session.run(SEARCH if as_dm else SEARCH_PLAYER, {
             "slug": campaign, "q": q.strip(), "label": label,
             "limit": max(1, min(int(limit), 50)),
         })

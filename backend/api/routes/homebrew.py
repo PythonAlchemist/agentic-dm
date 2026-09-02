@@ -34,6 +34,7 @@ from backend.campaign.model import PART_OF
 from backend.core.config import settings
 from backend.api import auth
 from backend.campaign import reader
+from backend import player
 from backend.core.database import neo4j_session, read_only_session
 
 logger = logging.getLogger(__name__)
@@ -317,6 +318,38 @@ def guard(http: Request, campaign: str) -> str:
     return owner
 
 
+def dm_only(http: Request, campaign: str) -> None:
+    """Refuse a surface that has not been taught to keep a secret.
+
+    THE ASSISTANT READS THE WHOLE BOOK. Retrieval seeds itself from canon and
+    the campaign plane together, and there is no revealed-closure path through
+    it yet -- so a player asking "who is Strahd" would be answered out of the
+    book, gated screens or not.
+
+    CLOSED, NOT FILTERED. A model given the secret and asked not to say it has
+    already been given the secret: it shapes the prose around it, declines in a
+    way that confirms it, or leaks it under mild rephrasing. Refusing the
+    surface is the only honest state until generation can be SEEDED from
+    `player.visible_ids`, which now exists for exactly that.
+
+    A DM IS UNAFFECTED, and so is the open deployment, where nobody is
+    identified and there is one person at the machine.
+    """
+    from backend import player
+
+    if not campaign:
+        return
+    reader = auth.reader_of(http)
+    with read_only_session() as session:
+        if player.audience(session, slug=campaign, reader=reader) != player.DM:
+            raise HTTPException(
+                status_code=403,
+                detail="the assistant reads the whole book, so it answers the "
+                       "DM only. What your table has been shown is on the "
+                       "entity and scene screens.",
+            )
+
+
 @router.post("/plan-cluster")
 def plan_cluster_route(request: ClusterRequest) -> dict:
     """What storing this WOULD do. Writes nothing.
@@ -565,7 +598,8 @@ class DraftRequest(BaseModel):
 
 
 @router.get("/section")
-def read_section(section_id: str, campaign: str | None = None) -> dict:
+def read_section(http: Request, section_id: str,
+                 campaign: str | None = None) -> dict:
     """The prose of one section, canon or campaign, for a person to read.
 
     THE THING A DM DOES AT A TABLE. The running order listed 547 headings and
@@ -579,9 +613,9 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
     one is not found rather than refused -- from this endpoint's side there is
     nothing there.
     """
-    with read_only_session() as session:
-        row = session.run(
-            """
+    # GATED, for the reason `/entity` is: a player's token reaches this
+    # endpoint whether or not a screen ever calls it.
+    dm_query = """
             MATCH (s:Section {id:$id})
             WHERE s.plane = 'canon' OR s.campaign = $campaign
             OPTIONAL MATCH (c:Chapter)-[:HAS_SECTION]->(s)
@@ -638,9 +672,12 @@ def read_section(section_id: str, campaign: str | None = None) -> dict:
                      rel: type(edge), to: far.name,
                      to_id: far.id, plane: far.plane, status: edge.status
                    }) AS connections
-            """,
-            {"id": section_id, "campaign": campaign},
-        ).single()
+            """
+    with read_only_session() as session:
+        row = player.section_for(
+            session, slug=campaign or "", reader=auth.reader_of(http),
+            section_id=section_id, dm_query=dm_query,
+            dm_params={"id": section_id, "campaign": campaign})
     if row is None:
         raise HTTPException(status_code=404, detail=f"no section {section_id!r} here")
 
@@ -795,7 +832,8 @@ def expand_element(http: Request, request: ExpandRequest) -> dict:
 
 
 @router.get("/entity")
-def read_entity(entity_id: str, campaign: str | None = None) -> dict:
+def read_entity(http: Request, entity_id: str,
+                campaign: str | None = None) -> dict:
     """What the graph holds about one thing, for a reader who clicked its name.
 
     BOTH PLANES, because a DM reading their own scene clicks straight through
@@ -807,9 +845,12 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
     lets a DM follow a thread — and it is the same triangle the highlight was
     drawn from, so the two cannot disagree.
     """
-    with read_only_session() as session:
-        row = session.run(
-            """
+    # THE VISIBILITY CHOKE POINT, and the reason this route takes a request
+    # at all. A player holds a token that reaches every endpoint here, so
+    # gating only the product's screens would gate nothing -- `curl` is not a
+    # threat model, it is Tuesday. `player/reader.py` runs the DM's query for a
+    # DM and a DIFFERENT query for a player, one anchored on the reveal.
+    dm_query = """
             MATCH (e:Entity {id:$id})
             WHERE e.plane = 'canon' OR e.campaign = $campaign
             OPTIONAL MATCH (own:Section {expands:e.id})
@@ -848,14 +889,19 @@ def read_entity(entity_id: str, campaign: str | None = None) -> dict:
                         other: near.name, other_id: near.id,
                         other_labels: labels(near), other_plane: near.plane}]
                    AS connections
-            """,
-            {"id": entity_id, "campaign": campaign,
-             # The mention triangle and its kin join the graph; they assert
-             # nothing about the world and are not connections a DM curates.
-             "plumbing": ["REFERS_TO", "IN_SECTION", "ALIAS_OF",
-                          "CO_OCCURS_WITH", "USES_ALIAS", "DESCRIBES",
-                          "HAS_SECTION", "HAS_CHAPTER", "NEXT"]},
-        ).single()
+            """
+    dm_params = {
+        "id": entity_id, "campaign": campaign,
+        # The mention triangle and its kin join the graph; they assert
+        # nothing about the world and are not connections a DM curates.
+        "plumbing": ["REFERS_TO", "IN_SECTION", "ALIAS_OF",
+                     "CO_OCCURS_WITH", "USES_ALIAS", "DESCRIBES",
+                     "HAS_SECTION", "HAS_CHAPTER", "NEXT", "REVEALED"],
+    }
+    with read_only_session() as session:
+        row = player.entity_for(
+            session, slug=campaign or "", reader=auth.reader_of(http),
+            entity_id=entity_id, dm_query=dm_query, dm_params=dm_params)
     if row is None:
         raise HTTPException(status_code=404, detail=f"no entity {entity_id!r} here")
     # SHAPED IN `campaign/reader.py`, not here. These rules decide what a DM

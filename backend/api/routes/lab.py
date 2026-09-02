@@ -16,7 +16,7 @@ import logging
 from collections import OrderedDict
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from backend.agents import canon_context, generator
@@ -27,6 +27,8 @@ from backend.core import pricing
 from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
+from backend.api.routes.homebrew import dm_only
+
 router = APIRouter()
 
 #: How many conversations one process keeps. Reached only by a deployment with
@@ -216,8 +218,14 @@ def _books_loaded() -> list[dict]:
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest) -> dict:
-    """One grounded turn, with its cost and its retrieval laid open."""
+async def chat(http: Request, request: ChatRequest) -> dict:
+    """One grounded turn, with its cost and its retrieval laid open.
+
+    THE DM ONLY. Retrieval seeds itself from the whole book, so this is the one
+    surface that cannot be narrowed to what a table has been shown -- see
+    `homebrew.dm_only` for why it is closed rather than filtered.
+    """
+    dm_only(http, request.campaign or "")
     model = request.model or settings.openai_model
     depth = request.depth.to_domain()
     agent = _agent_for(request.session_id, model, depth, request.book, request.campaign)
@@ -255,8 +263,9 @@ async def chat(request: ChatRequest) -> dict:
 
 
 @router.post("/generate")
-async def generate(request: GenerateRequest) -> dict:
+async def generate(http: Request, request: GenerateRequest) -> dict:
     """A quest, NPC or monster, with canon and invention kept apart."""
+    dm_only(http, request.campaign or "")
     model = request.model or settings.openai_model
     depth = request.depth.to_domain()
 
@@ -327,7 +336,7 @@ class FindElementsRequest(BaseModel):
 
 
 @router.post("/find-elements")
-async def find_elements(request: FindElementsRequest) -> dict:
+async def find_elements(http: Request, request: FindElementsRequest) -> dict:
     """Ask a draft what things it contains, on demand.
 
     A QUEST, SCENE OR ENCOUNTER IS ANNOTATED WHEN IT IS WRITTEN, and when that

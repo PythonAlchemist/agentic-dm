@@ -1,0 +1,133 @@
+'use client'
+
+import { useCallback, useEffect, useState } from 'react'
+
+import { tableAPI, type Grant } from '@/lib/api'
+import { CHROME } from '@/lib/palette'
+
+/**
+ * Whether the table has been told about this.
+ *
+ * ON THE THING ITSELF, not in a permissions screen. A DM decides what the
+ * players know while reading the scene where it comes up, and a separate list
+ * of grants somewhere in settings would be filled in never.
+ *
+ * IT SAYS WHAT IT CANNOT DO. Concealing removes the grant; it does not remove
+ * what anybody already read. That is not a defect to apologise for -- it is
+ * the whole reason the default is "not shown", and the copy says so where the
+ * decision is made rather than in a document nobody opens.
+ *
+ * NO HUE. `palette.ts` keeps every hue for a SOURCE, and "the table knows
+ * this" is not a source -- it is a fact about an audience. Contrast carries it.
+ */
+export function Reveal({
+  campaign,
+  target,
+  name,
+}: {
+  campaign: string
+  target: string
+  name: string
+}) {
+  const [grant, setGrant] = useState<Grant | null>(null)
+  const [ready, setReady] = useState(false)
+  const [alias, setAlias] = useState('')
+  const [naming, setNaming] = useState(false)
+  const [failed, setFailed] = useState('')
+
+  const load = useCallback(() => {
+    tableAPI
+      .revealed(campaign)
+      .then((r) => {
+        setGrant(r.revealed.find((g) => g.id === target) ?? null)
+        setReady(true)
+      })
+      // A PLAYER GETS NO CONTROL AT ALL, and a failure here is how this
+      // component learns that: the route is the DM's. Not an error banner --
+      // just nothing, which is the correct amount of interface.
+      .catch(() => setReady(false))
+  }, [campaign, target])
+
+  useEffect(load, [load])
+
+  if (!ready) return null
+
+  const act = (call: Promise<unknown>) =>
+    call
+      .then(() => {
+        setNaming(false)
+        setAlias('')
+        load()
+      })
+      .catch((error) => setFailed(String(error).replace(/^Error:\s*/, '')))
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[11px] text-neutral-600">
+          {grant
+            ? grant.as_name
+              ? `Your table knows this as “${grant.as_name}”.`
+              : 'Your table knows about this.'
+            : 'Your table has not been told about this.'}
+        </span>
+        {grant ? (
+          <button
+            onClick={() => act(tableAPI.conceal(campaign, target))}
+            className="text-[11px] text-neutral-500 hover:text-neutral-300"
+          >
+            take it back
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => act(tableAPI.tellTable(campaign, target))}
+              className={`rounded px-1.5 py-0.5 text-[11px] ${CHROME.selected}`}
+            >
+              tell them
+            </button>
+            <button
+              onClick={() => setNaming((was) => !was)}
+              className="text-[11px] text-neutral-600 hover:text-neutral-400"
+            >
+              under another name
+            </button>
+          </>
+        )}
+      </div>
+
+      {naming && (
+        <div className="flex gap-2">
+          <input
+            autoFocus
+            value={alias}
+            onChange={(e) => setAlias(e.target.value)}
+            onKeyDown={(e) =>
+              e.key === 'Enter' &&
+              alias.trim() &&
+              act(tableAPI.tellTable(campaign, target, alias.trim()))
+            }
+            // How a party actually meets somebody: the coachman for three
+            // sessions before Strahd.
+            placeholder={`what they call ${name}`}
+            className={`min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[11px] text-neutral-200 outline-none ${CHROME.focus}`}
+          />
+          <button
+            onClick={() => alias.trim() && act(tableAPI.tellTable(campaign, target, alias.trim()))}
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${CHROME.selected}`}
+          >
+            tell them that
+          </button>
+        </div>
+      )}
+
+      {grant && (
+        <p className="text-[10px] leading-tight text-neutral-700">
+          Taking it back hides it from here on. It does not unsay it.
+        </p>
+      )}
+
+      {failed && <p className="text-[11px] text-neutral-500">⚠ {failed}</p>}
+    </div>
+  )
+}

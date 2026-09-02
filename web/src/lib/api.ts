@@ -843,7 +843,42 @@ export interface Settings {
   premise: string
 }
 
+export interface Grant {
+  id: string
+  name: string
+  labels: string[]
+  /** What the table was told it is called, when that differs. */
+  as_name: string
+  at_session: string
+}
+
 export const tableAPI = {
+  /** Everything this table has been shown. The DM's audit of their own game --
+   *  readable in one screen, which a list of what they do NOT know would
+   *  never be.
+   *
+   *  DISTINCT FROM `reveal` ABOVE, WHICH IS A PIN. A pin's `revealed` says
+   *  "this token is on the map the players are looking at"; a grant says "this
+   *  table knows this thing exists". A party can know Strahd exists without
+   *  knowing where he is, and can find a body on a map without being told
+   *  whose. Same word, two claims, and collapsing them would leak one through
+   *  the other. */
+  revealed(campaign: string): Promise<{ revealed: Grant[] }> {
+    return getJSON(`/table/revealed?${query({ campaign })}`)
+  },
+
+  tellTable(campaign: string, target: string, asName = '', atSession = '') {
+    return postTo<{ id: string; as_name: string }>('/table/reveal', {
+      campaign, target, as_name: asName, at_session: atSession,
+    })
+  },
+
+  conceal(campaign: string, target: string) {
+    return send(`${API_BASE}/table/reveal?${query({ campaign, target })}`, {
+      method: 'DELETE',
+    })
+  },
+
   books(): Promise<{ books: BookRow[] }> {
     return getJSON('/table/books')
   },

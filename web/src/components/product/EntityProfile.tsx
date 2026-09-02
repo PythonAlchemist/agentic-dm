@@ -4,6 +4,7 @@ import Link from 'next/link'
 
 import type { EntityRead } from '@/lib/api'
 import { Portraits } from '@/components/product/Portraits'
+import { Reveal } from '@/components/product/Reveal'
 import { SOURCE } from '@/lib/palette'
 
 /**
@@ -92,6 +93,20 @@ export function EntityProfile({
 
           {entity.role && (
             <p className="mt-2 text-sm text-neutral-400">{entity.role}</p>
+          )}
+
+          {/* WHAT THE TABLE KNOWS, decided where the DM is already reading.
+              Never on the popout: that exists to answer "who is this again?"
+              in five seconds while five people wait, and a visibility decision
+              is not a five-second question. */}
+          {!compact && (
+            <div className="mt-3">
+              <Reveal
+                campaign={campaign}
+                target={entity.entity_id}
+                name={entity.name}
+              />
+            </div>
           )}
         </div>
       </header>
