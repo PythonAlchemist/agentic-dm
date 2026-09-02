@@ -251,6 +251,25 @@ RETURN a.id AS id, a.campaign AS campaign,
 LIMIT 50
 """
 
+#: A pin whose coordinates are not fractions of its image.
+#:
+#: THE FAILURE IS SILENT, WHICH IS WHY IT IS CHECKED. `maps.pin` refuses
+#: anything outside 0..1, but a hand-written Cypher or an import does not go
+#: through it, and a pixel coordinate that escaped conversion stores cleanly.
+#: Nobody notices until the tavern is in the lake -- or worse, until a pin sits
+#: off the edge of the map where no click can reach it to be deleted.
+#:
+#: NULL COUNTS AS BROKEN. A pin with no `x` renders at the origin, which looks
+#: like a decision somebody made rather than a value nobody wrote.
+STRAY_PINS = """
+MATCH (e:Entity)-[p:PINNED_ON]->(m:Map)
+WHERE p.x IS NULL OR p.y IS NULL
+   OR p.x < 0.0 OR p.x > 1.0 OR p.y < 0.0 OR p.y > 1.0
+RETURN e.id AS id, m.id AS map, p.x AS x, p.y AS y,
+       'a pin is a fraction of the image, not a pixel' AS why
+LIMIT 50
+"""
+
 ROW_LIMIT = 50
 
 
@@ -290,6 +309,10 @@ CHECKS: tuple[Check, ...] = (
     Check("a canon claim carries its evidence", UNSOURCED_CANON_CLAIMS,
           "delete them -- a canon edge citing no sentence was not written by "
           "the canon writer, and reads to a DM exactly like one that was"),
+    Check("a pin is a fraction of its image", STRAY_PINS,
+          "re-pin it through `maps.pin`, which divides by the image dimensions; "
+          "a pin off the edge cannot be clicked, so it cannot be removed by "
+          "the DM who put it there"),
     Check("a canon entity says whether the book names it", UNSUPPORTED_ENTITIES,
           "`mark_unnamed --apply` records it on the node, which is what makes "
           "keeping one a stated decision rather than a gap a reader must spot"),
