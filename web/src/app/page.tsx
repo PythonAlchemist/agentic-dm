@@ -132,12 +132,12 @@ export default function Home() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="what do you call it?"
-                className="rounded-md bg-surface px-2 py-1 text-ui text-ink focus:border-line"
+                className="rounded-md bg-overlay px-2 py-1 text-ui text-ink focus:border-line"
               />
               <select
                 value={book}
                 onChange={(e) => setBook(e.target.value)}
-                className="rounded-md bg-surface px-2 py-1 text-ui text-ink-dim"
+                className="rounded-md bg-overlay px-2 py-1 text-ui text-ink-dim"
               >
                 <option value="">no book yet</option>
                 {books.map((b) => (

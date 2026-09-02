@@ -88,7 +88,7 @@ export default function LibraryPage() {
                       the label appears on the first row and then stops, so a
                       long chapter reads as a block rather than as 40 copies of
                       its own name. */}
-                  <span className="ml-auto shrink-0 label text-ink-faint">
+                  <span className="ml-auto shrink-0 text-meta text-ink-faint">
                     {row.skipped
                       ? 'skipped'
                       : row.chapter && row.chapter !== order[i - 1]?.chapter
@@ -214,7 +214,7 @@ function NewMap({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="which place?"
-          className={`w-full rounded-md bg-surface px-2 py-1 text-ui text-ink`}
+          className={`w-full rounded-md bg-overlay px-2 py-1 text-ui text-ink`}
         />
       )}
 
@@ -243,7 +243,7 @@ function NewMap({
           <button
             onClick={() => file.current?.click()}
             disabled={busy}
-            className={`mt-2 w-full rounded-md px-2 py-1 text-label ${CHROME.primary}`}
+            className={`mt-2 w-full rounded-md px-3 py-1 text-ui ${CHROME.primary}`}
           >
             {busy ? 'storing…' : 'choose the image'}
           </button>

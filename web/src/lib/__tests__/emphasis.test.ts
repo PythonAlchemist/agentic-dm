@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { EMPHASIS_MARK, withEmphasis } from '@/lib/reading'
+import { EMPHASIS_MARK, readingBlocks, withEmphasis } from '@/lib/reading'
 
 /**
  * The book's italics were reaching the reader as punctuation: every
@@ -36,5 +36,32 @@ describe('the book’s emphasis', () => {
     expect(withEmphasis('(_see below_)')).toBe(
       `(${EMPHASIS_MARK}see below${EMPHASIS_MARK})`,
     )
+  })
+})
+
+describe('read-aloud passages', () => {
+  it('a run of quoted lines becomes one aloud block', () => {
+    const found = readingBlocks('> The gravel road leads to a village.\n> Tall houses.', 'X')
+    expect(found).toEqual([
+      { kind: 'aloud', text: 'The gravel road leads to a village.\nTall houses.' },
+    ])
+  })
+
+  it('the marker never reaches the reader', () => {
+    // 825 canon sections carried a literal `>` at the head of every line of
+    // the one text a DM reads out word for word.
+    const found = readingBlocks('> Boxed text.', 'X')
+    expect(JSON.stringify(found)).not.toContain('>')
+  })
+
+  it('prose either side stays prose', () => {
+    const found = readingBlocks('Before.\n> Said aloud.\nAfter.', 'X')
+    expect(found.map((b) => b.kind)).toEqual(['prose', 'aloud', 'prose'])
+  })
+
+  it('a blank line inside a passage keeps it open', () => {
+    const found = readingBlocks('> One.\n>\n> Two.', 'X')
+    expect(found).toHaveLength(1)
+    expect(found[0].kind).toBe('aloud')
   })
 })

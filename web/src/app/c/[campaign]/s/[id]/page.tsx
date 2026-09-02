@@ -8,7 +8,12 @@ import { Reveal } from '@/components/product/Reveal'
 import { Shell } from '@/components/product/Shell'
 import { labAPI, type EntityRead, type SectionRead } from '@/lib/api'
 import { EMPHASIS_MARK, readingBlocks, withEmphasis } from '@/lib/reading'
-import { SOURCE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
+import {
+  SOURCE,
+  SOURCE_EDGE,
+  SOURCE_GLYPH,
+  SOURCE_WORD,
+} from '@/lib/palette'
 
 /**
  * A section, read the way the book set it.
@@ -107,7 +112,25 @@ export default function SectionPage() {
 
           <div className="mt-8 flex flex-col gap-6">
             {readingBlocks(section.text, section.heading).map((block, i) =>
-              block.kind === 'illustration' ? (
+              block.kind === 'aloud' ? (
+                /* THE PASSAGE A DM READS OUT WORD FOR WORD, which is the most
+                   literally "the book's" text on the screen -- so it takes the
+                   book's grammar in full: the edge, the glyph, the word, and
+                   the one type step reserved for it. It had been rendering
+                   with a literal `>` at the head of every line. */
+                <blockquote key={i} className={`py-2 pl-4 ${SOURCE_EDGE.book}`}>
+                  <p className={`label ${SOURCE.book}`}>
+                    {SOURCE_GLYPH.book} read aloud
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap font-serif text-aloud text-ink">
+                    <Named
+                      text={withEmphasis(block.text)}
+                      mentions={section.mentions}
+                      onOpen={openEntity}
+                    />
+                  </p>
+                </blockquote>
+              ) : block.kind === 'illustration' ? (
                 <figure key={i} className="my-2 flex flex-col gap-2">
                   {/* THE PLATE IS THE BOOK'S TOO, and says so in the same
                       grammar as its sentences. No border: a frame around a
@@ -172,7 +195,7 @@ export default function SectionPage() {
         >
           <div
             // A POPOVER IS THE OVERLAY STEP OF THE GROUND LADDER, lit from
-            // above. `` is invisible on a near-black ground, which is
+            // above. A drop shadow is invisible on a near-black ground, which is
             // why elevation here is lightness and why shadows are banned.
             className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-md bg-overlay p-5 lit"
             onClick={(e) => e.stopPropagation()}

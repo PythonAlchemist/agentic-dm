@@ -93,7 +93,7 @@ export function Reveal({
               // AN ACTION, NOT A SELECTION. `CHROME.selected` is the grammar
               // for the row you are on; on an unpressed button it reads as a
               // toggle that is already on.
-              className={`rounded-md px-2 py-1 label ${CHROME.primary}`}
+              className={`rounded-md px-3 py-1 text-ui ${CHROME.primary}`}
             >
               tell them
             </button>
@@ -125,7 +125,7 @@ export function Reveal({
           />
           <button
             onClick={() => alias.trim() && act(tableAPI.tellTable(campaign, target, alias.trim()))}
-            className={`shrink-0 rounded-md px-1.5 py-0.5 text-label ${CHROME.selected}`}
+            className={`shrink-0 rounded-md px-2 py-1 text-ui ${CHROME.selected}`}
           >
             tell them that
           </button>

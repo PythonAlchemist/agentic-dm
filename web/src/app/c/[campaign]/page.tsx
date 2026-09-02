@@ -144,7 +144,7 @@ export default function CampaignHome() {
                       {SOURCE_GLYPH.yours}
                     </span>
                   )}
-                  <span className="ml-auto shrink-0 label text-ink-faint">
+                  <span className="ml-auto shrink-0 text-meta text-ink-faint">
                     {row.chapter}
                   </span>
                 </Link>

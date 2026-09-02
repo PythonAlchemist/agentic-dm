@@ -203,7 +203,7 @@ export default function PlayPage() {
                 />
                 <button
                   onClick={() => file.current?.click()}
-                  className={`rounded-md px-2 py-1 text-label ${CHROME.primary}`}
+                  className={`rounded-md px-3 py-1 text-ui ${CHROME.primary}`}
                 >
                   upload the transcript
                 </button>

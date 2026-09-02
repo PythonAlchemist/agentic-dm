@@ -80,7 +80,7 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
           />
           <button
             onClick={propose}
-            className="shrink-0 rounded-md border border-line px-2 py-1 label text-ink-dim hover:text-ink"
+            className="shrink-0 rounded-md border border-line px-2 py-1 text-ui text-ink-dim hover:text-ink"
           >
             propose
           </button>

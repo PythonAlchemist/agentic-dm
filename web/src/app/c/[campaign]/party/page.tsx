@@ -252,7 +252,7 @@ function Picker({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder={label}
-        className={`w-full rounded-md bg-surface px-2 py-1 text-ui text-ink`}
+        className={`w-full rounded-md bg-overlay px-2 py-1 text-ui text-ink`}
       />
       <ul className="mt-1 flex max-h-48 flex-col overflow-y-auto">
         {rows.map((entity) => (

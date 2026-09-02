@@ -250,7 +250,7 @@ export function Portraits({
                 <button
                   onClick={keep}
                   disabled={busy}
-                  className={`rounded-md px-1.5 py-0.5 text-label ${CHROME.primary}`}
+                  className={`rounded-md px-3 py-1 text-ui ${CHROME.primary}`}
                 >
                   keep it
                 </button>
