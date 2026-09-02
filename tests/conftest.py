@@ -23,6 +23,22 @@ rather than in a fixture -- which is why this file has a statement before its
 imports and a lint suppression to allow it.
 """
 
+#: A FIXTURE'S LAST WRITE MUST BE CONSUMED.
+#:
+#: `session.run(...)` is auto-commit, and the transaction does not commit until
+#: the result is consumed or another query runs on that session. A fixture that
+#: holds its session open across the test (`yield session`) and ends on a bare
+#: `.run()` therefore leaves the write uncommitted -- and code under test that
+#: opens its OWN session reads a snapshot without it. That is the whole of the
+#: flake that hit four tests: not a missing bookmark between sessions, which is
+#: what it was first diagnosed as, but a transaction that had not committed yet.
+#:
+#: So: end a fixture's writes with `.consume()`, as `tests/test_graph` already
+#: does throughout. Writes inside a closed `with neo4j_session()` block are safe
+#: (close commits), `execute_write` is safe, and any bare run followed by
+#: another query on the same session is safe -- the exposed shape is precisely
+#: the LAST bare run on a still-open session.
+
 import os
 
 #: The test instance, unless the environment already names one. Overridable so

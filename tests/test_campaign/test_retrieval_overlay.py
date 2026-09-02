@@ -362,7 +362,9 @@ class TestLinkingACanonEntityIntoAScene:
             """,
             {"e": self.LINKED, "s": f"hb:{SLUG}:corsair-boarding#0", "c": SLUG,
              "name": self.CANON_NAME},
-        )
+        # CONSUMED, because this is the fixture's last write and the retriever
+        # opens its own session. See the rule in `tests/conftest.py`.
+        ).consume()
         yield overlaid
         overlaid.run("MATCH (e:Entity {id:$id}) DETACH DELETE e", {"id": self.LINKED})
         overlaid.run("MATCH (a:Alias {normalized:$n}) DETACH DELETE a",
@@ -414,21 +416,6 @@ class TestLinkingACanonEntityIntoAScene:
         assert with_campaign == without
 
 
-def _await_alias(name: str, tries: int = 50) -> None:
-    """Block until a NEW session can see this alias.
-
-    Not a sleep: it reads the way the code under test reads, so it waits for
-    exactly the condition that matters and returns the moment it holds.
-    """
-    for _ in range(tries):
-        with neo4j_session() as fresh:
-            if fresh.run(
-                "MATCH (a:Alias {name:$n})-[:ALIAS_OF]->() RETURN count(a) AS n",
-                {"n": name},
-            ).single()["n"]:
-                return
-        time.sleep(0.02)
-    raise AssertionError(f"alias {name!r} never became visible to a new session")
 
 
 class TestYourOwnNamesAreMatchedCaseFolded:
@@ -456,14 +443,11 @@ class TestYourOwnNamesAreMatchedCaseFolded:
             CREATE (a)-[:ALIAS_OF]->(e)
             """,
             {"id": f"{BOOK}:pytest-warden-kessel"},
-        )
-        # WAIT FOR IT TO BE VISIBLE TO A FRESH SESSION, which is what the
-        # retriever opens. The write lands in this session and the read happens
-        # in another with no bookmark tying them, so the retriever could run
-        # against a snapshot from before the alias existed -- and then resolve
-        # only the campaign name, which is what this failed with about a third
-        # of the time.
-        _await_alias("Pytest Warden Kessel")
+        # CONSUMED, because `CanonRetriever` opens its own session and this
+        # auto-commit write would otherwise still be uncommitted when it reads.
+        # This is what the polling helper here was standing in for: the failure
+        # was an uncommitted transaction, not a missing bookmark.
+        ).consume()
         try:
             result = CanonRetriever(book=BOOK, limit=6, campaign=SLUG).retrieve(
                 "what does Pytest Warden Kessel know about the corsair boarding"

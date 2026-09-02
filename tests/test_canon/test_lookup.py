@@ -836,17 +836,8 @@ class TestALookupSaysWhetherTheBookNamesIt:
         graph.run(
             f"MATCH (e:Entity {{id:$id}}) SET e.{NAMED_BY_BOOK} = false",
             {"id": CHURCH.id},
-        )
-        # `lookup` opens its OWN session, and nothing carries a bookmark from
-        # the write above to that read.
-        for _ in range(50):
-            with neo4j_session() as fresh:
-                if fresh.run(
-                    f"MATCH (e:Entity {{id:$id}}) WHERE e.{NAMED_BY_BOOK} = false "
-                    "RETURN count(e) AS n", {"id": CHURCH.id}
-                ).single()["n"]:
-                    break
-            time.sleep(0.02)
+        # CONSUMED: `lookup` opens its own session.
+        ).consume()
         assert canon.lookup(CHURCH.name)["entities"][0]["named_by_book"] is False
 
     def test_it_is_a_boolean_and_not_the_stored_value(self, graph, canon):

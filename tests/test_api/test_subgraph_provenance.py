@@ -5,8 +5,6 @@ prints. The entity card had said so since the marking landed; this is the same
 fact at the place the reader actually looks.
 """
 
-import time
-
 import pytest
 
 from backend.api.routes.lab import _with_provenance
@@ -26,22 +24,14 @@ def graph():
         session.run(
             f"CREATE (:Entity {{id:'{PREFIX}:quiet', plane:'canon', "
             f"name:'Closet 1', {NAMED_BY_BOOK}:false}}) "
-            f"CREATE (:Entity {{id:'{PREFIX}:said', plane:'canon', name:'Strahd'}})"
-        )
-        # WAIT FOR A FRESH SESSION TO SEE THEM. `_with_provenance` opens its
-        # own, and nothing carries a bookmark from this write to that read --
-        # the shape `4948293` documents, and the third time it has bitten a
-        # test in this file's neighbourhood.
-        for _ in range(50):
-            with neo4j_session() as fresh:
-                if fresh.run(
-                    "MATCH (e:Entity) WHERE e.id STARTS WITH $p RETURN count(e) AS n",
-                    {"p": PREFIX},
-                ).single()["n"] == 2:
-                    break
-            time.sleep(0.02)
-        else:
-            raise AssertionError("fixture entities never became visible")
+            f"CREATE (:Entity {{id:'{PREFIX}:said', plane:'canon', name:'Strahd'}}) "
+            f"CREATE (:Entity {{id:'{PREFIX}:mine', plane:'campaign', "
+            f"campaign:'{PREFIX}', name:'A DM invention'}})"
+        # CONSUMED: `_with_provenance` opens its own session, and this
+        # auto-commit write is not committed until its result is. This was a
+        # polling loop, on the theory that the read needed a bookmark; the
+        # actual fault was an uncommitted transaction. See `tests/conftest.py`.
+        ).consume()
         yield session
         clean(session)
 
@@ -63,12 +53,12 @@ class TestMarkingWhatTheBookDoesNotName:
         found = _with_provenance(_sub(f"{PREFIX}:quiet", f"{PREFIX}:said"))
         assert [n["named_by_book"] for n in found["nodes"]] == [False, True]
 
-    def test_a_node_the_graph_does_not_hold_is_not_called_unnamed(self, graph):
-        """Absent means not marked, never "unknown". Reporting a node this
-        cannot find as unnamed would put the badge on anything the panel
-        happened to carry."""
+    def test_a_node_the_graph_does_not_hold_gets_no_verdict(self, graph):
+        """It used to be answered `true` -- "the book names this" -- about a
+        node the query could not find at all. Now it is left alone, and the
+        frontend badges only an explicit `false`."""
         found = _with_provenance(_sub(f"{PREFIX}:nowhere"))
-        assert found["nodes"][0]["named_by_book"] is True
+        assert "named_by_book" not in found["nodes"][0]
 
 
 class TestItNeverCostsAnAnswer:
@@ -82,4 +72,20 @@ class TestItNeverCostsAnAnswer:
 
     def test_a_node_with_no_id_does_not_raise(self, graph):
         found = _with_provenance({"nodes": [{"name": "nameless"}], "edges": []})
-        assert found["nodes"][0]["named_by_book"] is True
+        assert "named_by_book" not in found["nodes"][0]
+
+
+class TestACampaignNodeIsNotAnsweredFor:
+    """The bug this had. It stamped every node, so a campaign session -- whose
+    subgraph holds the DM's own invented NPCs -- got `named_by_book: true` on
+    them: "the book names this", asserted over an invention, in the panel built
+    to prevent exactly that."""
+
+    def test_a_campaign_entity_gets_no_verdict(self, graph):
+        found = _with_provenance(_sub(f"{PREFIX}:mine"))
+        assert "named_by_book" not in found["nodes"][0]
+
+    def test_canon_nodes_beside_it_are_still_answered(self, graph):
+        found = _with_provenance(_sub(f"{PREFIX}:mine", f"{PREFIX}:quiet"))
+        assert "named_by_book" not in found["nodes"][0]
+        assert found["nodes"][1]["named_by_book"] is False

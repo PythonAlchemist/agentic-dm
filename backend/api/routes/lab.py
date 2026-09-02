@@ -362,9 +362,10 @@ def reset(session_id: str = "lab") -> dict:
 #: sites cannot fill would mean defaulting it, and a default of "the book names
 #: this" is the one wrong answer -- it would assert canon over the 154 nodes
 #: that have none.
-_UNNAMED = """
-MATCH (e:Entity) WHERE e.id IN $ids AND e.named_by_book = false
-RETURN collect(e.id) AS ids
+_PROVENANCE = """
+MATCH (e:Entity) WHERE e.id IN $ids
+RETURN collect(CASE WHEN e.plane = 'canon' THEN e.id END) AS canon,
+       collect(CASE WHEN e.named_by_book = false THEN e.id END) AS unnamed
 """
 
 
@@ -376,9 +377,15 @@ def _with_provenance(subgraph: dict | None) -> dict | None:
     entity card had said so since the marking landed; this is the same fact at
     the place the reader actually looks.
 
-    ABSENT MEANS NOT MARKED, NEVER "unknown". Only ids the graph explicitly
-    holds as `false` come back, so a node this cannot find is left alone rather
-    than described either way.
+    ONLY CANON NODES ARE ANSWERED FOR, which this did not do and its own
+    docstring claimed it did. It stamped every node, so a campaign session --
+    whose subgraph holds the DM's own invented NPCs -- got `named_by_book: true`
+    on them: "the book names this", asserted over an invention, in the one panel
+    built to prevent exactly that. A node that is not canon gets no field at
+    all, and the frontend renders a badge only on an explicit `false`.
+
+    ABSENT MEANS NOT MARKED, NEVER "unknown", for canon nodes too: a canon id
+    the graph cannot find is left alone rather than described either way.
     """
     if not subgraph or not subgraph.get("nodes"):
         return subgraph
@@ -387,12 +394,15 @@ def _with_provenance(subgraph: dict | None) -> dict | None:
     ids = [n["id"] for n in subgraph["nodes"] if n.get("id")]
     try:
         with read_only_session() as session:
-            unnamed = set(session.run(_UNNAMED, {"ids": ids}).single()["ids"])
+            row = session.run(_PROVENANCE, {"ids": ids}).single()
+            canon = {i for i in (row["canon"] or []) if i}
+            unnamed = {i for i in (row["unnamed"] or []) if i}
     except Exception:  # noqa: BLE001 -- a panel decoration is not worth a 500
         logger.exception("could not read provenance for the subgraph")
         return subgraph
     for node in subgraph["nodes"]:
-        node["named_by_book"] = node.get("id") not in unnamed
+        if node.get("id") in canon:
+            node["named_by_book"] = node["id"] not in unnamed
     return subgraph
 
 
