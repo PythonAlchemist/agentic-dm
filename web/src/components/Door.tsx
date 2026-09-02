@@ -20,25 +20,28 @@ import { auth } from '@/lib/api'
 export function Door({ onOpened }: { onOpened: () => void }) {
   const [token, setToken] = useState('')
   const [checking, setChecking] = useState(false)
-  const [refused, setRefused] = useState(false)
+  const [failed, setFailed] = useState<'' | 'refused' | 'unreachable'>('')
 
   async function tryIt(event: React.FormEvent) {
     event.preventDefault()
     if (!token.trim() || checking) return
     setChecking(true)
-    setRefused(false)
+    setFailed('')
     auth.set(token)
     // ASKED OF THE API, NOT CHECKED HERE. The frontend has no list of who is
     // allowed and must not: a gate the client decides is a gate anyone can
     // walk through with the devtools open.
-    const ok = await auth.check()
+    const answer = await auth.check()
     setChecking(false)
-    if (ok) {
+    if (answer === 'ok') {
       onOpened()
       return
     }
-    auth.clear()
-    setRefused(true)
+    // THE TOKEN IS ONLY CLEARED ON A REFUSAL. Throwing away a good token
+    // because the API was briefly down would make the next attempt fail for a
+    // second, invented reason.
+    if (answer === 'refused') auth.clear()
+    setFailed(answer)
   }
 
   return (
@@ -70,10 +73,20 @@ export function Door({ onOpened }: { onOpened: () => void }) {
           {checking ? 'checking…' : 'Open'}
         </button>
 
-        {refused && (
+        {failed === 'refused' && (
           <p className="mt-3 text-sm text-red-400">
             That token was refused. If it used to work, it may have been
-            revoked -- ask the DM for a new one.
+            revoked &mdash; ask the DM for a new one.
+          </p>
+        )}
+
+        {/* NOT A REFUSAL, and saying so matters: telling a reader with a good
+            token that it was rejected is the one message that makes them stop
+            trying. Their token is kept, so retrying costs them nothing. */}
+        {failed === 'unreachable' && (
+          <p className="mt-3 text-sm text-amber-300">
+            Could not reach the API to check. It may be starting up &mdash; your
+            token has been kept, so try again in a moment.
           </p>
         )}
       </form>

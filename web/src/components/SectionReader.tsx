@@ -433,7 +433,7 @@ export function SectionReader({
  * exactly as harvested. This is a rendering decision, so it lives at the
  * rendering edge.
  */
-function forReading(text: string, heading: string) {
+export function forReading(text: string, heading: string) {
   const lines = text.split('\n')
   // Only a FIRST heading, and only when it says what the drawer already says.
   // A mid-section H1 is structure the reader should keep.
@@ -467,7 +467,7 @@ function forReading(text: string, heading: string) {
  * confirmed name sits, and a surface that fell inside a dropped line simply
  * is not found, which is the right answer.
  *
- * LONGEST FIRST, so `Captain Saltmarrow` wins over `Saltmarrow` and the短
+ * LONGEST FIRST, so `Captain Saltmarrow` wins over `Saltmarrow` and the short
  * match cannot eat the start of the long one.
  */
 function Named({

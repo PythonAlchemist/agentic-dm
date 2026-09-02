@@ -87,9 +87,25 @@ export const auth = {
    * text. A frontend that judged its own token would be a gate anyone could
    * walk through with the devtools open.
    */
-  async check(): Promise<boolean> {
-    const response = await send(`${API_BASE}/lab/config`)
-    return response.ok
+  /** Whether this token is one of theirs, or why we cannot say.
+   *
+   *  THREE ANSWERS, NOT TWO. `ok`/`not ok` told a reader with a perfectly good
+   *  token that it had been refused whenever the API was merely down -- a
+   *  Railway cold start, a dead Neo4j, no network at all -- which is the one
+   *  message that makes somebody stop trying. A refusal is a 401 and nothing
+   *  else; every other failure is "we could not ask".
+   */
+  async check(): Promise<'ok' | 'refused' | 'unreachable'> {
+    try {
+      const response = await send(`${API_BASE}/lab/config`)
+      if (response.ok) return 'ok'
+      return response.status === 401 ? 'refused' : 'unreachable'
+    } catch {
+      // `send` rejects on a network failure. Unhandled, this left the Door's
+      // button stuck on "checking..." forever, because the line that cleared
+      // it never ran.
+      return 'unreachable'
+    }
   },
 }
 
