@@ -153,7 +153,9 @@ class TestDeletingACampaignTakesItsConversations:
         finally:
             graph.run("MATCH (c:Campaign {slug:$s}) DETACH DELETE c",
                       {"s": slug}).consume()
-        assert counted.get("session memory") == 1
+        # KEYED BY LABEL, since the sweep iterates 
+        # rather than a hand-written list of phrases.
+        assert counted.get("SessionMemory") == 1
         assert graph.run(
             "MATCH (m:SessionMemory {id:$i}) RETURN count(m) AS n",
             {"i": SESSION}).single()["n"] == 0

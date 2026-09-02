@@ -223,6 +223,38 @@ AUTHORED_LOCATION_SUBTYPES: frozenset[LocationSubtype] = (
 # design decision, not an entry to append here.
 ARTIFACT_LABEL = "Artifact"
 
+#: NODES THAT ARE APPARATUS, NOT CLAIMS -- and therefore carry no `plane`.
+#:
+#: `plane` says WHO ASSERTS a thing: the book, or the DM. A stored conversation,
+#: a player's seat at a table, an image file, a map are none of them assertions
+#: about the world, and giving them a plane would put tooling state inside a
+#: distinction that exists to separate two kinds of CLAIM. `:SessionMemory`
+#: already made this ruling and said so; this is the ruling written down once so
+#: the next label does not have to rediscover it.
+#:
+#: NAMED SO PLANE-SCOPED READS EXCLUDE THEM KNOWINGLY. A query that means "every
+#: entity the book asserts" and gets an image node back has been surprised; a
+#: query that names this set has decided.
+APPARATUS_LABELS = frozenset({"SessionMemory", "Player", "Session", "Asset", "Map"})
+
+#: EVERY LABEL A CAMPAIGN MINTS, and therefore every label `delete_campaign`
+#: must sweep.
+#:
+#: THE FOUR-TIMES-IN-ONE-WEEK DEFECT, pre-empted. `invariants.py` opens by
+#: recording that the same shape appeared four times -- a campaign-plane thing
+#: joining nodes the campaign does not own, outliving whatever made it -- each
+#: instance invisible to the check written for the one before. Every new kind
+#: the roadmap adds is another instance waiting. Listing them here, and having
+#: both the sweep and its test iterate this one set, makes "added a label and
+#: forgot to delete it" a failing test rather than a fifth afternoon.
+CAMPAIGN_OWNED_LABELS: tuple[str, ...] = (
+    "SessionMemory",
+    "Player",
+    "Session",
+    "Asset",
+    "Map",
+)
+
 #: SET WHEN NO SECTION OF THE BOOK NAMES AN ENTITY, and absent otherwise.
 #:
 #: A mention is how a canon entity cites the prose that says it. 154 entities

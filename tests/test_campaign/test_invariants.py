@@ -413,3 +413,33 @@ class TestACanonClaimCarriesItsEvidence:
             f"CREATE (a)-[:KNOWS {{plane:'campaign', campaign:'{PREFIX}'}}]->(b)"
         )
         assert not [r for r in _rows(graph, self.NAME) if PREFIX in str(r["id"])]
+
+
+class TestTheSweepCoversEveryCampaignLabel:
+    """`invariants.py` opens by recording the same defect four times in one
+    week -- a campaign-plane thing outliving whatever made it, each instance
+    invisible to the check written for the one before. Every label the roadmap
+    adds is another instance waiting, so the sweep and this test read the one
+    registry: adding a label without adding its delete fails here."""
+
+    def test_delete_campaign_sweeps_each_registered_label(self):
+        import inspect
+
+        from backend.campaign import store
+        from backend.graph.schema import CAMPAIGN_OWNED_LABELS
+
+        source = inspect.getsource(store.delete_campaign)
+        assert "CAMPAIGN_OWNED_LABELS" in source, (
+            "the sweep must iterate the registry, not a hand-written list that "
+            "can fall behind it"
+        )
+        assert CAMPAIGN_OWNED_LABELS, "an empty registry sweeps nothing"
+
+    def test_apparatus_carries_no_plane(self):
+        """Apparatus is not a claim, so it takes no side in a distinction that
+        exists to separate the book's assertions from the DM's."""
+        from backend.graph.schema import APPARATUS_LABELS
+
+        assert "SessionMemory" in APPARATUS_LABELS
+        assert "Entity" not in APPARATUS_LABELS
+        assert "Section" not in APPARATUS_LABELS

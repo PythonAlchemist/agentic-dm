@@ -37,6 +37,7 @@ from backend.campaign.model import (
     Campaign,
 )
 from backend.canon.lookup import CANON_PLANE, write_log_record
+from backend.graph.schema import CAMPAIGN_OWNED_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -257,11 +258,18 @@ def delete_campaign(tx, slug: str) -> dict:
         "MATCH (s:Section {plane:$plane, campaign:$slug}) DETACH DELETE s RETURN count(s) AS n")
     run("entities",
         "MATCH (e:Entity {plane:$plane, campaign:$slug}) DETACH DELETE e RETURN count(e) AS n")
-    # THE CONVERSATIONS ABOUT IT, which are neither canon nor campaign
-    # material but are about a table that is being removed. Left behind they
-    # would restore a subgraph naming entities this delete has just taken.
-    run("session memory",
-        "MATCH (m:SessionMemory {campaign:$slug}) DETACH DELETE m RETURN count(m) AS n")
+    # EVERY APPARATUS LABEL THIS CAMPAIGN MINTED, iterated from the one
+    # registry rather than listed here. A stored conversation, a player's seat,
+    # an image, a map: none is canon or campaign MATERIAL, and all of them are
+    # about a table that is being removed. Left behind, a `:SessionMemory`
+    # would restore a subgraph naming entities this delete just took, and an
+    # `:Asset` would leave a portrait of somebody who no longer exists.
+    #
+    # The registry is shared with the test that asserts the sweep covers it, so
+    # adding a label without adding its delete fails rather than accumulating.
+    for label in CAMPAIGN_OWNED_LABELS:
+        run(label, f"MATCH (n:{label} {{campaign:$slug}}) DETACH DELETE n "
+                   "RETURN count(n) AS n")
     # AFTER the entities, since an alias is orphaned by their going and the
     # `:Alias` node is shared -- it goes only when nothing answers to it.
     run("aliases",
