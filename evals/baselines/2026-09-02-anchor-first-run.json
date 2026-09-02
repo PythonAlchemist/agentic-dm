@@ -1,0 +1,20 @@
+{
+ "cases": 10,
+ "elsewhere": 2,
+ "hits": 4,
+ "label": "first run of the anchor cases, which had no runner",
+ "outcomes": {
+  "a01": "hit",
+  "a02": "hit",
+  "a03": "hit",
+  "a04": "near",
+  "a05": "near",
+  "a06": "near",
+  "a07": "near",
+  "a08": "hit",
+  "a09": "elsewhere",
+  "a10": "elsewhere"
+ },
+ "rate": 0.4,
+ "right_chapter_wrong_beat": 4
+}
