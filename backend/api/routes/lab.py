@@ -217,6 +217,8 @@ async def chat(request: ChatRequest) -> dict:
         logger.exception("lab chat failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    _save_memory(agent, request.session_id, request.book, request.campaign)
+
     return {
         "message": result.message,
         "sources": result.sources,
@@ -353,6 +355,18 @@ async def find_elements(request: FindElementsRequest) -> dict:
 def reset(session_id: str = "lab") -> dict:
     """Drop a session's history. The knobs are per-request, so nothing else."""
     _SESSIONS.pop(session_id, None)
+    # AND THE STORED COPY. Dropping only the live agent would leave a reset
+    # session restoring its old subgraph on the next question -- a Reset button
+    # that does not reset.
+    from backend.campaign import memory
+    from backend.core.database import neo4j_session
+
+    try:
+        with neo4j_session() as session:
+            session.execute_write(
+                lambda tx: memory.forget(tx, session_id=session_id))
+    except Exception:  # noqa: BLE001
+        logger.exception("could not forget session memory for %s", session_id)
     return {"ok": True, "session_id": session_id}
 
 
@@ -455,4 +469,67 @@ def _agent_for(
     if existing is not None and same_book:
         rebuilt.conversation = existing.conversation
         rebuilt.subgraph = existing.subgraph
+    elif existing is None:
+        # NOTHING IN THIS PROCESS KNOWS THIS SESSION, which is the case a
+        # restart, a deploy and an LRU eviction all look like. The subgraph IS
+        # the conversation's memory -- `_trim` bounds the transcript and leans
+        # on it -- so without this every deploy was amnesia mid-campaign.
+        #
+        # ONLY WHEN THERE IS NO LIVE AGENT. A rebuild for a changed knob
+        # already carries the subgraph across in the branch above, and reading
+        # a stored one over it would put an older working set in front of the
+        # DM than the one they have been talking to.
+        _restore_memory(rebuilt, session_id, book, campaign)
     return _remember(session_id, rebuilt)
+
+
+def _save_memory(agent: DMAgent, session_id: str, book: str,
+                 campaign: str | None) -> None:
+    """Write what the turn left the conversation knowing.
+
+    AFTER THE ANSWER, NEVER BEFORE IT. The DM has already paid for this reply;
+    a memory store that is down must not turn a successful turn into a 500, so
+    the failure is logged and the session goes on working exactly as it did
+    before any of this existed -- in memory, until the process ends.
+    """
+    from datetime import UTC, datetime
+
+    from backend.campaign import memory
+    from backend.core.database import neo4j_session
+
+    try:
+        with neo4j_session() as session:
+            session.execute_write(lambda tx: memory.save(
+                tx, session_id=session_id, book=book, campaign=campaign,
+                snapshot=agent.subgraph.snapshot(),
+                updated_at=datetime.now(UTC).isoformat(),
+            ))
+    except Exception:  # noqa: BLE001 -- an answer already given is not worth a 500
+        logger.exception("could not save session memory for %s", session_id)
+
+
+def _restore_memory(agent: DMAgent, session_id: str, book: str,
+                    campaign: str | None) -> None:
+    """Give a fresh agent whatever the last process knew, if anything.
+
+    NEVER FAILS A QUESTION. A DM asking something should not meet a 500 because
+    the memory store is unreachable; they get the fresh session they would have
+    had anyway, and the failure is logged rather than raised.
+    """
+    from backend.agents.subgraph import Subgraph
+    from backend.campaign import memory
+    from backend.core.database import read_only_session
+
+    try:
+        with read_only_session() as session:
+            payload = session.execute_read(
+                lambda tx: memory.load(
+                    tx, session_id=session_id, book=book, campaign=campaign)
+            )
+    except Exception:  # noqa: BLE001 -- a restored thread is not worth a 500
+        logger.exception("could not restore session memory for %s", session_id)
+        return
+    if payload:
+        agent.subgraph = Subgraph.restore(payload)
+        logger.info("restored session %s: %d nodes", session_id,
+                    len(agent.subgraph.nodes))

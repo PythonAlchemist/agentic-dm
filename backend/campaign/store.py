@@ -249,6 +249,11 @@ def delete_campaign(tx, slug: str) -> dict:
         "MATCH (s:Section {plane:$plane, campaign:$slug}) DETACH DELETE s RETURN count(s) AS n")
     run("entities",
         "MATCH (e:Entity {plane:$plane, campaign:$slug}) DETACH DELETE e RETURN count(e) AS n")
+    # THE CONVERSATIONS ABOUT IT, which are neither canon nor campaign
+    # material but are about a table that is being removed. Left behind they
+    # would restore a subgraph naming entities this delete has just taken.
+    run("session memory",
+        "MATCH (m:SessionMemory {campaign:$slug}) DETACH DELETE m RETURN count(m) AS n")
     # AFTER the entities, since an alias is orphaned by their going and the
     # `:Alias` node is shared -- it goes only when nothing answers to it.
     run("aliases",

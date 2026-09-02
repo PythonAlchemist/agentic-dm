@@ -323,6 +323,72 @@ class Subgraph:
             "turn": self.turn,
         }
 
+    # -- what survives a restart -------------------------------------------
+
+    def snapshot(self) -> dict:
+        """The whole state, round-trippable. NOT `as_dict`.
+
+        `as_dict` is a VIEW, for the panel a DM watches: it reports `passages`
+        as a count, because a reader wants to know how much has been read and
+        not which ids. Restoring from it would silently drop the read-passage
+        set and the conversation would re-fetch prose it had already seen.
+
+        Two methods rather than one because they answer different questions,
+        and the failure of merging them is asymmetric: a view that carries too
+        much is noise, a restore that carries too little is amnesia wearing the
+        face of a working session.
+        """
+        return {
+            "nodes": [
+                {"id": h.id, "name": h.name, "labels": list(h.labels),
+                 "how": h.how, "turn": h.turn}
+                for h in self.nodes.values()
+            ],
+            "edges": [
+                {"source": e.source, "rel_type": e.rel_type, "target": e.target,
+                 "status": e.status, "how": e.how, "turn": e.turn}
+                for e in self.edges.values()
+            ],
+            "passages": dict(self.passages),
+            "turn": self.turn,
+        }
+
+    @classmethod
+    def restore(cls, payload: dict | None) -> "Subgraph":
+        """A subgraph from a `snapshot`, or an empty one.
+
+        TOLERANT OF A PARTIAL PAYLOAD, deliberately. This reads state written by
+        an older build, and a restore that raised on a missing key would turn a
+        schema addition into every reader losing their thread. A field that is
+        not there takes its default; the conversation continues one field
+        poorer rather than not at all.
+        """
+        found = cls()
+        if not payload:
+            return found
+        for node in payload.get("nodes") or ():
+            if not node.get("id"):
+                continue
+            found.nodes[node["id"]] = Held(
+                id=node["id"], name=node.get("name", ""),
+                labels=tuple(node.get("labels") or ()),
+                how=node.get("how", SEEDED), turn=int(node.get("turn", 0)),
+            )
+        for edge in payload.get("edges") or ():
+            if not (edge.get("source") and edge.get("target")):
+                continue
+            held = HeldEdge(
+                source=edge["source"], rel_type=edge.get("rel_type", ""),
+                target=edge["target"], status=edge.get("status", ""),
+                how=edge.get("how", SEEDED), turn=int(edge.get("turn", 0)),
+            )
+            found.edges[held.key] = held
+        found.passages = {
+            k: int(v) for k, v in (payload.get("passages") or {}).items()
+        }
+        found.turn = int(payload.get("turn", 0))
+        return found
+
     # -- what the model sees -----------------------------------------------
 
     def render(self, include_proposed: bool = True) -> str:
