@@ -817,7 +817,43 @@ export interface HeldBefore {
   until_session: string | null
 }
 
+export interface Sitting {
+  id: string
+  on: string
+  note: string
+  yes: string[]
+  no: string[]
+  maybe: string[]
+  seated: number
+  /** Counted apart from `no`, always. Silence is not a refusal. */
+  unanswered: number
+}
+
 export const tableAPI = {
+  sittings(campaign: string): Promise<{ sittings: Sitting[] }> {
+    return getJSON(`/table/sittings?${query({ campaign })}`)
+  },
+
+  propose(campaign: string, on: string, note = '') {
+    return postTo<{ id: string; on: string }>('/table/sitting', {
+      campaign, on, note,
+    })
+  },
+
+  withdraw(campaign: string, sitting: string) {
+    return send(`${API_BASE}/table/sitting?${query({ campaign, sitting })}`, {
+      method: 'DELETE',
+    })
+  },
+
+  /** Note what this does NOT take: who is answering. The server reads that
+   *  from the seat, so nobody can answer on somebody else's behalf. */
+  answerSitting(campaign: string, sitting: string, answer: 'yes' | 'no' | 'maybe') {
+    return postTo<{ answer: string }>('/table/sitting/answer', {
+      campaign, sitting, answer,
+    })
+  },
+
   /** `hb:<campaign>:the-party` -- an entity like any other, which is why
    *  there is no separate party-inventory call. */
   partyId(campaign: string): string {

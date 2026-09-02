@@ -235,7 +235,9 @@ ARTIFACT_LABEL = "Artifact"
 #: NAMED SO PLANE-SCOPED READS EXCLUDE THEM KNOWINGLY. A query that means "every
 #: entity the book asserts" and gets an image node back has been surprised; a
 #: query that names this set has decided.
-APPARATUS_LABELS = frozenset({"SessionMemory", "Player", "Session", "Asset", "Map"})
+APPARATUS_LABELS = frozenset(
+    {"SessionMemory", "Player", "Session", "Asset", "Map", "Sitting"}
+)
 
 #: EVERY LABEL A CAMPAIGN MINTS, and therefore every label `delete_campaign`
 #: must sweep.
@@ -253,6 +255,7 @@ CAMPAIGN_OWNED_LABELS: tuple[str, ...] = (
     "Session",
     "Asset",
     "Map",
+    "Sitting",
 )
 
 #: SET WHEN NO SECTION OF THE BOOK NAMES AN ENTITY, and absent otherwise.

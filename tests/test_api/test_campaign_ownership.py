@@ -31,6 +31,19 @@ ROUTES: tuple[Path, ...] = (
 #: them would refuse a reader a preview of their own material.
 READ_ONLY_POSTS = frozenset({"plan_cluster_route", "draft_expansion"})
 
+#: Writes a PLAYER is supposed to be able to make to a table they do not own.
+#:
+#: THE OWNERSHIP GUARD IS THE WRONG TOOL HERE, not a rule being skipped.
+#: `guard` asks "is this your table"; answering a scheduling poll is precisely
+#: the thing a player does at somebody else's table, and requiring ownership
+#: would mean only the DM could ever reply to their own question.
+#:
+#: EACH ONE MUST NARROW ITS OWN WRITE INSTEAD. `answer_sitting` can set exactly
+#: one property on one edge, keyed to the reader the gate identified -- there
+#: is no `reader` field in its body to forge. An entry added here without that
+#: property is a hole, so the list stays short and every addition is argued.
+PLAYER_WRITES = frozenset({"answer_sitting"})
+
 
 def _handlers() -> list[ast.FunctionDef]:
     """Every route function in the module, with its HTTP verbs."""
@@ -64,7 +77,7 @@ class TestEveryWriteRouteIsGuarded:
         for node, verbs in _handlers():
             if not (verbs & {"post", "delete", "put", "patch"}):
                 continue
-            if node.name in READ_ONLY_POSTS:
+            if node.name in READ_ONLY_POSTS or node.name in PLAYER_WRITES:
                 continue
             calls = {
                 n.func.id for n in ast.walk(node)
@@ -74,11 +87,32 @@ class TestEveryWriteRouteIsGuarded:
                 missing.append(node.name)
         assert not missing, f"write routes with no ownership check: {missing}"
 
+    def test_a_player_write_takes_its_answerer_from_the_gate(self):
+        """The exemption is only sound while the route cannot be told who is
+        answering. A `reader` field in the body would make "somebody marked me
+        unavailable" a bug that looks exactly like a scheduling disagreement."""
+        source = Path("backend/api/routes/table.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in PLAYER_WRITES:
+                names = {
+                    n.attr for n in ast.walk(node) if isinstance(n, ast.Attribute)
+                }
+                assert "reader" not in names, (
+                    f"{node.name} reads a reader off the request body")
+                calls = {
+                    n.func.id for n in ast.walk(node)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                }
+                assert "_reader" in calls, (
+                    f"{node.name} does not take its answerer from the gate")
+
     def test_the_read_only_exemptions_still_exist(self):
         """A name left in the allowlist after the route is gone would silently
         exempt the next function that takes it."""
         names = {node.name for node, _ in _handlers()}
         assert READ_ONLY_POSTS <= names
+        assert PLAYER_WRITES <= names
 
 
 class TestTheRule:

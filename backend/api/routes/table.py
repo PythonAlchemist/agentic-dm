@@ -29,7 +29,14 @@ from pydantic import BaseModel
 
 from backend.api import auth
 from backend.api.routes.homebrew import guard
-from backend.campaign import assets, inventory, maps, roles, sessions
+from backend.campaign import (
+    assets,
+    inventory,
+    maps,
+    roles,
+    scheduling,
+    sessions,
+)
 from backend.core.config import settings
 from backend.core.database import neo4j_session, read_only_session
 
@@ -425,6 +432,94 @@ def reveal_pin(http: Request, request: RevealRequest) -> dict:
                 tx, slug=request.campaign, map_ref=request.map,
                 entity=request.entity, revealed=request.revealed,
                 as_name=request.as_name, at_session=request.at_session))}
+    except ValueError as bad:
+        raise HTTPException(status_code=404, detail=str(bad)) from bad
+
+
+# ----------------------------------------------------------- scheduling
+
+
+class SittingRequest(BaseModel):
+    campaign: str
+    on: str = ""
+    note: str = ""
+    sitting: str = ""
+    #: `yes`, `no` or `maybe`. Note what is NOT here: who is answering.
+    answer: str = ""
+    session: str = ""
+
+
+@router.get("/sittings")
+def read_sittings(campaign: str) -> dict:
+    """Every proposed evening, with who said what -- and how many never said.
+
+    SILENCE COMES BACK AS ITS OWN NUMBER. "Two said no" and "two have not
+    answered" lead to opposite decisions, and a single availability count
+    collapses them.
+    """
+    with read_only_session() as session:
+        return {"sittings": scheduling.sittings(session, slug=campaign)}
+
+
+@router.post("/sitting")
+def propose_sitting(http: Request, request: SittingRequest) -> dict:
+    guard(http, request.campaign)
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(lambda tx: scheduling.propose(
+                tx, slug=request.campaign, on=request.on, note=request.note))
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad)) from bad
+
+
+@router.delete("/sitting")
+def withdraw_sitting(http: Request, campaign: str, sitting: str) -> dict:
+    guard(http, campaign)
+    with neo4j_session() as session:
+        return {"withdrawn": session.execute_write(
+            lambda tx: scheduling.withdraw(tx, slug=campaign, sitting=sitting))}
+
+
+@router.post("/sitting/answer")
+def answer_sitting(http: Request, request: SittingRequest) -> dict:
+    """Say whether you can make it.
+
+    THE ANSWERER COMES FROM THE SEAT, NOT THE BODY. There is no `reader` field
+    to fill in, for the same reason the map takes no `asDM` flag: a field a
+    client fills in is a field a client can fill in wrongly, and "somebody
+    marked me unavailable" is a bug that looks exactly like a scheduling
+    disagreement.
+
+    NO `guard` HERE, DELIBERATELY, and it is the one write on this router that
+    does not take one -- answering is what a PLAYER is for, and requiring
+    ownership would mean only the DM could ever reply. What stops a player
+    writing anything else is that this route can only ever set one property on
+    one edge, keyed to the reader the gate identified.
+    """
+    reader = _reader(http)
+    if not reader:
+        raise HTTPException(
+            status_code=401,
+            detail="an answer needs somebody to have given it, and this "
+                   "deployment has not identified you")
+    try:
+        with neo4j_session() as session:
+            return {"answer": session.execute_write(lambda tx: scheduling.answer(
+                tx, slug=request.campaign, sitting=request.sitting,
+                reader=reader, says=request.answer))}
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad)) from bad
+
+
+@router.post("/sitting/held")
+def hold_session_on(http: Request, request: SittingRequest) -> dict:
+    """Record that this session was the one played on that evening."""
+    guard(http, request.campaign)
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(lambda tx: scheduling.hold_on(
+                tx, slug=request.campaign, session=request.session,
+                sitting=request.sitting))
     except ValueError as bad:
         raise HTTPException(status_code=404, detail=str(bad)) from bad
 

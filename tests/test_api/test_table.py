@@ -369,3 +369,41 @@ class TestInventory:
         got = client.post("/api/table/inventory/give", json={
             "campaign": SLUG, "item": f"{PREFIX}:missing", "holder": NPC})
         assert got.status_code == 404
+
+
+class TestScheduling:
+    def _sitting(self) -> str:
+        return client.post("/api/table/sitting", json={
+            "campaign": SLUG, "on": "2026-09-14"}).json()["id"]
+
+    def test_an_evening_goes_on_the_table(self, table):
+        assert self._sitting().endswith("sitting-2026-09-14")
+
+    def test_silence_comes_back_as_its_own_number(self, table):
+        """"Two said no" and "two have not answered" lead to opposite
+        decisions."""
+        client.post("/api/table/seat", json={
+            "campaign": SLUG, "reader": "ana", "role": "player"})
+        self._sitting()
+        found = client.get("/api/table/sittings",
+                           params={"campaign": SLUG}).json()["sittings"][0]
+        assert found["unanswered"] == 1 and found["no"] == []
+
+    def test_an_unidentified_reader_cannot_answer_for_anybody(self, table):
+        """The open deployment identifies nobody, and "everyone is free" is not
+        a safe thing to guess."""
+        got = client.post("/api/table/sitting/answer", json={
+            "campaign": SLUG, "sitting": self._sitting(), "answer": "yes"})
+        assert got.status_code == 401
+
+    def test_withdrawing_removes_it(self, table):
+        got = client.request("DELETE", "/api/table/sitting", params={
+            "campaign": SLUG, "sitting": self._sitting()})
+        assert got.json()["withdrawn"] == 1
+
+    def test_a_session_can_be_pinned_to_an_evening(self, table):
+        session = client.post("/api/table/session",
+                              json={"campaign": SLUG}).json()["id"]
+        got = client.post("/api/table/sitting/held", json={
+            "campaign": SLUG, "session": session, "sitting": self._sitting()})
+        assert got.json()["held_on"] == "2026-09-14"

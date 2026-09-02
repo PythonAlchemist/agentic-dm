@@ -5,7 +5,14 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
-import { labAPI, type CampaignElement, type OrderRow } from '@/lib/api'
+import { Sittings } from '@/components/product/Sittings'
+import {
+  labAPI,
+  tableAPI,
+  type CampaignElement,
+  type OrderRow,
+  type Whoami,
+} from '@/lib/api'
 import { SOURCE } from '@/lib/palette'
 
 /**
@@ -21,10 +28,12 @@ export default function CampaignHome() {
 
   const [order, setOrder] = useState<OrderRow[]>([])
   const [cast, setCast] = useState<CampaignElement[]>([])
+  const [who, setWho] = useState<Whoami | null>(null)
 
   useEffect(() => {
     labAPI.runningOrder(campaign).then((r) => setOrder(r.sections)).catch(() => undefined)
     labAPI.elements(campaign).then((r) => setCast(r.elements)).catch(() => undefined)
+    tableAPI.whoami(campaign).then(setWho).catch(() => undefined)
   }, [campaign])
 
   const yours = order.filter((row) => row.origin === 'campaign')
@@ -94,6 +103,10 @@ export default function CampaignHome() {
           <p className="mt-4 text-[11px] text-neutral-700">
             {yours.length} of {order.length} scenes are yours
           </p>
+
+          <div className="mt-8">
+            <Sittings campaign={campaign} who={who} />
+          </div>
         </aside>
       </div>
     </Shell>
