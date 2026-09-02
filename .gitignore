@@ -45,3 +45,7 @@ htmlcov/
 
 # Playwright MCP scratch (snapshots, console logs)
 .playwright-mcp/
+
+# Next.js writes a trace directory wherever it is invoked from, which is
+# sometimes the repo root rather than `web/`.
+.next/

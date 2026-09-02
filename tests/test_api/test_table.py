@@ -32,13 +32,20 @@ def table():
                   {"c": SLUG}).consume()
             s.run("MATCH (n) WHERE n.id STARTS WITH $p DETACH DELETE n",
                   {"p": PREFIX}).consume()
+            s.run("MATCH (b:Book {slug:$p}) DETACH DELETE b",
+                  {"p": PREFIX}).consume()
 
         clean(session)
+        # A TABLE DRAWS ON A BOOK, which is what scopes every search: the
+        # entity ids below carry the book's prefix, exactly as a real harvest
+        # writes them.
         session.run(
-            "CREATE (:Campaign {slug:$slug, name:'Table', campaign:$slug}) "
+            "CREATE (b:Book {slug:$book, id:$book}) "
+            "CREATE (c:Campaign {slug:$slug, name:'Table', campaign:$slug}) "
+            "CREATE (c)-[:DRAWS_ON]->(b) "
             "CREATE (:Entity:LOCATION {id:$p, plane:'canon', name:'Barovia'}) "
             "CREATE (:Entity:NPC {id:$n, plane:'canon', name:'Strahd'})",
-            {"slug": SLUG, "p": PLACE, "n": NPC},
+            {"slug": SLUG, "book": PREFIX, "p": PLACE, "n": NPC},
         ).consume()
         yield session
         clean(session)
@@ -228,3 +235,36 @@ class TestPictures:
         found = client.get("/api/table/portraits", params={
             "entity_id": NPC, "campaign": SLUG}).json()["portraits"]
         assert [p["caption"] for p in found] == [assets.CAPTION[assets.UPLOADED]]
+
+
+class TestSearch:
+    """A name belongs to the adventure that says it."""
+
+    def test_it_finds_by_name(self, table):
+        found = client.get("/api/table/search", params={
+            "campaign": SLUG, "q": "stra"}).json()["found"]
+        assert [f["name"] for f in found] == ["Strahd"]
+
+    def test_a_prefix_match_comes_first(self, table):
+        table.run(
+            "CREATE (:Entity:NPC {id:$i, plane:'canon', name:'Ismark Straw'})",
+            {"i": f"{PREFIX}:ismark"}).consume()
+        found = client.get("/api/table/search", params={
+            "campaign": SLUG, "q": "stra"}).json()["found"]
+        assert found[0]["name"] == "Strahd"
+
+    def test_it_can_be_narrowed_to_a_kind(self, table):
+        """Pinning wants places; portraying wants people."""
+        found = client.get("/api/table/search", params={
+            "campaign": SLUG, "q": "a", "label": "LOCATION"}).json()["found"]
+        assert [f["name"] for f in found] == ["Barovia"]
+
+    def test_an_empty_query_returns_nothing_rather_than_everything(self, table):
+        found = client.get("/api/table/search", params={
+            "campaign": SLUG, "q": "  "}).json()["found"]
+        assert found == []
+
+    def test_the_cap_cannot_be_lifted(self, table):
+        got = client.get("/api/table/search", params={
+            "campaign": SLUG, "q": "a", "limit": 5000})
+        assert got.status_code == 200 and len(got.json()["found"]) <= 50

@@ -3,6 +3,7 @@
 import Link from 'next/link'
 
 import type { EntityRead } from '@/lib/api'
+import { Portraits } from '@/components/product/Portraits'
 import { SOURCE } from '@/lib/palette'
 
 /**
@@ -48,7 +49,12 @@ export function EntityProfile({
   return (
     <article className={compact ? '' : 'mx-auto max-w-3xl px-6 py-10'}>
       <header className="flex gap-4">
-        <Portrait entity={entity} compact={compact} />
+        <Portraits
+          entityId={entity.entity_id}
+          campaign={campaign}
+          labels={entity.labels}
+          compact={compact}
+        />
 
         <div className="min-w-0 flex-1">
           <h1
@@ -204,35 +210,5 @@ export function EntityProfile({
         </Link>
       )}
     </article>
-  )
-}
-
-/**
- * The portrait slot, which is empty for almost everything and will be for a
- * long time.
- *
- * DELIBERATELY UNREMARKABLE WHEN EMPTY. A slot that nags -- a dashed box, a
- * "generate" button on every entity -- makes invention ambient, which is the
- * drift the whole colour rule was written to stop. A kind mark, and the actions
- * live on the profile only, never on the popout.
- */
-function Portrait({ entity, compact }: { entity: EntityRead; compact: boolean }) {
-  const size = compact ? 'h-14 w-14' : 'h-24 w-24'
-  const mark = entity.labels.includes('NPC')
-    ? '☙'
-    : entity.labels.includes('LOCATION')
-      ? '⌂'
-      : entity.labels.includes('ITEM')
-        ? '◇'
-        : entity.labels.includes('MONSTER')
-          ? '✦'
-          : '·'
-  return (
-    <div
-      className={`${size} flex shrink-0 items-center justify-center rounded border border-neutral-800 bg-neutral-900/60 text-2xl text-neutral-700`}
-      aria-hidden
-    >
-      {mark}
-    </div>
   )
 }

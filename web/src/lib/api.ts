@@ -700,3 +700,220 @@ export const labAPI = {
     })
   },
 }
+
+/**
+ * The table's own API: who sits at it, what it played, and what it may see.
+ *
+ * A SEPARATE OBJECT FROM `labAPI`, because it is a separate audience. The lab
+ * is one person's research console and every one of its calls assumes the
+ * reader is the DM. These are read by players, and the difference has to be
+ * visible in the code and not only in the routes.
+ *
+ * NOTHING HERE ASKS FOR A VIEW. There is no `asDM` parameter to pass, because
+ * the server derives the audience from the seat -- see `_for_player` in
+ * `backend/api/routes/table.py`. `preview` is the exception that proves it:
+ * it can only ever narrow a DM to what the table sees.
+ */
+
+export interface Seat {
+  reader: string
+  role: 'dm' | 'player'
+}
+
+export interface Whoami {
+  reader: string
+  role: string
+  identified: boolean
+}
+
+export interface SessionRow {
+  id: string
+  number: number
+  title: string
+  status: string
+  held_on: string
+  planned: number
+  covered: number
+}
+
+export interface Scene {
+  id: string
+  heading: string
+}
+
+export interface SessionDiff {
+  planned: Scene[]
+  covered: Scene[]
+  /** Meant and not reached. */
+  missed: Scene[]
+  /** Reached and never planned -- where a campaign actually leaves the book. */
+  unplanned: Scene[]
+}
+
+export interface MapRow {
+  id: string
+  name: string
+  place_id: string
+  place: string
+  asset_id: string
+  origin: string
+}
+
+export interface Pin {
+  entity_id: string
+  /** What THIS reader may call it. A player sees the alias when the DM set
+   *  one, and the true name is not in the payload at all. */
+  name: string
+  labels: string[]
+  x: number
+  y: number
+  /** DM view only. */
+  plane?: string
+  note?: string
+  revealed?: boolean
+  as_name?: string
+}
+
+export interface Portrait {
+  id: string
+  origin: string
+  media_type: string
+  primary: boolean
+  /** "the book's art", "yours", "imagined" -- written beside the property
+   *  that decides it so the two cannot drift. */
+  caption: string
+}
+
+function query(params: Record<string, string | boolean | undefined>): string {
+  const pairs = Object.entries(params).filter(([, v]) => v !== undefined && v !== '')
+  return pairs.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
+}
+
+export interface Found {
+  entity_id: string
+  name: string
+  plane: string
+  labels: string[]
+  named_by_book: boolean
+}
+
+export const tableAPI = {
+  /** Something to pin, portray, or open. Scoped to the books this table drew
+   *  on plus what it wrote -- a name belongs to the adventure that says it. */
+  search(campaign: string, q: string, label = ''): Promise<{ found: Found[] }> {
+    return getJSON(`/table/search?${query({ campaign, q, label })}`)
+  },
+
+  /** The URL of an asset's bytes. Content-addressed, so it never means
+   *  different pixels later. */
+  assetURL(assetId: string): string {
+    return `${API_BASE}/table/asset/${encodeURIComponent(assetId)}`
+  },
+
+  whoami(campaign: string): Promise<Whoami> {
+    return getJSON(`/table/me?${query({ campaign })}`)
+  },
+
+  seats(campaign: string): Promise<{ seats: Seat[] }> {
+    return getJSON(`/table/seats?${query({ campaign })}`)
+  },
+
+  seat(campaign: string, reader: string, role: string) {
+    return postTo<Seat>('/table/seat', { campaign, reader, role })
+  },
+
+  unseat(campaign: string, reader: string) {
+    return send(`${API_BASE}/table/seat?${query({ campaign, reader })}`, {
+      method: 'DELETE',
+    })
+  },
+
+  sessions(campaign: string): Promise<{ sessions: SessionRow[] }> {
+    return getJSON(`/table/sessions?${query({ campaign })}`)
+  },
+
+  openSession(campaign: string, title = '', heldOn = '') {
+    return postTo<SessionRow>('/table/session', {
+      campaign, title, held_on: heldOn,
+    })
+  },
+
+  plan(campaign: string, session: string, section: string) {
+    return postTo<{ planned: number }>('/table/session/plan', {
+      campaign, session, section,
+    })
+  },
+
+  cover(campaign: string, session: string, section: string) {
+    return postTo<{ covered: number }>('/table/session/cover', {
+      campaign, session, section,
+    })
+  },
+
+  diff(campaign: string, sessionId: string): Promise<SessionDiff> {
+    return getJSON(`/table/session/diff?${query({ campaign, session_id: sessionId })}`)
+  },
+
+  maps(campaign: string): Promise<{ maps: MapRow[] }> {
+    return getJSON(`/table/maps?${query({ campaign })}`)
+  },
+
+  createMap(campaign: string, name: string, place: string, asset: string) {
+    return postTo<{ id: string; name: string }>('/table/map', {
+      campaign, name, place, asset,
+    })
+  },
+
+  /** `preview` asks for the player's view of a map you run. It cannot ask for
+   *  the other direction. */
+  pins(campaign: string, mapId: string, preview = false): Promise<{
+    pins: Pin[]
+    as_player: boolean
+  }> {
+    return getJSON(`/table/map/pins?${query({ campaign, map_id: mapId, preview })}`)
+  },
+
+  pin(campaign: string, map: string, entity: string, x: number, y: number) {
+    return postTo<Pin>('/table/map/pin', { campaign, map, entity, x, y })
+  },
+
+  unpin(campaign: string, mapId: string, entity: string) {
+    return send(
+      `${API_BASE}/table/map/pin?${query({ campaign, map_id: mapId, entity })}`,
+      { method: 'DELETE' },
+    )
+  },
+
+  reveal(campaign: string, map: string, entity: string, revealed: boolean, asName = '') {
+    return postTo<{ revealed: boolean }>('/table/map/reveal', {
+      campaign, map, entity, revealed, as_name: asName,
+    })
+  },
+
+  portraits(entityId: string, campaign: string): Promise<{ portraits: Portrait[] }> {
+    return getJSON(`/table/portraits?${query({ entity_id: entityId, campaign })}`)
+  },
+
+  /** Send the bytes. The route cannot record them as anything but yours. */
+  async upload(campaign: string, file: File): Promise<Portrait> {
+    const form = new FormData()
+    form.append('file', file)
+    // NO `Content-Type` HEADER. `fetch` sets it with the multipart boundary,
+    // and setting it by hand produces a body the server cannot parse.
+    const response = await send(
+      `${API_BASE}/table/asset/upload?${query({ campaign })}`,
+      { method: 'POST', body: form },
+    )
+    if (!response.ok) {
+      throw new Error(readableDetail(await response.json().catch(() => null))
+        || `upload failed: ${response.status}`)
+    }
+    return response.json()
+  },
+
+  portray(campaign: string, entity: string, asset: string) {
+    return postTo<{ portrayed: number }>('/table/portray', {
+      campaign, entity, asset,
+    })
+  },
+}

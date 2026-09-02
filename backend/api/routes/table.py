@@ -209,6 +209,58 @@ def session_diff(campaign: str, session_id: str) -> dict:
         return sessions.diff(session, slug=campaign, session=session_id)
 
 
+# --------------------------------------------------------------- lookup
+
+#: Entities a table may reach: the books it draws on, plus what it wrote.
+#:
+#: SCOPED BY BOOK, BECAUSE A NAME BELONGS TO THE ADVENTURE THAT SAYS IT. The
+#: mention scan once read every book's entities against one book's prose and
+#: produced 332 cross-book mentions; a search that offered a DM running one
+#: adventure the cast of another would be the same mistake with a person in the
+#: loop instead of a script. `DRAWS_ON` is already the record of which books a
+#: table set out with.
+#:
+#: PREFIX MATCHES RANK ABOVE CONTAINED ONES. Somebody typing "bar" wants
+#: Barovia before they want "Blood of the Vine Tavern", and a search that makes
+#: a DM read the whole list mid-session is a search they stop using.
+SEARCH = """
+MATCH (c:Campaign {slug:$slug})
+OPTIONAL MATCH (c)-[:DRAWS_ON]->(b:Book)
+WITH collect(b.slug + ':') AS prefixes
+MATCH (e:Entity)
+WHERE toLower(e.name) CONTAINS toLower($q)
+  AND (e.campaign = $slug
+       OR any(p IN prefixes WHERE e.id STARTS WITH p))
+  AND ($label = '' OR $label IN labels(e))
+RETURN e.id AS entity_id, e.name AS name, e.plane AS plane,
+       [l IN labels(e) WHERE l <> 'Entity'] AS labels,
+       coalesce(e.named_by_book, true) AS named_by_book
+ORDER BY CASE WHEN toLower(e.name) STARTS WITH toLower($q) THEN 0 ELSE 1 END,
+         size(e.name), e.name
+LIMIT $limit
+"""
+
+
+@router.get("/search")
+def search_entities(campaign: str, q: str, label: str = "",
+                    limit: int = 20) -> dict:
+    """Find something to pin, to portray, or to open.
+
+    A ROW CAP THE CALLER CANNOT LIFT PAST 50. This is the shape every read the
+    model can reach already has, and it is worth keeping on a read a person
+    reaches too: a search box that can ask for the whole graph is a search box
+    that will, on the evening the graph is largest.
+    """
+    if not q.strip():
+        return {"found": []}
+    with read_only_session() as session:
+        rows = session.run(SEARCH, {
+            "slug": campaign, "q": q.strip(), "label": label,
+            "limit": max(1, min(int(limit), 50)),
+        })
+        return {"found": [dict(r) for r in rows]}
+
+
 # ----------------------------------------------------------------- maps
 
 
