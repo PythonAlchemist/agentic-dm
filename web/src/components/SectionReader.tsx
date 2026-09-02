@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type { EntityRead, SectionRead } from '@/lib/api'
+import { SOURCE } from '@/lib/palette'
 import { labAPI } from '@/lib/api'
 import { PaneHeader } from './ui'
 
@@ -598,7 +599,11 @@ function EntityCard({
           </>
         ) : unnamed ? (
           <>
-            <span className="text-sky-400/80">Not named in the book.</span>{' '}
+            {/* INVENTED, per `palette.SOURCE`: the model supplied this name and
+                nothing stands behind it. It borrowed `sky`, which names the
+                TABLE -- something said in conversation -- and no one said
+                these. */}
+            <span className={SOURCE.invented}>Not named in the book.</span>{' '}
             {entity.labels.join(' · ').toLowerCase() || 'from extraction'}
           </>
         ) : (
@@ -611,7 +616,7 @@ function EntityCard({
       </p>
 
       {unnamed && (
-        <p className="mt-2 rounded border border-sky-900/60 bg-sky-950/30 p-2 text-xs text-sky-200/70">
+        <p className="mt-2 rounded border border-rose-900/60 bg-rose-950/30 p-2 text-xs text-rose-200/70">
           No section of the book says this name. It was derived when the book
           was read, so what it connects to may well be right — but do not quote
           it as the book&apos;s wording at the table.

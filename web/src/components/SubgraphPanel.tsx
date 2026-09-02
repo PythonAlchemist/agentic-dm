@@ -3,7 +3,15 @@
 import { useMemo, useState } from 'react'
 import type { SubgraphView } from '@/lib/api'
 import { SubgraphGraph } from './SubgraphGraph'
-import { HOW_COLOUR, HOW_LABEL, NOT_HELD } from './subgraph-legend'
+import { SOURCE } from '@/lib/palette'
+
+import {
+  HOW_COLOUR,
+  HOW_GLYPH,
+  HOW_LABEL,
+  NOT_HELD,
+  NOT_HELD_GLYPH,
+} from './subgraph-legend'
 import { Explain } from './ui'
 
 /**
@@ -196,7 +204,12 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
               <div key={n.id}>
                 <div className="flex items-baseline gap-2">
                   <Explain text={HOW_LABEL[n.how] ?? n.how}>
-                    <span style={{ color: HOW_COLOUR[n.how] ?? '#a3a3a3' }}>●</span>
+                    {/* THE SHAPE SAYS HOW IT ARRIVED, the brightness how
+                        strongly. The hues belong to `palette.SOURCE` and say
+                        where a sentence CAME FROM, which is a different axis. */}
+                    <span style={{ color: HOW_COLOUR[n.how] ?? '#a3a3a3' }}>
+                      {HOW_GLYPH[n.how] ?? NOT_HELD_GLYPH}
+                    </span>
                   </Explain>
                   <span className="font-medium text-neutral-200">{n.name}</span>
                   <span className="truncate text-neutral-600">{n.labels.join('/')}</span>
@@ -205,7 +218,13 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                       described either way. */}
                   {n.named_by_book === false && (
                     <Explain text="No section of the book names this. It came from the extraction — a common noun title-cased into a name, or a name written for something the book only describes — so there is no sentence to quote about it. What it connects to may still be right.">
-                      <span className="shrink-0 rounded border border-sky-900/70 px-1 text-[10px] text-sky-300/80">
+                      {/* INVENTED, which is what the palette calls a name the
+                          model supplied with nothing behind it. This borrowed
+                          `sky`, which names THE TABLE -- something said in
+                          conversation -- and these were never said by anyone. */}
+                      <span
+                        className={`shrink-0 rounded border border-rose-900/70 px-1 text-[10px] ${SOURCE.invented}`}
+                      >
                         unnamed
                       </span>
                     </Explain>
