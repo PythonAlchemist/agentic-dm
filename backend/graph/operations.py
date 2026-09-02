@@ -4,8 +4,42 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from backend.campaign.model import CAMPAIGN_PLANE
 from backend.core.database import neo4j_session
 from backend.graph.schema import GRAPH_SCHEMA, LAYER_MAP, EntityType, RelationshipType
+
+
+def _relationship_tokens(names) -> list[str]:
+    """Every name as a `RelationshipType` value, or raise.
+
+    Raises `ValueError` on anything this graph does not write, which the route
+    turns into a 400. It refuses the whole request rather than dropping the bad
+    half: a filter that quietly ignored an unknown type would answer a question
+    the caller did not ask.
+    """
+    tokens = [
+        RelationshipType(
+            n.value if isinstance(n, RelationshipType) else str(n).strip()
+        ).value
+        for n in names
+        if str(n).strip()
+    ]
+    if not tokens:
+        raise ValueError("no relationship types given")
+    return tokens
+
+
+def _hops(max_hops: int) -> int:
+    """A bounded integer, since this reaches the query as text.
+
+    Cypher cannot parameterise a variable-length bound. FastAPI already types
+    this `int`, which is what stops an injection through it; the CAP is here
+    because an unbounded traversal of a 13,000-node graph is its own outage.
+    """
+    hops = int(max_hops)
+    if not 1 <= hops <= 5:
+        raise ValueError(f"max_hops must be between 1 and 5, got {hops}")
+    return hops
 
 
 class CampaignGraphOps:
@@ -57,8 +91,14 @@ class CampaignGraphOps:
         # The resolver filters on `plane`; an unstamped node is invisible to it.
         # Default to campaign — canon is written by the seed loader, which passes
         # plane explicitly.
-        props = dict(properties or {})
-        props.setdefault("plane", "campaign")
+        # PINNED, NOT DEFAULTED. This was `setdefault`, so a caller sending
+        # `{"plane": "canon"}` won -- and `routes/campaign.py` hands the
+        # `properties` dict straight through from the request body. Any
+        # token-holder could mint a node on the book's own plane, which
+        # `lookup` then serves to the model and the reader as the book's. The
+        # canon plane is written by the seed loader and by nothing else.
+        props = {k: v for k, v in (properties or {}).items() if k != "plane"}
+        props["plane"] = CAMPAIGN_PLANE
         now = datetime.utcnow().isoformat()
 
         query = """
@@ -261,7 +301,18 @@ class CampaignGraphOps:
         )
         relationship_type = rel.value
 
-        props = dict(properties or {})
+        # THE SAME PIN, AND THE MORE IMPORTANT ONE. A forged NODE eventually
+        # trips `UNSUPPORTED_ENTITIES`, which fails on a canon entity no
+        # mention names. A forged EDGE trips nothing: `lookup.EDGES` filters on
+        # `r.plane` and `status <> 'rejected'`, so an edge stamped
+        # `{"plane": "canon", "status": "accepted"}` between two real book
+        # entities is served to a DM as the book's own derived fact, and no
+        # invariant in this repository looks for it.
+        props = {
+            k: v for k, v in (properties or {}).items()
+            if k not in ("plane", "status")
+        }
+        props["plane"] = CAMPAIGN_PLANE
         props["created_at"] = datetime.utcnow().isoformat()
         layer = LAYER_MAP[rel]
         if layer is not None:
@@ -308,11 +359,20 @@ class CampaignGraphOps:
         Returns:
             List of neighbor entities with relationship info
         """
+        hops = _hops(max_hops)
         if relationship_types:
-            rel_filter = "|".join(relationship_types)
+            # COERCED THROUGH THE ENUM, for the reason `create_relationship`
+            # gives twenty lines up and this path did not follow: a relationship
+            # type cannot be parameterised, so the enum is the only thing
+            # keeping an arbitrary caller string out of the query text.
+            # `relationship_types` arrives from a comma-split query parameter in
+            # `routes/campaign.py`, and every method here runs on the FULL-WRITE
+            # session -- so an uncoerced value closed the pattern and ran
+            # whatever the caller put after it.
+            rel_filter = "|".join(_relationship_tokens(relationship_types))
             query = f"""
             MATCH (start:Entity {{id: $id}})
-            MATCH path = (start)-[r:{rel_filter}*1..{max_hops}]-(neighbor:Entity)
+            MATCH path = (start)-[r:{rel_filter}*1..{hops}]-(neighbor:Entity)
             RETURN DISTINCT neighbor,
                    [rel in relationships(path) | type(rel)] as relationship_types,
                    length(path) as distance
@@ -321,7 +381,7 @@ class CampaignGraphOps:
         else:
             query = f"""
             MATCH (start:Entity {{id: $id}})
-            MATCH path = (start)-[*1..{max_hops}]-(neighbor:Entity)
+            MATCH path = (start)-[*1..{hops}]-(neighbor:Entity)
             RETURN DISTINCT neighbor,
                    [rel in relationships(path) | type(rel)] as relationship_types,
                    length(path) as distance

@@ -127,6 +127,12 @@ async def get_entity_neighbors(
             relationship_types=rel_types,
         )
         return {"entity_id": entity_id, "neighbors": neighbors}
+    except ValueError as e:
+        # A REFUSED FILTER IS THE CALLER'S FAULT, not the server's. These come
+        # from `_relationship_tokens`/`_hops`, which refuse anything that is
+        # not a type this graph writes or a hop count it will traverse -- the
+        # coercion that keeps caller text out of the query.
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
