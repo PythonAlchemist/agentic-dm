@@ -100,7 +100,7 @@ export default function Home() {
             <Link
               key={c.slug}
               href={`/c/${c.slug}`}
-              className="group flex items-baseline gap-3 rounded-md border border-line bg-surface/40 px-4 py-3 transition-colors hover:border-line hover:bg-surface"
+              className="group flex h-14 items-center gap-3 rounded-md bg-surface px-4 lit transition-colors hover:bg-overlay"
             >
               <span className="font-medium text-ink group-hover:text-ink">
                 {c.name}
@@ -122,7 +122,7 @@ export default function Home() {
             which was not true of the lab either. */}
         <div className="mt-6">
           {making ? (
-            <div className="flex flex-col gap-2 rounded-md border border-line bg-surface/40 p-4">
+            <div className="flex flex-col gap-2 rounded-md bg-surface p-4 lit">
               <input
                 autoFocus
                 value={name}
