@@ -14,7 +14,16 @@ import pytest
 
 from backend.campaign.ownership import may_write
 
-ROUTES = Path("backend/api/routes/homebrew.py")
+#: EVERY ROUTER THAT WRITES TO A TABLE, swept as one.
+#:
+#: This was a single path, and the sweep it powered was the reason ownership is
+#: enforced at all -- so a second router carrying seats, sessions, maps and
+#: pictures had to arrive in this tuple on the day it was written, not the day
+#: somebody remembered. That is the same argument the sweep makes about routes.
+ROUTES: tuple[Path, ...] = (
+    Path("backend/api/routes/homebrew.py"),
+    Path("backend/api/routes/table.py"),
+)
 
 #: Routes that POST and write NOTHING. `plan-cluster` is the dry run whose
 #: whole point is that it is pure -- the card calls it on every edit -- and
@@ -25,18 +34,19 @@ READ_ONLY_POSTS = frozenset({"plan_cluster_route", "draft_expansion"})
 
 def _handlers() -> list[ast.FunctionDef]:
     """Every route function in the module, with its HTTP verbs."""
-    tree = ast.parse(ROUTES.read_text(encoding="utf-8"))
     found = []
-    for node in tree.body:
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        verbs = {
-            d.func.attr
-            for d in node.decorator_list
-            if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
-        }
-        if verbs:
-            found.append((node, verbs))
+    for path in ROUTES:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            verbs = {
+                d.func.attr
+                for d in node.decorator_list
+                if isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+            }
+            if verbs:
+                found.append((node, verbs))
     return found
 
 

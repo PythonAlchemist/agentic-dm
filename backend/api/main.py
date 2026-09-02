@@ -23,6 +23,7 @@ from backend.api.routes import (
     npc_discord,
     players,
     shop,
+    table,
     transcript,
 )
 from backend.core.config import settings
@@ -163,6 +164,7 @@ app.include_router(shop.router, prefix="/api", tags=["Shop"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
 app.include_router(lab.router, prefix="/api/lab", tags=["Agent Lab"])
 app.include_router(homebrew.router, prefix="/api/homebrew", tags=["Homebrew"])
+app.include_router(table.router, prefix="/api/table", tags=["Table"])
 
 
 @app.get("/")
