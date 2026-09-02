@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { ClusterPlan, GeneratedReply, OrderRow } from '@/lib/api'
 import { labAPI } from '@/lib/api'
 import { ClusterReview } from './ClusterReview'
@@ -73,6 +73,21 @@ export function GenerationCard({
   const [failed, setFailed] = useState('')
   const [plan, setPlan] = useState<ClusterPlan | null>(null)
   const [clusterBody, setClusterBody] = useState<Record<string, unknown> | null>(null)
+
+  // STABLE ACROSS RENDERS, and the effect that calls it lists it as a
+  // dependency. As an inline arrow this was a new function every render, so:
+  // plan arrives -> setPlan/setClusterBody -> re-render -> new identity ->
+  // ClusterReview's effect sees changed deps -> plans again, for as long as the
+  // card is on screen. Each turn is a POST to `/homebrew/plan-cluster`.
+  // `ClusterReview` carries a comment memoising `card.elements` against this
+  // exact loop; the hole came back one prop over.
+  const onClusterPlanned = useCallback(
+    (next: ClusterPlan | null, body: Record<string, unknown>) => {
+      setPlan(next)
+      setClusterBody(body)
+    },
+    [],
+  )
   //: A cast asked for AFTER the draft was written, when the pass that runs at
   //  write time found nothing. Held beside the card rather than in it: the
   //  card is what the model returned and stays that.
@@ -294,10 +309,7 @@ export function GenerationCard({
           card={shown}
           campaign={campaign}
           anchor={anchor}
-          onPlan={(next, body) => {
-            setPlan(next)
-            setClusterBody(body)
-          }}
+          onPlan={onClusterPlanned}
         />
       )}
 
