@@ -834,6 +834,133 @@ def drop_item(http: Request, request: GiveRequest) -> dict:
 # --------------------------------------------------------------- images
 
 
+class ImagineRequest(BaseModel):
+    campaign: str
+    entity_id: str
+    note: str = ""
+
+
+class KeepRequest(BaseModel):
+    campaign: str
+    entity_id: str
+    prompt: str
+    generator: str
+    #: The bytes, base64, coming back from a draft the DM looked at.
+    image: str
+    primary: bool = True
+
+
+@router.post("/portrait/draft")
+async def imagine_portrait(http: Request, request: ImagineRequest) -> dict:
+    """Ask for a picture. STORES NOTHING.
+
+    THE CARD IS THE GATE, the rule `homebrew.py` opens with. A model proposes,
+    a person looks, one step applies -- so a draft is bytes handed back to the
+    browser, and nothing reaches the graph or the disk until the DM presses
+    keep. A route that stored first would fill the asset store with pictures
+    nobody chose, each one stamped `generated` and each one findable.
+
+    AND THE DRAFT IS NOT SERVER STATE, for the reason the generation flow gives:
+    a server-side draft dies on restart, and a store flow that depends on a
+    session surviving is a store flow that loses work.
+    """
+    guard(http, request.campaign)
+    import base64
+
+    from openai import AsyncOpenAI
+
+    from backend.campaign import imagining, reader as shaping
+
+    with read_only_session() as session:
+        row = session.run(
+            """
+            MATCH (e:Entity {id:$id})
+            OPTIONAL MATCH (e)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s:Section)
+            WHERE s.plane = 'canon' OR s.campaign = $campaign
+            RETURN e.name AS name, e.role AS role, labels(e) AS labels,
+                   collect({text: s.text, offsets: m.offsets})[0..3] AS said
+            """,
+            {"id": request.entity_id, "campaign": request.campaign}).single()
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail=f"no entity {request.entity_id!r}")
+
+    # THE BOOK'S OWN SENTENCES, quoted by the same code that quotes them to a
+    # reader. A second extractor here would drift from what the profile shows,
+    # and the prompt would stop matching the evidence beside it.
+    says: list[str] = []
+    for where in (row["said"] or []):
+        if where.get("text") and where.get("offsets"):
+            says += shaping.sentences_at(where["text"], where["offsets"], 1)
+
+    prompt = imagining.prompt_for(
+        name=row["name"] or request.entity_id,
+        labels=[l for l in (row["labels"] or []) if l != "Entity"],
+        role=row["role"] or "", says=says, note=request.note)
+
+    generator = settings.openai_image_model
+    try:
+        made = await AsyncOpenAI(api_key=settings.openai_api_key).images.generate(
+            model=generator, prompt=prompt, n=1, size="1024x1024")
+    except Exception as failed:  # noqa: BLE001 -- the provider's message is
+        # the useful half; swallowing it costs an afternoon, which is the
+        # ruling `post` in the frontend client already makes.
+        raise HTTPException(status_code=502, detail=str(failed)) from failed
+
+    payload = made.data[0]
+    image = getattr(payload, "b64_json", None)
+    if not image:
+        raise HTTPException(
+            status_code=502,
+            detail="the image model returned no bytes to look at")
+    base64.b64decode(image, validate=True)
+    return {"prompt": prompt, "generator": generator, "image": image}
+
+
+@router.post("/portrait/keep")
+def keep_portrait(http: Request, request: KeepRequest) -> dict:
+    """Store the draft the DM chose, stamped as imagined.
+
+    THE ROUTE CANNOT NAME THE ORIGIN, exactly as the upload route cannot. It
+    calls `store_generated`, which can only ever stamp `generated` and refuses
+    an asset that will not say what produced it.
+    """
+    guard(http, request.campaign)
+    import base64
+    import binascii
+
+    if not request.generator:
+        raise HTTPException(
+            status_code=400,
+            detail="a generated picture must say what generated it")
+    try:
+        payload = base64.b64decode(request.image, validate=True)
+    except (binascii.Error, ValueError) as bad:
+        raise HTTPException(status_code=400, detail="not an image") from bad
+    if not payload:
+        raise HTTPException(status_code=400, detail="an empty file is not a picture")
+    if len(payload) > MAX_UPLOAD:
+        raise HTTPException(
+            status_code=413,
+            detail=f"{len(payload)} bytes is past the {MAX_UPLOAD} limit")
+
+    sha = assets.digest(payload)
+    path = assets.path_for(Path(settings.asset_dir), sha, ".png")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_bytes(payload)
+
+    with neo4j_session() as session:
+        stored = session.execute_write(lambda tx: assets.store_generated(
+            tx, sha256=sha, media_type="image/png", campaign=request.campaign,
+            generator=request.generator, prompt=request.prompt,
+            created_at=now_iso()))
+        session.execute_write(lambda tx: assets.portray(
+            tx, entity=request.entity_id, asset=stored["id"],
+            campaign=request.campaign, primary=request.primary))
+    return stored
+
+
 class PortrayRequest(BaseModel):
     campaign: str
     entity: str

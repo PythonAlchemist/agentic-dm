@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    #: The model asked for a portrait. Separate from `openai_model` because it
+    #: is a different price and a different failure: a text model that is down
+    #: costs an answer, an image model that is down costs a picture nobody was
+    #: going to keep anyway.
+    openai_image_model: str = "gpt-image-1"
     openai_embedding_model: str = "text-embedding-3-small"
     openai_vision_model: str = "gpt-4o"
     embedding_dimensions: int = 1536

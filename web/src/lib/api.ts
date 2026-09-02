@@ -1091,6 +1091,27 @@ export const tableAPI = {
     return getJSON(`/table/portraits?${query({ entity_id: entityId, campaign })}`)
   },
 
+  /** Ask for a picture. Stores nothing -- the bytes come back to be looked
+   *  at, and `keepPortrait` is the apply. */
+  draftPortrait(campaign: string, entityId: string, note = '') {
+    return postTo<{ prompt: string; generator: string; image: string }>(
+      '/table/portrait/draft', { campaign, entity_id: entityId, note })
+  },
+
+  /** Store the draft the DM chose. The route can only stamp it `generated`. */
+  keepPortrait(body: {
+    campaign: string
+    entityId: string
+    prompt: string
+    generator: string
+    image: string
+  }) {
+    return postTo<Portrait>('/table/portrait/keep', {
+      campaign: body.campaign, entity_id: body.entityId,
+      prompt: body.prompt, generator: body.generator, image: body.image,
+    })
+  },
+
   /** Send the bytes. The route cannot record them as anything but yours. */
   async upload(campaign: string, file: File): Promise<Portrait> {
     const form = new FormData()

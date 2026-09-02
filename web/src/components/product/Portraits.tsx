@@ -5,6 +5,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { tableAPI, type Portrait } from '@/lib/api'
 import { CHROME, SOURCE } from '@/lib/palette'
 
+/** A draft nobody has kept. It lives in the browser and nowhere else -- see
+ *  `/table/portrait/draft`, which stores nothing. */
+type Draft = { prompt: string; generator: string; image: string }
+
 /**
  * The pictures of an entity, each saying where it came from.
  *
@@ -55,6 +59,8 @@ export function Portraits({
   const [found, setFound] = useState<Portrait[]>([])
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState('')
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [note, setNote] = useState('')
   const file = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
@@ -80,6 +86,38 @@ export function Portraits({
       .then((asset) => tableAPI.portray(campaign, entityId, asset.id))
       .then(() => {
         setBusy(false)
+        load()
+      })
+      .catch((error) => {
+        setBusy(false)
+        setFailed(String(error).replace(/^Error:\s*/, ''))
+      })
+  }
+
+  const imagine = () => {
+    setBusy(true)
+    setFailed('')
+    tableAPI
+      .draftPortrait(campaign, entityId, note)
+      .then((made) => {
+        setBusy(false)
+        setDraft(made)
+      })
+      .catch((error) => {
+        setBusy(false)
+        setFailed(String(error).replace(/^Error:\s*/, ''))
+      })
+  }
+
+  const keep = () => {
+    if (!draft) return
+    setBusy(true)
+    tableAPI
+      .keepPortrait({ campaign, entityId, ...draft })
+      .then(() => {
+        setBusy(false)
+        setDraft(null)
+        setNote('')
         load()
       })
       .catch((error) => {
@@ -156,8 +194,63 @@ export function Portraits({
             disabled={busy}
             className={`rounded px-2 py-1 text-[11px] ${CHROME.primary}`}
           >
-            {busy ? 'storing…' : found.length ? 'another picture' : 'add a picture'}
+            {busy ? 'working…' : found.length ? 'another picture' : 'add a picture'}
           </button>
+
+          {/* IMAGINING IS A SECOND, QUIETER ACTION. Not a button on every empty
+              slot -- that is what would make invention ambient, which is the
+              drift the whole colour rule exists to stop. It sits under the
+              upload, in plain text, on the full profile only. */}
+          <button
+            onClick={imagine}
+            disabled={busy}
+            className={`text-left text-[11px] ${SOURCE.invented} hover:underline disabled:opacity-40`}
+          >
+            {busy ? '…' : 'imagine one'}
+          </button>
+
+          {draft && (
+            <div className="flex w-36 flex-col gap-1 rounded border border-neutral-800 bg-neutral-900/60 p-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`data:image/png;base64,${draft.image}`}
+                alt="a suggested portrait, not yet kept"
+                className="w-full rounded"
+              />
+              {/* NOTHING HAS BEEN STORED YET, and the words say so. A DM who
+                  walks away here leaves the graph exactly as they found it. */}
+              <p className={`text-[10px] leading-tight ${SOURCE.invented}`}>
+                Imagined. Not kept yet.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={keep}
+                  disabled={busy}
+                  className={`rounded px-1.5 py-0.5 text-[10px] ${CHROME.primary}`}
+                >
+                  keep it
+                </button>
+                <button
+                  onClick={() => setDraft(null)}
+                  className="text-[10px] text-neutral-600 hover:text-neutral-400"
+                >
+                  discard
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!draft && (
+            <input
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="anything to add?"
+              // THE BOOK'S SENTENCES ARE ALREADY IN THE PROMPT and this only
+              // refines them, which is why it is an afterthought of a field
+              // rather than the main event.
+              className={`w-36 rounded border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-[10px] text-neutral-300 outline-none ${CHROME.focus}`}
+            />
+          )}
           {failed && (
             <p className="max-w-[9rem] text-[11px] leading-tight text-neutral-400">
               ⚠ {failed}

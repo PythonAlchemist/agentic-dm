@@ -455,3 +455,53 @@ class TestSetup:
                            params={"campaign": SLUG}).json()
         assert found["books"] == []
         assert found["premise"] == "A debt, and a long road."
+
+
+class TestImaginedPortraits:
+    """The card is the gate: a model proposes, a person looks, one step
+    applies. Nothing reaches the store until the DM presses keep."""
+
+    #: A one-pixel PNG, base64. Small enough to inline, real enough to decode.
+    PIXEL = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+             "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+    def test_keeping_one_stamps_it_as_imagined(self, table):
+        got = client.post("/api/table/portrait/keep", json={
+            "campaign": SLUG, "entity_id": NPC, "prompt": "a weary man",
+            "generator": "gpt-image-1", "image": self.PIXEL})
+        assert got.status_code == 200
+        assert got.json()["origin"] == assets.GENERATED
+
+    def test_it_carries_the_caption_that_says_so(self, table):
+        client.post("/api/table/portrait/keep", json={
+            "campaign": SLUG, "entity_id": NPC, "prompt": "a weary man",
+            "generator": "gpt-image-1", "image": self.PIXEL})
+        found = client.get("/api/table/portraits", params={
+            "entity_id": NPC, "campaign": SLUG}).json()["portraits"]
+        assert [p["caption"] for p in found] == [
+            assets.CAPTION[assets.GENERATED]]
+
+    def test_a_picture_that_will_not_say_what_made_it_is_refused(self, table):
+        """The eighth invariant catches these; the boundary refuses them."""
+        got = client.post("/api/table/portrait/keep", json={
+            "campaign": SLUG, "entity_id": NPC, "prompt": "x",
+            "generator": "", "image": self.PIXEL})
+        assert got.status_code == 400
+
+    def test_something_that_is_not_an_image_is_refused(self, table):
+        got = client.post("/api/table/portrait/keep", json={
+            "campaign": SLUG, "entity_id": NPC, "prompt": "x",
+            "generator": "gpt-image-1", "image": "not base64!!"})
+        assert got.status_code == 400
+
+    def test_an_empty_draft_is_not_a_picture(self, table):
+        got = client.post("/api/table/portrait/keep", json={
+            "campaign": SLUG, "entity_id": NPC, "prompt": "x",
+            "generator": "gpt-image-1", "image": ""})
+        assert got.status_code == 400
+
+    def test_a_draft_for_nobody_is_a_404(self, table):
+        """Checked before any money is spent on a model call."""
+        got = client.post("/api/table/portrait/draft", json={
+            "campaign": SLUG, "entity_id": f"{PREFIX}:nobody"})
+        assert got.status_code == 404
