@@ -23,7 +23,7 @@ export function Shell({
   aside,
 }: {
   campaign?: string
-  section?: 'prep' | 'library' | 'play' | 'party'
+  section?: 'prep' | 'library' | 'play' | 'party' | 'settings'
   children: ReactNode
   aside?: ReactNode
 }) {
@@ -51,6 +51,9 @@ export function Shell({
             </Tab>
             <Tab href={`/c/${campaign}/party`} on={section === 'party'}>
               Party
+            </Tab>
+            <Tab href={`/c/${campaign}/settings`} on={section === 'settings'}>
+              Setup
             </Tab>
           </>
         )}

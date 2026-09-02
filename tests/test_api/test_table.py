@@ -40,7 +40,7 @@ def table():
         # entity ids below carry the book's prefix, exactly as a real harvest
         # writes them.
         session.run(
-            "CREATE (b:Book {slug:$book, id:$book}) "
+            "CREATE (b:Book {slug:$book, id:$book, plane:'canon'}) "
             "CREATE (c:Campaign {slug:$slug, name:'Table', campaign:$slug}) "
             "CREATE (c)-[:DRAWS_ON]->(b) "
             "CREATE (:Entity:LOCATION {id:$p, plane:'canon', name:'Barovia'}) "
@@ -407,3 +407,51 @@ class TestScheduling:
         got = client.post("/api/table/sitting/held", json={
             "campaign": SLUG, "session": session, "sitting": self._sitting()})
         assert got.json()["held_on"] == "2026-09-14"
+
+
+class TestSetup:
+    NEW = f"{PREFIX}-fresh"
+
+    def test_a_table_can_be_made_from_the_product(self, table):
+        """`store.create` had one caller and it was a script."""
+        made = client.post("/api/table/create", json={
+            "campaign": self.NEW, "name": "A Fresh Table", "book": PREFIX})
+        assert made.status_code == 200
+        assert made.json()["name"] == "A Fresh Table"
+        assert made.json()["books"] == [PREFIX]
+        table.run("MATCH (c:Campaign {slug:$c}) DETACH DELETE c",
+                  {"c": self.NEW}).consume()
+
+    def test_a_table_with_no_slug_is_refused(self, table):
+        assert client.post("/api/table/create",
+                           json={"campaign": "  "}).status_code == 400
+
+    def test_the_settings_read_back(self, table):
+        found = client.get("/api/table/settings",
+                           params={"campaign": SLUG}).json()
+        assert found["slug"] == SLUG and found["books"] == [PREFIX]
+
+    def test_a_table_that_is_not_there_is_a_404(self, table):
+        assert client.get("/api/table/settings",
+                          params={"campaign": f"{PREFIX}-no"}).status_code == 404
+
+    def test_a_premise_is_prose_the_graph_reads(self, table):
+        """It is a section, so it is scanned. A premise naming Strahd connects
+        the table to Strahd through machinery that already exists."""
+        client.post("/api/table/settings", json={
+            "campaign": SLUG, "premise": "The party owes Strahd a debt."})
+        found = table.run(
+            "MATCH (m:Mention)-[:IN_SECTION]->(:Section {id:$id}) "
+            "RETURN count(m) AS n",
+            {"id": f"hb:{SLUG}:the-premise"}).single()["n"]
+        assert found == 1
+
+    def test_dropping_a_book_keeps_the_prose(self, table):
+        client.post("/api/table/settings", json={
+            "campaign": SLUG, "premise": "A debt, and a long road."})
+        client.request("DELETE", "/api/table/settings/book",
+                       params={"campaign": SLUG, "book": PREFIX})
+        found = client.get("/api/table/settings",
+                           params={"campaign": SLUG}).json()
+        assert found["books"] == []
+        assert found["premise"] == "A debt, and a long road."

@@ -36,6 +36,7 @@ from backend.campaign import (
     roles,
     scheduling,
     sessions,
+    setup,
 )
 from backend.core.config import settings
 from backend.core.database import neo4j_session, read_only_session
@@ -94,6 +95,99 @@ def _for_player(http: Request, campaign: str, preview: bool = False) -> bool:
     with read_only_session() as session:
         role = roles.role_of(session, slug=campaign, reader=reader)
     return role != roles.DM
+
+
+# ---------------------------------------------------------------- setup
+
+
+class TableRequest(BaseModel):
+    campaign: str
+    name: str = ""
+    book: str = ""
+    premise: str = ""
+
+
+@router.get("/books")
+def list_books() -> dict:
+    """Every book the graph holds, for the picker."""
+    with read_only_session() as session:
+        return {"books": setup.books(session)}
+
+
+@router.get("/settings")
+def read_settings(campaign: str) -> dict:
+    with read_only_session() as session:
+        try:
+            return setup.settings(session, slug=campaign)
+        except ValueError as bad:
+            raise HTTPException(status_code=404, detail=str(bad)) from bad
+
+
+@router.post("/create")
+def create_table(http: Request, request: TableRequest) -> dict:
+    """Make a table.
+
+    THE FIRST THING A PERSON DOES WITH THIS PRODUCT HAD NO BUTTON. `store.create`
+    has existed all along with exactly one caller -- a script -- while the home
+    page said the lab could do it, which was not true of the lab either.
+
+    `guard` CLAIMS IT FOR WHOEVER MADE IT, which is the ordinary path through
+    `ownership.claim`: a campaign with no owner is taken by the first identified
+    reader to write to it, and creating it is that write.
+    """
+    from backend.campaign.model import Campaign
+    from backend.campaign.store import create
+
+    slug = request.campaign.strip()
+    if not slug:
+        raise HTTPException(status_code=400, detail="a table needs a slug")
+    owner = guard(http, slug)
+    with neo4j_session() as session:
+        session.execute_write(lambda tx: create(
+            tx, Campaign(slug=slug, name=request.name.strip() or slug,
+                         books=tuple(b for b in [request.book] if b)),
+            owner=owner or _reader(http)))
+        return setup.settings(session, slug=slug)
+
+
+@router.post("/settings")
+def write_settings(http: Request, request: TableRequest) -> dict:
+    """Rename it, add a book, or say what it is. Any subset, one call."""
+    guard(http, request.campaign)
+    try:
+        with neo4j_session() as session:
+            if request.name:
+                session.execute_write(lambda tx: setup.rename(
+                    tx, slug=request.campaign, name=request.name))
+            if request.book:
+                session.execute_write(lambda tx: setup.draw_on(
+                    tx, slug=request.campaign, book=request.book))
+            if request.premise:
+                session.execute_write(lambda tx: setup.write_premise(
+                    tx, slug=request.campaign, text=request.premise))
+                # SCANNED LIKE ANY OTHER SECTION, which is the reason it is
+                # one: a premise naming Bildrath connects the table to
+                # Bildrath through machinery that already exists.
+                session.execute_write(lambda tx: _rescan(
+                    tx, request.campaign, setup.premise_id(request.campaign)))
+            return setup.settings(session, slug=request.campaign)
+    except ValueError as bad:
+        raise HTTPException(status_code=400, detail=str(bad)) from bad
+
+
+@router.delete("/settings/book")
+def drop_book(http: Request, campaign: str, book: str) -> dict:
+    """Stop playing from a book. Removes an edge, never prose."""
+    guard(http, campaign)
+    with neo4j_session() as session:
+        return {"dropped": session.execute_write(lambda tx: setup.stop_drawing(
+            tx, slug=campaign, book=book))}
+
+
+def _rescan(tx, slug: str, section_id: str) -> dict:
+    from backend.campaign import homebrew
+
+    return homebrew.rescan(tx, slug=slug, section_id=section_id)
 
 
 # ---------------------------------------------------------------- seats

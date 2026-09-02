@@ -829,7 +829,49 @@ export interface Sitting {
   unanswered: number
 }
 
+export interface BookRow {
+  slug: string
+  title: string
+  chapters: number
+}
+
+export interface Settings {
+  slug: string
+  name: string
+  owner: string
+  books: string[]
+  premise: string
+}
+
 export const tableAPI = {
+  books(): Promise<{ books: BookRow[] }> {
+    return getJSON('/table/books')
+  },
+
+  settings(campaign: string): Promise<Settings> {
+    return getJSON(`/table/settings?${query({ campaign })}`)
+  },
+
+  /** Make a table. The reader who makes it owns it. */
+  createTable(campaign: string, name: string, book = '') {
+    return postTo<Settings>('/table/create', { campaign, name, book })
+  },
+
+  saveSettings(body: {
+    campaign: string
+    name?: string
+    book?: string
+    premise?: string
+  }) {
+    return postTo<Settings>('/table/settings', body)
+  },
+
+  dropBook(campaign: string, book: string) {
+    return send(`${API_BASE}/table/settings/book?${query({ campaign, book })}`, {
+      method: 'DELETE',
+    })
+  },
+
   sittings(campaign: string): Promise<{ sittings: Sitting[] }> {
     return getJSON(`/table/sittings?${query({ campaign })}`)
   },
