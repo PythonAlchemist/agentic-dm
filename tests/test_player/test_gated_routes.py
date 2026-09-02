@@ -160,3 +160,27 @@ class TestTheShapeThatKeepsItTrue:
         """Without this the sweep above passes by finding nothing, which is how
         the auth sweep once enumerated zero routes and went green."""
         assert visibility.ENTITY_PLAYER and visibility.SECTION_PLAYER
+
+
+class TestTheQuieterLeaks:
+    """Not the screens anybody thinks about -- the lists beside them."""
+
+    def test_the_atlas_does_not_name_places_they_have_not_met(self, table):
+        """Every pin can be hidden and the sidebar still says Castle Ravenloft
+        exists."""
+        maps = _as(PLAYER_TOKEN).get("/api/table/maps",
+                                     params={"campaign": SLUG}).json()["maps"]
+        assert maps == []
+
+    def test_the_plan_for_tonight_is_the_dm_s(self, table):
+        """What a DM MEANT to run is next session's plot in list form."""
+        session = _as(DM_TOKEN).post("/api/table/session",
+                                     json={"campaign": SLUG}).json()["id"]
+        got = _as(PLAYER_TOKEN).get("/api/table/session/diff", params={
+            "campaign": SLUG, "session_id": session})
+        assert got.status_code == 403
+
+    def test_the_transcript_suggestions_are_the_dm_s(self, table):
+        got = _as(PLAYER_TOKEN).get("/api/table/session/touched", params={
+            "campaign": SLUG, "session_id": f"hb:{SLUG}:session-1"})
+        assert got.status_code == 403

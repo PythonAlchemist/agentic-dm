@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from backend.api import auth
 from backend import player
-from backend.api.routes.homebrew import guard
+from backend.api.routes.homebrew import dm_only, guard
 from backend.campaign import (
     assets,
     inventory,
@@ -355,8 +355,15 @@ def cover_scene(http: Request, request: SceneRequest) -> dict:
 
 
 @router.get("/session/diff")
-def session_diff(campaign: str, session_id: str) -> dict:
-    """Planned against covered, computed on read and stored nowhere."""
+def session_diff(http: Request, campaign: str, session_id: str) -> dict:
+    """Planned against covered, computed on read and stored nowhere.
+
+    THE DM'S, BECAUSE `PLANNED` IS. What a DM MEANT to run tonight is next
+    session's plot in list form -- `sessions.py` says so where the edge is
+    defined, and a screen that showed it to the table would hand over the
+    running order of everything they have not reached.
+    """
+    dm_only(http, campaign)
     with read_only_session() as session:
         return sessions.diff(session, slug=campaign, session=session_id)
 
@@ -414,13 +421,16 @@ def store_transcript(http: Request, request: TranscriptRequest) -> dict:
 
 
 @router.get("/session/touched")
-def transcript_touched(campaign: str, session_id: str) -> dict:
+def transcript_touched(http: Request, campaign: str, session_id: str) -> dict:
     """Planned scenes the recording appears to have reached.
 
     EVIDENCE, NOT A VERDICT. `COVERED` is a DM's claim about their own evening;
     deriving it from name overlap would be a model deciding what happened at a
     table it was not at. So this comes back as a list to press.
+
+    THE DM'S, LIKE THE DIFF: it names the planned scenes and the cast in them.
     """
+    dm_only(http, campaign)
     from backend.campaign import transcripts
 
     with read_only_session() as session:
@@ -531,10 +541,29 @@ class RevealRequest(BaseModel):
     at_session: str = ""
 
 
+#: The atlas, narrowed to places the table has been told about.
+#:
+#: LISTING MAPS IS LISTING PLACE NAMES. Every pin on every map can be hidden
+#: and the sidebar still tells a player that Castle Ravenloft exists, which is
+#: the same leak the search box was.
+MAPS_PLAYER = """
+MATCH (c:Campaign {slug:$slug})-[:REVEALED]->(place:Entity)<-[:MAP_OF]-(m:Map)
+WHERE m.campaign = $slug
+OPTIONAL MATCH (m)-[:IMAGE]->(a:Asset)
+RETURN m.id AS id, m.name AS name, place.id AS place_id, place.name AS place,
+       a.id AS asset_id, a.origin AS origin
+ORDER BY m.name
+"""
+
+
 @router.get("/maps")
-def list_maps(campaign: str) -> dict:
+def list_maps(http: Request, campaign: str) -> dict:
     with read_only_session() as session:
-        return {"maps": maps.maps_of(session, slug=campaign)}
+        if player.audience(session, slug=campaign,
+                           reader=_reader(http)) == player.DM:
+            return {"maps": maps.maps_of(session, slug=campaign)}
+        return {"maps": [dict(r) for r in session.run(
+            MAPS_PLAYER, {"slug": campaign})]}
 
 
 @router.post("/map")

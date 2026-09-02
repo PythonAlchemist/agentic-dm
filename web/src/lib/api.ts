@@ -1043,6 +1043,8 @@ export const tableAPI = {
 
   /** `preview` asks for the player's view of a map you run. It cannot ask for
    *  the other direction. */
+  /** The atlas. A player sees only maps of places they have been told about
+   *  -- listing maps is listing place names. */
   pins(campaign: string, mapId: string, preview = false): Promise<{
     pins: Pin[]
     as_player: boolean
