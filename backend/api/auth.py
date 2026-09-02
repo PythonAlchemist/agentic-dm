@@ -53,6 +53,23 @@ def mint_token() -> str:
     return f"dm-{secrets.token_urlsafe(32)}"
 
 
+class MisconfiguredTokens(RuntimeError):
+    """`ACCESS_TOKENS` is set and none of it parses.
+
+    THE ONE FAILURE THE OPEN-WHEN-UNSET RULE DOES NOT COVER. `require_reader`
+    is open when NOTHING is configured, which is what makes local development
+    and the test suite work, and the argument for it is that a deployment which
+    forgets tokens is one nobody can reach -- the frontend would have no token
+    to send either.
+
+    That argument does not hold for a MALFORMED value. A quoting mishap or the
+    wrong separator leaves `ACCESS_TOKENS` set, every entry dropped, and the
+    gate open -- while the frontend's stored token still works, so nobody
+    notices. Two published books, served to anyone who finds the URL, announced
+    by one startup line nobody reads.
+    """
+
+
 def readers() -> dict[str, str]:
     """`{fingerprint: who}`, read from the environment.
 
@@ -62,12 +79,19 @@ def readers() -> dict[str, str]:
     a stranger something.
     """
     found: dict[str, str] = {}
-    for entry in (settings.access_tokens or "").split(","):
+    raw = (settings.access_tokens or "").strip()
+    for entry in raw.split(","):
         entry = entry.strip()
         if not entry or ":" not in entry:
             continue
         who, _, digest = entry.partition(":")
         found[digest.strip().lower()] = who.strip()
+    if raw and not found:
+        raise MisconfiguredTokens(
+            "ACCESS_TOKENS is set but no entry parses as `name:sha256`. "
+            "Refusing to serve, because the alternative is serving two "
+            "published books to anyone at all."
+        )
     return found
 
 
@@ -87,6 +111,20 @@ def identify(token: str) -> str:
         if hmac.compare_digest(offered, digest):
             who = name
     return who
+
+
+def reader_of(request) -> str:
+    """Whose request this is, as the gate decided it.
+
+    READ FROM THE SCOPE, not re-derived from the header. `ReaderGate` has
+    already identified the caller in constant time; a route doing it again
+    would be a second implementation of the same rule, free to disagree with
+    the one that actually decides whether the request is served.
+
+    Empty when the deployment is open, which is a real answer rather than a
+    missing one: nobody was identified because nobody had to be.
+    """
+    return request.scope.get("reader", "") if request is not None else ""
 
 
 def require_reader(authorization: str = Header(default="")) -> str:

@@ -7,7 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from backend.api.auth import OPEN_PATHS, identify, readers
+from backend.api.auth import (
+    OPEN_PATHS,
+    MisconfiguredTokens,
+    identify,
+    readers,
+)
 from backend.api.routes import (
     audio,
     campaign,
@@ -67,7 +72,15 @@ class ReaderGate:
                     offered = token.strip()
                 break
 
-        if identify(offered):
+        who = identify(offered)
+        if who:
+            # THE NAME TRAVELS. `identify` returns WHO, and this used to throw
+            # that away -- so the per-person-token design's whole payoff, that
+            # "a leaked token says whose it was", never reached a request. No
+            # log carried a name and no route could know its caller. Stashed on
+            # the scope, which both HTTP and WebSocket handlers can read, and
+            # `require_reader` returns it to any route that asks.
+            scope["reader"] = who
             await self.app(scope, receive, send)
             return
 
@@ -93,7 +106,15 @@ async def lifespan(app: FastAPI):
     # SAID OUT LOUD, BOTH WAYS. The graph holds the prose of two published
     # books, so "did the tokens get set" is the one deployment question worth
     # answering at startup rather than by trying the URL in a private window.
-    known = readers()
+    # A MALFORMED VALUE STOPS THE PROCESS rather than opening the gate. Unset
+    # is a deliberate, documented open; set-but-unparseable is a mistake, and
+    # the mistake used to serve two books to anyone who found the URL while the
+    # frontend's stored token went on working, so nobody would notice.
+    try:
+        known = readers()
+    except MisconfiguredTokens as exc:
+        print(f"[auth] REFUSING TO START -- {exc}")
+        raise
     if known:
         print(f"[auth] gated -- {len(known)} reader(s): {', '.join(sorted(known.values()))}")
     else:

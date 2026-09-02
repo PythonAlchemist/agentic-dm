@@ -10,6 +10,7 @@ or this fails.
 """
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 from starlette.routing import WebSocketRoute
 
@@ -222,3 +223,70 @@ class TestTheWebsocketIsGatedToo:
             headers={"Authorization": f"Bearer {ALICE}"},
         ) as ws:
             assert ws is not None
+
+
+class TestAMalformedConfigDoesNotOpenTheGate:
+    """The one failure the open-when-unset rule does not cover.
+
+    `require_reader` is open when NOTHING is configured, and the argument is
+    that a deployment which forgets tokens is one nobody can reach -- the
+    frontend would have no token to send either. That does not hold for a
+    MALFORMED value: a quoting mishap leaves `ACCESS_TOKENS` set, every entry
+    dropped, the gate open, and the frontend's stored token still working, so
+    nobody notices two published books being served to anyone at all.
+    """
+
+    def _set(self, monkeypatch, value):
+        from backend.core.config import settings
+        monkeypatch.setattr(settings, "access_tokens", value)
+
+    def test_unset_is_still_open(self, monkeypatch):
+        self._set(monkeypatch, "")
+        assert auth.readers() == {}
+
+    def test_a_well_formed_value_parses(self, monkeypatch):
+        self._set(monkeypatch, "alice:" + auth.fingerprint("t"))
+        assert list(auth.readers().values()) == ["alice"]
+
+    def test_a_value_that_parses_to_nothing_refuses(self, monkeypatch):
+        self._set(monkeypatch, "alice=abc;bob=def")
+        with pytest.raises(auth.MisconfiguredTokens):
+            auth.readers()
+
+    def test_one_good_entry_is_enough(self, monkeypatch):
+        """Refusing on ANY unparseable entry would turn a typo in the second
+        name into an outage; the rule is that nothing at all parses."""
+        self._set(monkeypatch, "alice:" + auth.fingerprint("t") + ",garbage")
+        assert list(auth.readers().values()) == ["alice"]
+
+
+class TestTheGateSaysWhoItLetThrough:
+    """`identify` returns WHO and the middleware discarded it, so the
+    per-person-token design's payoff -- "a leaked token says whose it was" --
+    never reached a request."""
+
+    def test_the_name_is_on_the_scope(self, gated):
+        found = {}
+
+        @app.get("/api/_pytest_reader")
+        def _who(request: Request) -> dict:
+            return {"reader": auth.reader_of(request)}
+
+        try:
+            body = gated.get(
+                "/api/_pytest_reader",
+                headers={"Authorization": f"Bearer {ALICE}"},
+            ).json()
+            found.update(body)
+        finally:
+            app.router.routes = [
+                r for r in app.router.routes
+                if getattr(r, "path", "") != "/api/_pytest_reader"
+            ]
+        assert found["reader"] == "alice"
+
+    def test_reader_of_is_empty_when_nobody_was_identified(self):
+        class _Req:
+            scope: dict = {}
+
+        assert auth.reader_of(_Req()) == ""
