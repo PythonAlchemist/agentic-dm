@@ -4,9 +4,23 @@
     uv run python -m backend.scripts.eval_anchor --verbose
     uv run python -m backend.scripts.eval_anchor --save evals/baselines/x.json
     uv run python -m backend.scripts.eval_anchor --compare before.json after.json
+    uv run python -m backend.scripts.eval_anchor --model gpt-4o-mini   # SPENDS
 
-COSTS NOTHING, like `eval_retrieval` and unlike `eval_answers`: retrieval is
-deterministic and `suggest_anchor` is a pure function over it. No model runs.
+COSTS NOTHING BY DEFAULT, like `eval_retrieval` and unlike `eval_answers`:
+retrieval is deterministic and `suggest_anchor` is a pure function over it.
+
+TEN CASES IS TEN CASES. A model run over them moves on resampling, and this
+harness reports no interval -- the answer eval's warning applies here in
+spirit: a two-case difference is not a result. What it can settle is a
+difference of the size actually seen, 4 of 10 against 8 of 10, where the four
+that flipped are exactly the four the deterministic rule is documented to get
+wrong.
+
+`--model` SCORES THE OTHER RULE, and spends. Every path that drafts something
+now refines the deterministic guess with `place_it`, which asks a model which
+beat the material comes after over the closed list of passages it was written
+against. Wiring that in on the strength of its docstring would have been faith;
+this is how the two are compared on the same ten cases.
 
 WHY THIS EXISTS. `evals/anchor-cases.yaml` was written carefully -- multi-accept
 semantics, a `why` on every case -- and nothing read it. A measurement that
@@ -133,6 +147,40 @@ def _compare(before: Path, after: Path) -> int:
     return 0
 
 
+def _with_model(cases, retrievers, model: str) -> list[dict]:
+    """The same cases, scored through `place_it`.
+
+    SEQUENTIAL AND UNCONCURRENT, deliberately: ten cheap calls, and a harness
+    that raced them would be harder to read than the thing it measures.
+    """
+    import asyncio
+
+    from openai import AsyncOpenAI
+
+    from backend.agents.canon_context import place_it, sources, suggest_anchor
+    from backend.canon.retrieval import CanonRetriever  # noqa: F401
+    from backend.core.config import settings
+
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+    async def one(case):
+        retrieval = retrievers[case.get("book", "cos")].retrieve(case["subject"])
+        chosen = await place_it(
+            client, subject=case["subject"], body="",
+            shown=sources(retrieval), model=model,
+        )
+        # FALLS BACK EXACTLY AS THE APP DOES. `place_it` returns "" when it
+        # cannot answer and every caller keeps the deterministic guess, so
+        # scoring the empty string would measure a path nothing takes.
+        deterministic, chapters = suggest_anchor(retrieval)
+        return score(case, chosen or deterministic, chapters)
+
+    async def run():
+        return [await one(case) for case in cases]
+
+    return asyncio.run(run())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
@@ -142,6 +190,11 @@ def main() -> int:
     parser.add_argument("--label", default="")
     parser.add_argument("--compare", nargs=2, type=Path,
                         metavar=("BEFORE", "AFTER"))
+    parser.add_argument(
+        "--model", default="",
+        help="also score `place_it` with this model. SPENDS: one cheap call "
+             "per case.",
+    )
     args = parser.parse_args()
 
     if args.compare:
@@ -165,11 +218,31 @@ def main() -> int:
         rows.append(score(case, suggested, chapters))
 
     found = summarize(rows)
+    placed_rows = _with_model(cases, retrievers, args.model) if args.model else []
     print(f"anchor suggestions over {len(cases)} hand-authored cases")
     print()
     print(render(rows, found, verbose=args.verbose))
+    if placed_rows:
+        placed = summarize(placed_rows)
+        print()
+        print(f"  with `place_it` ({args.model}), on the same cases:")
+        print(render(placed_rows, placed, verbose=args.verbose))
+        print()
+        moved = [
+            (a["id"], a["hit"], b["hit"])
+            for a, b in zip(rows, placed_rows) if a["hit"] != b["hit"]
+        ]
+        print(f"  {found['hits']}/{found['cases']} -> "
+              f"{placed['hits']}/{placed['cases']}")
+        for cid, was, now in moved:
+            print(f"    {cid:5} {'hit' if was else 'miss'} -> "
+                  f"{'hit' if now else 'miss'}")
     if args.save:
-        _save(args.save, args.label, rows, found)
+        # WHEN A MODEL RAN, THAT IS THE RUN WORTH RECORDING -- it is the rule
+        # the app actually files by. The deterministic number is still printed
+        # above as the floor it has to beat.
+        keep = placed_rows or rows
+        _save(args.save, args.label, keep, summarize(keep))
         print(f"\n  saved to {args.save}")
     return 0
 

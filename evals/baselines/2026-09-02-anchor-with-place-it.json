@@ -1,0 +1,20 @@
+{
+ "cases": 10,
+ "elsewhere": 1,
+ "hits": 8,
+ "label": "place_it over the same ten cases, gpt-4o-mini",
+ "outcomes": {
+  "a01": "hit",
+  "a02": "hit",
+  "a03": "hit",
+  "a04": "hit",
+  "a05": "near",
+  "a06": "hit",
+  "a07": "hit",
+  "a08": "hit",
+  "a09": "elsewhere",
+  "a10": "hit"
+ },
+ "rate": 0.8,
+ "right_chapter_wrong_beat": 1
+}
