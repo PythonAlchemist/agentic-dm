@@ -479,7 +479,7 @@ export function SubgraphGraph({ view }: { view: SubgraphView }) {
       {/* One strip rather than a floating tooltip: the detail is several lines
           of relationship types, and a box that follows the cursor covers the
           neighbours you are comparing against. */}
-      <p className="h-8 shrink-0 truncate border-t border-neutral-800 px-3 py-2 text-xs text-neutral-500">
+      <p className="h-8 shrink-0 truncate border-t border-line px-3 py-2 text-meta text-ink-dim">
         {detail || 'Hover a name or a line. Drag to rearrange, scroll to zoom.'}
       </p>
     </div>

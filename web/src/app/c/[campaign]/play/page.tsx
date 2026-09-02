@@ -117,10 +117,10 @@ export default function PlayPage() {
       <div className="mx-auto grid max-w-5xl gap-10 px-6 py-10 md:grid-cols-[16rem_1fr]">
         <aside>
           <div className="flex items-baseline justify-between">
-            <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+            <h2 className="text-label uppercase tracking-widest text-ink-faint">
               Sessions
             </h2>
-            <button onClick={start} className={`rounded px-2 py-0.5 text-[11px] ${CHROME.primary}`}>
+            <button onClick={start} className={`rounded-md px-2 py-0.5 text-label ${CHROME.primary}`}>
               start one
             </button>
           </div>
@@ -130,38 +130,38 @@ export default function PlayPage() {
               <li key={s.id}>
                 <button
                   onClick={() => setOpen(s.id)}
-                  className={`flex w-full items-baseline gap-2 rounded px-2 py-1.5 text-left text-sm ${
-                    s.id === open ? CHROME.selected : 'text-neutral-400 hover:text-neutral-200'
+                  className={`flex w-full items-baseline gap-2 rounded-md px-2 py-1.5 text-left text-ui ${
+                    s.id === open ? CHROME.selected : 'text-ink-dim hover:text-ink'
                   }`}
                 >
                   <span className="tabular-nums">#{s.number}</span>
                   <span className="truncate">{s.title || 'untitled'}</span>
-                  <span className="ml-auto shrink-0 text-[11px] tabular-nums text-neutral-600">
+                  <span className="ml-auto shrink-0 text-label tabular-nums text-ink-faint">
                     {s.covered}/{s.planned}
                   </span>
                 </button>
               </li>
             ))}
             {sessions.length === 0 && (
-              <li className="px-2 py-1 text-sm text-neutral-600">
+              <li className="px-2 py-1 text-ui text-ink-faint">
                 No sessions yet.
               </li>
             )}
           </ul>
 
           {failed && (
-            <p className="mt-4 text-[11px] leading-relaxed text-neutral-400">⚠ {failed}</p>
+            <p className="mt-4 text-label leading-relaxed text-ink-dim">⚠ {failed}</p>
           )}
         </aside>
 
         <div>
-          <h1 className="text-xl font-medium text-neutral-100">Tonight</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+          <h1 className="text-title font-medium text-ink">Tonight</h1>
+          <p className="mt-1 text-ui text-ink-dim">
             Plan a scene before you run it; mark it played when you have.
           </p>
 
           {!open && (
-            <p className="mt-6 text-sm text-neutral-600">
+            <p className="mt-6 text-ui text-ink-faint">
               Start a session to plan against it.
             </p>
           )}
@@ -181,31 +181,31 @@ export default function PlayPage() {
                 />
                 <button
                   onClick={() => file.current?.click()}
-                  className={`rounded px-2 py-1 text-[11px] ${CHROME.primary}`}
+                  className={`rounded-md px-2 py-1 text-label ${CHROME.primary}`}
                 >
                   upload the transcript
                 </button>
-                {note && <span className="text-[11px] text-neutral-500">{note}</span>}
+                {note && <span className="text-label text-ink-dim">{note}</span>}
               </div>
 
               {touched.length > 0 && (
-                <div className="mt-4 rounded border border-neutral-800 bg-neutral-900/40 p-3">
-                  <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+                <div className="mt-4 rounded-md border border-line bg-surface/40 p-3">
+                  <h2 className="text-label uppercase tracking-widest text-ink-faint">
                     The recording names these
                   </h2>
-                  <p className="mt-1 text-[11px] text-neutral-600">
+                  <p className="mt-1 text-label text-ink-faint">
                     Evidence, not a verdict. Mark what you actually ran.
                   </p>
                   <ul className="mt-2 flex flex-col gap-1">
                     {touched.map((t) => (
-                      <li key={t.section_id} className="flex items-baseline gap-2 text-sm">
-                        <span className="text-neutral-300">{t.heading}</span>
-                        <span className="text-[11px] text-neutral-600">
+                      <li key={t.section_id} className="flex items-baseline gap-2 text-ui">
+                        <span className="text-ink-dim">{t.heading}</span>
+                        <span className="text-label text-ink-faint">
                           {t.names.slice(0, 4).join(', ')}
                         </span>
                         <button
                           onClick={() => mark(t.section_id, 'covered')}
-                          className="ml-auto text-[11px] text-neutral-400 hover:text-neutral-200"
+                          className="ml-auto text-label text-ink-dim hover:text-ink"
                         >
                           mark played
                         </button>
@@ -225,12 +225,12 @@ export default function PlayPage() {
                     return (
                       <li
                         key={row.section_id}
-                        className="flex items-baseline gap-3 border-b border-neutral-900 py-2"
+                        className="flex items-baseline gap-3 border-b border-line py-2"
                       >
                         <Link
                           href={`/c/${campaign}/s/${encodeURIComponent(row.section_id)}`}
-                          className={`truncate text-sm hover:underline ${
-                            row.origin === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                          className={`truncate text-ui hover:underline ${
+                            row.origin === 'campaign' ? SOURCE.yours : 'text-ink'
                           }`}
                         >
                           {row.heading}
@@ -291,8 +291,8 @@ function Toggle({
       aria-pressed={on}
       // CONTRAST, NEVER HUE -- `palette.ts` keeps every hue for a source, and
       // "played" is not a source.
-      className={`rounded px-1.5 py-0.5 text-[11px] transition-colors ${
-        on ? CHROME.selected : 'text-neutral-600 hover:text-neutral-400'
+      className={`rounded-md px-1.5 py-0.5 text-label transition-colors ${
+        on ? CHROME.selected : 'text-ink-faint hover:text-ink-dim'
       }`}
     >
       {label}
@@ -313,19 +313,19 @@ function Column({
 }) {
   return (
     <section>
-      <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">{title}</h2>
+      <h2 className="text-label uppercase tracking-widest text-ink-faint">{title}</h2>
       <ul className="mt-2 flex flex-col gap-1">
         {scenes.map((s) => (
           <li key={s.id}>
             <Link
               href={`/c/${campaign}/s/${encodeURIComponent(s.id)}`}
-              className="text-sm text-neutral-300 hover:underline"
+              className="text-ui text-ink-dim hover:underline"
             >
               {s.heading || s.id}
             </Link>
           </li>
         ))}
-        {scenes.length === 0 && <li className="text-sm text-neutral-600">{empty}</li>}
+        {scenes.length === 0 && <li className="text-ui text-ink-faint">{empty}</li>}
       </ul>
     </section>
   )

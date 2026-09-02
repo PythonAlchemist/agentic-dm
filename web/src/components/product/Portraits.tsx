@@ -133,7 +133,7 @@ export function Portraits({
   return (
     <div className="flex shrink-0 flex-col gap-2">
       <div
-        className={`${size} relative overflow-hidden rounded border border-neutral-800 bg-neutral-900/60`}
+        className={`${size} relative overflow-hidden rounded-md border border-line bg-surface/60`}
       >
         {primary ? (
           // A PLAIN `<img>`, DELIBERATELY. The bytes come from our own API at
@@ -148,7 +148,7 @@ export function Portraits({
           />
         ) : (
           <div
-            className="flex h-full w-full items-center justify-center text-2xl text-neutral-700"
+            className="flex h-full w-full items-center justify-center text-title text-ink-faint"
             aria-hidden
           >
             {kindMark(labels)}
@@ -160,8 +160,8 @@ export function Portraits({
           // provenance signal a reader can miss is one that will be missed
           // exactly when it matters.
           <span
-            className={`absolute inset-x-0 bottom-0 bg-neutral-950/80 px-1 py-0.5 text-center text-[9px] leading-tight ${
-              ORIGIN_HUE[primary.origin] ?? 'text-neutral-400'
+            className={`absolute inset-x-0 bottom-0 bg-ground/80 px-1 py-0.5 text-center text-label leading-tight ${
+              ORIGIN_HUE[primary.origin] ?? 'text-ink-dim'
             }`}
           >
             {primary.caption}
@@ -179,7 +179,7 @@ export function Portraits({
                   <img
                     src={tableAPI.assetURL(p.id)}
                     alt={p.caption}
-                    className="h-8 w-8 rounded border border-neutral-800 object-cover"
+                    className="h-8 w-8 rounded-md border border-line object-cover"
                   />
                 </span>
               ))}
@@ -196,7 +196,7 @@ export function Portraits({
           <button
             onClick={() => file.current?.click()}
             disabled={busy}
-            className={`rounded px-2 py-1 text-[11px] ${CHROME.primary}`}
+            className={`rounded-md px-2 py-1 text-label ${CHROME.primary}`}
           >
             {busy ? 'working…' : found.length ? 'another picture' : 'add a picture'}
           </button>
@@ -208,35 +208,35 @@ export function Portraits({
           <button
             onClick={imagine}
             disabled={busy}
-            className={`text-left text-[11px] ${SOURCE.invented} hover:underline disabled:opacity-40`}
+            className={`text-left text-label ${SOURCE.invented} hover:underline disabled:opacity-40`}
           >
             {busy ? '…' : 'imagine one'}
           </button>
 
           {draft && (
-            <div className="flex w-36 flex-col gap-1 rounded border border-neutral-800 bg-neutral-900/60 p-1.5">
+            <div className="flex w-36 flex-col gap-1 rounded-md border border-line bg-surface/60 p-1.5">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={`data:image/png;base64,${draft.image}`}
                 alt="a suggested portrait, not yet kept"
-                className="w-full rounded"
+                className="w-full rounded-md"
               />
               {/* NOTHING HAS BEEN STORED YET, and the words say so. A DM who
                   walks away here leaves the graph exactly as they found it. */}
-              <p className={`text-[10px] leading-tight ${SOURCE.invented}`}>
+              <p className={`text-label leading-tight ${SOURCE.invented}`}>
                 Imagined. Not kept yet.
               </p>
               <div className="flex gap-2">
                 <button
                   onClick={keep}
                   disabled={busy}
-                  className={`rounded px-1.5 py-0.5 text-[10px] ${CHROME.primary}`}
+                  className={`rounded-md px-1.5 py-0.5 text-label ${CHROME.primary}`}
                 >
                   keep it
                 </button>
                 <button
                   onClick={() => setDraft(null)}
-                  className="text-[10px] text-neutral-600 hover:text-neutral-400"
+                  className="text-label text-ink-faint hover:text-ink-dim"
                 >
                   discard
                 </button>
@@ -252,11 +252,11 @@ export function Portraits({
               // THE BOOK'S SENTENCES ARE ALREADY IN THE PROMPT and this only
               // refines them, which is why it is an afterthought of a field
               // rather than the main event.
-              className={`w-36 rounded border border-neutral-800 bg-neutral-950 px-1.5 py-0.5 text-[10px] text-neutral-300 outline-none ${CHROME.focus}`}
+              className={`w-36 rounded-md border border-line bg-ground px-1.5 py-0.5 text-label text-ink-dim`}
             />
           )}
           {failed && (
-            <p className="max-w-[9rem] text-[11px] leading-tight text-neutral-400">
+            <p className="max-w-[9rem] text-label leading-tight text-ink-dim">
               ⚠ {failed}
             </p>
           )}

@@ -14,14 +14,14 @@ import { Explain } from './ui'
 
 export function CallMeter({ usage, cost }: { usage: Usage; cost: Cost }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs text-neutral-500">
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-meta text-ink-dim">
       <span className="tabular-nums">
         {usage.input.toLocaleString()} in / {usage.output.toLocaleString()} out
       </span>
       <span className="tabular-nums">{money(cost)}</span>
       {age(cost) && (
         <Explain text="Every rate is a claim about the outside world this repository cannot check. An unverified one is arithmetic on a number nobody has confirmed — correct it in backend/core/pricing.yaml and set last_verified.">
-          <span className={cost.verified ? '' : 'text-neutral-400'}>{age(cost)}</span>
+          <span className={cost.verified ? '' : 'text-ink-dim'}>{age(cost)}</span>
         </Explain>
       )}
     </div>
@@ -39,7 +39,7 @@ export function CallMeter({ usage, cost }: { usage: Usage; cost: Cost }) {
 export function MissReason({ report }: { report: RetrievalReport | null }) {
   if (!report?.miss_reason) return null
   return (
-    <p className="mt-2 text-xs text-neutral-400">{report.miss_reason}</p>
+    <p className="mt-2 text-meta text-ink-dim">{report.miss_reason}</p>
   )
 }
 
@@ -52,9 +52,9 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
   const byKeyword = report.passages_by_path?.text ?? 0
 
   return (
-    <div className="mt-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-3 text-xs">
+    <div className="mt-2 rounded-md border border-line bg-surface/40 p-3 text-meta">
       <div className="mb-2 flex items-baseline justify-between">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+        <span className="text-label font-medium uppercase tracking-wider text-ink-dim">
           Retrieval
         </span>
         <Explain
@@ -66,46 +66,46 @@ export function RetrievalPanel({ report }: { report: RetrievalReport | null }) {
                 : 'Retrieval returned nothing at all.'
           }
         >
-          <span className={byText ? 'text-neutral-400' : report.path ? 'text-neutral-200' : 'text-neutral-500'}>
+          <span className={byText ? 'text-ink-dim' : report.path ? 'text-ink' : 'text-ink-dim'}>
             {byText ? 'keyword match' : report.path ? 'by name' : 'nothing'}
           </span>
         </Explain>
       </div>
 
       {report.anchors.length > 0 && (
-        <p className="text-neutral-300">{report.anchors.join(', ')}</p>
+        <p className="text-ink-dim">{report.anchors.join(', ')}</p>
       )}
       {byText && report.terms.length > 0 && (
-        <p className="text-neutral-500">searched: {report.terms.join(', ')}</p>
+        <p className="text-ink-dim">searched: {report.terms.join(', ')}</p>
       )}
       {report.loose && (
-        <p className="text-neutral-500">
+        <p className="text-ink-dim">
           <Explain text="Nothing matched under the scan's own casing rule, so a case-folded pass was used. Weaker evidence than an exact match, which is why it is shown at all.">
             matched with relaxed capitalisation
           </Explain>
         </p>
       )}
       {report.carried && (
-        <p className="text-neutral-500">
+        <p className="text-ink-dim">
           <Explain text="This question resolved no name of its own, so it was anchored on what the conversation was already about. A question that names something is never overridden this way.">
             carried from the conversation
           </Explain>
         </p>
       )}
 
-      <p className="mt-1 text-neutral-500">
+      <p className="mt-1 text-ink-dim">
         {report.passages} passage{report.passages === 1 ? '' : 's'}
         {byName > 0 && byKeyword > 0 && ` (${byName} by name, ${byKeyword} by keyword)`}
         {report.dropped > 0 && `, ${report.dropped} cut by the budget`}
       </p>
-      <p className="text-neutral-500">
+      <p className="text-ink-dim">
         <Explain text="Derived relationships come from the book's own structure and are reliable. Guessed ones come from an extractor and roughly a third are wrong — treat each as a lead to check, never as fact.">
           {report.accepted_edges} derived · {report.proposed_edges} guessed
         </Explain>
         {report.proposed_withheld && ' (withheld)'}
       </p>
       {report.miss_reason && (
-        <p className="mt-1 text-neutral-400">{report.miss_reason}</p>
+        <p className="mt-1 text-ink-dim">{report.miss_reason}</p>
       )}
     </div>
   )
@@ -139,32 +139,32 @@ export function SessionMeter({
   onReset: () => void
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900/40">
-      <div className="flex items-baseline justify-between border-b border-neutral-800 px-3 py-2">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+    <div className="rounded-md border border-line bg-surface/40">
+      <div className="flex items-baseline justify-between border-b border-line px-3 py-2">
+        <span className="text-label font-medium uppercase tracking-wider text-ink-dim">
           This session
         </span>
         <button
           onClick={onReset}
-          className="text-xs text-neutral-600 underline hover:text-neutral-400"
+          className="text-meta text-ink-faint underline hover:text-ink-dim"
         >
           reset
         </button>
       </div>
-      <dl className="grid grid-cols-2 gap-y-1 p-3 text-sm tabular-nums">
-        <dt className="text-neutral-500">calls</dt>
-        <dd className="text-right text-neutral-300">{running.calls}</dd>
-        <dt className="text-neutral-500">input</dt>
-        <dd className="text-right text-neutral-300">{running.input.toLocaleString()}</dd>
-        <dt className="text-neutral-500">output</dt>
-        <dd className="text-right text-neutral-300">{running.output.toLocaleString()}</dd>
-        <dt className="text-neutral-500">estimated</dt>
-        <dd className="text-right text-neutral-300">${running.usd.toFixed(4)}</dd>
+      <dl className="grid grid-cols-2 gap-y-1 p-3 text-ui tabular-nums">
+        <dt className="text-ink-dim">calls</dt>
+        <dd className="text-right text-ink-dim">{running.calls}</dd>
+        <dt className="text-ink-dim">input</dt>
+        <dd className="text-right text-ink-dim">{running.input.toLocaleString()}</dd>
+        <dt className="text-ink-dim">output</dt>
+        <dd className="text-right text-ink-dim">{running.output.toLocaleString()}</dd>
+        <dt className="text-ink-dim">estimated</dt>
+        <dd className="text-right text-ink-dim">${running.usd.toFixed(4)}</dd>
       </dl>
       {/* A total built partly from unchecked rates has to say so, or the
           number reads as though somebody confirmed it. */}
       {running.unverified && running.calls > 0 && (
-        <p className="border-t border-neutral-800 px-3 py-2 text-xs text-neutral-400">
+        <p className="border-t border-line px-3 py-2 text-meta text-ink-dim">
           Includes rates nobody has verified.
         </p>
       )}
@@ -194,17 +194,17 @@ export function SpendChip({
   debug: boolean
 }) {
   return (
-    <span className="flex items-baseline gap-2 text-xs tabular-nums text-neutral-500">
+    <span className="flex items-baseline gap-2 text-meta tabular-nums text-ink-dim">
       <span>
         ${running.usd.toFixed(4)}
         {running.unverified && (
           <Explain text="Some of this used a rate nobody has verified. Correct backend/core/pricing.yaml and set last_verified.">
-            <span className="ml-1 text-neutral-400">⚠</span>
+            <span className="ml-1 text-ink-dim">⚠</span>
           </Explain>
         )}
       </span>
       {debug && (
-        <span className="text-neutral-600">
+        <span className="text-ink-faint">
           {running.calls} calls · {running.input.toLocaleString()} in ·{' '}
           {running.output.toLocaleString()} out
         </span>
@@ -212,7 +212,7 @@ export function SpendChip({
       {running.calls > 0 && (
         <button
           onClick={onReset}
-          className="text-neutral-700 underline hover:text-neutral-400"
+          className="text-ink-faint underline hover:text-ink-dim"
         >
           reset
         </button>

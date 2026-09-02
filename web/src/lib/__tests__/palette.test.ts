@@ -13,10 +13,20 @@
 import { describe, expect, it } from 'vitest'
 
 import { HOW_COLOUR, HOW_GLYPH, HOW_LABEL, NOT_HELD } from '@/components/subgraph-legend'
-import { CAUTION, CHROME, SOURCE } from '@/lib/palette'
+import {
+  CAUTION,
+  CHROME,
+  SOURCE,
+  SOURCE_EDGE,
+  SOURCE_GLYPH,
+  SOURCE_WORD,
+} from '@/lib/palette'
 
-/** The four hue families the sources own. */
-const SOURCE_HUES = ['emerald', 'amber', 'sky', 'rose']
+/** The four token names the sources own. They were Tailwind hue families
+ *  (`emerald`, `amber`, `sky`, `rose`) until the design pass moved every
+ *  colour behind a semantic token in `globals.css`; the hues themselves are
+ *  unchanged, which is the point of the token indirection. */
+const SOURCE_HUES = ['book', 'yours', 'table', 'invented']
 
 /** Their hex forms, which an inline `style` uses instead of a class. */
 const SOURCE_HEX = [
@@ -28,17 +38,38 @@ const SOURCE_HEX = [
 
 describe('a hue names a source and nothing else', () => {
   it('each source keeps its own hue', () => {
-    expect(SOURCE.book).toContain('emerald')
-    expect(SOURCE.yours).toContain('amber')
-    expect(SOURCE.table).toContain('sky')
-    expect(SOURCE.invented).toContain('rose')
+    expect(SOURCE.book).toBe('text-book')
+    expect(SOURCE.yours).toBe('text-yours')
+    expect(SOURCE.table).toBe('text-table')
+    expect(SOURCE.invented).toBe('text-invented')
   })
 
   it('no two sources share a hue', () => {
-    const hues = Object.values(SOURCE).map(
-      (c) => SOURCE_HUES.find((h) => c.includes(h)),
-    )
-    expect(new Set(hues).size).toBe(hues.length)
+    expect(new Set(Object.values(SOURCE)).size).toBe(4)
+  })
+
+  it('every source carries a second channel that is not colour', () => {
+    // MEASURED, NOT ASSUMED: three designers each proposed moving a hue for
+    // colour blindness and each made the worst pair worse. The redundancy is
+    // what actually carries the promise for a reader who sees no hue at all,
+    // so a source with a colour and no glyph is a bug.
+    for (const source of SOURCE_HUES) {
+      expect(SOURCE_GLYPH[source as keyof typeof SOURCE_GLYPH]).toBeTruthy()
+      expect(SOURCE_WORD[source as keyof typeof SOURCE_WORD]).toBeTruthy()
+    }
+  })
+
+  it('no two sources share a glyph either', () => {
+    expect(new Set(Object.values(SOURCE_GLYPH)).size).toBe(4)
+    expect(new Set(Object.values(SOURCE_WORD)).size).toBe(4)
+  })
+
+  it('invented is the one marked by a broken line', () => {
+    // Nothing stands behind it, and the dashes say so without colour.
+    expect(SOURCE_EDGE.invented).toContain('dashed')
+    for (const source of ['book', 'yours', 'table'] as const) {
+      expect(SOURCE_EDGE[source]).not.toContain('dashed')
+    }
   })
 
   it('chrome carries contrast, never a hue', () => {

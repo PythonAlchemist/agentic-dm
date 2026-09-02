@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type Found, type Grant } from '@/lib/api'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { SOURCE } from '@/lib/palette'
 
 /**
  * Everything the table knows, in one place, with the switch beside it.
@@ -64,8 +64,8 @@ export default function ToldPage() {
   return (
     <Shell campaign={campaign} section="settings">
       <div className="mx-auto max-w-2xl px-6 py-10">
-        <h1 className="text-xl font-medium text-neutral-100">What your table knows</h1>
-        <p className="mt-1 text-sm text-neutral-500">
+        <h1 className="text-title font-medium text-ink">What your table knows</h1>
+        <p className="mt-1 text-ui text-ink-dim">
           Everything else is hidden from them until you say otherwise.
         </p>
 
@@ -73,25 +73,25 @@ export default function ToldPage() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="tell them about someone…"
-          className={`mt-5 w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+          className={`mt-5 w-full rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink`}
         />
 
         {shown.length > 0 && (
-          <ul className="mt-2 flex max-h-56 flex-col overflow-y-auto rounded border border-neutral-800 bg-neutral-900/50">
+          <ul className="mt-2 flex max-h-56 flex-col overflow-y-auto rounded-md border border-line bg-surface/50">
             {shown.map((one) => (
               <li key={one.entity_id}>
                 <button
                   onClick={() => act(tableAPI.tellTable(campaign, one.entity_id))}
-                  className="flex w-full items-baseline gap-2 px-2 py-1.5 text-left text-sm hover:bg-neutral-800"
+                  className="flex w-full items-baseline gap-2 px-2 py-1.5 text-left text-ui hover:bg-overlay"
                 >
                   <span
                     className={
-                      one.plane === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                      one.plane === 'campaign' ? SOURCE.yours : 'text-ink'
                     }
                   >
                     {one.name}
                   </span>
-                  <span className="ml-auto text-[10px] uppercase tracking-wide text-neutral-600">
+                  <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
                     tell them
                   </span>
                 </button>
@@ -104,7 +104,7 @@ export default function ToldPage() {
           {grants.map((grant) => (
             <li
               key={grant.id}
-              className="flex items-baseline gap-3 border-b border-neutral-900 py-2"
+              className="flex items-baseline gap-3 border-b border-line py-2"
             >
               <Link
                 href={
@@ -112,17 +112,17 @@ export default function ToldPage() {
                     ? `/c/${campaign}/s/${encodeURIComponent(grant.id)}`
                     : `/c/${campaign}/e/${encodeURIComponent(grant.id)}`
                 }
-                className="truncate text-sm text-neutral-200 hover:underline"
+                className="truncate text-ui text-ink hover:underline"
               >
                 {grant.name}
               </Link>
               {grant.as_name && (
-                <span className="shrink-0 text-[11px] text-neutral-500">
+                <span className="shrink-0 text-label text-ink-dim">
                   they call them &ldquo;{grant.as_name}&rdquo;
                 </span>
               )}
               {grant.at_session && (
-                <span className="shrink-0 text-[11px] text-neutral-700">
+                <span className="shrink-0 text-label text-ink-faint">
                   {/* A BARE NUMBER IS NOT A DATE. The id ends in the session
                       number, and "1" on its own reads as a count of
                       something. */}
@@ -131,7 +131,7 @@ export default function ToldPage() {
               )}
               <button
                 onClick={() => act(tableAPI.conceal(campaign, grant.id))}
-                className="ml-auto shrink-0 text-[11px] text-neutral-500 hover:text-neutral-300"
+                className="ml-auto shrink-0 text-label text-ink-dim hover:text-ink-dim"
               >
                 take it back
               </button>
@@ -140,17 +140,17 @@ export default function ToldPage() {
         </ul>
 
         {grants.length === 0 && (
-          <p className="mt-4 text-sm text-neutral-600">
+          <p className="mt-4 text-ui text-ink-faint">
             You have told them nothing yet.
           </p>
         )}
 
-        <p className="mt-8 text-[11px] leading-relaxed text-neutral-600">
+        <p className="mt-8 text-label leading-relaxed text-ink-faint">
           Taking something back hides it from here on. It does not unsay it
           &mdash; which is why nothing is shown to your table until you show it.
         </p>
 
-        {failed && <p className="mt-2 text-[11px] text-neutral-400">⚠ {failed}</p>}
+        {failed && <p className="mt-2 text-label text-ink-dim">⚠ {failed}</p>}
       </div>
     </Shell>
   )

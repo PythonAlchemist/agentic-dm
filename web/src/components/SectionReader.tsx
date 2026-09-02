@@ -164,8 +164,8 @@ export function SectionReader({
   // covers up the list you found it in or the conversation about it.
   if (!sectionId) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-neutral-800/60 bg-neutral-900/20">
-        <p className="max-w-xs px-6 text-center text-xs leading-relaxed text-neutral-600">
+      <div className="flex h-full items-center justify-center rounded-md border border-line/60 bg-surface/20">
+        <p className="max-w-xs px-6 text-center text-meta leading-relaxed text-ink-faint">
           Pick a section or something you have made. It opens here, and the
           chat leans on whatever is open.
         </p>
@@ -174,7 +174,7 @@ export function SectionReader({
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/20">
+    <div className="flex h-full flex-col overflow-hidden rounded-md border border-line bg-surface/20">
       <PaneHeader title="Viewer" subtitle={shown?.heading ?? 'Loading…'}>
             {/* ONLY YOUR OWN. The book is not editable and the server refuses
                 it either way; offering the button would be a lie the backend
@@ -182,14 +182,14 @@ export function SectionReader({
             {yours && draft === null && (
               <button
                 onClick={() => setDraft(shown?.text ?? '')}
-                className="text-neutral-500 hover:text-neutral-200"
+                className="text-ink-dim hover:text-ink"
               >
                 edit
               </button>
             )}
         <button
           onClick={onClose}
-          className="text-neutral-600 hover:text-neutral-300"
+          className="text-ink-faint hover:text-ink-dim"
         >
           close
         </button>
@@ -197,8 +197,8 @@ export function SectionReader({
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <h2
-          className={`mb-2 text-base font-medium ${
-            yours ? 'text-amber-200' : 'text-neutral-200'
+          className={`mb-2 text-body font-medium ${
+            yours ? 'text-amber-200' : 'text-ink'
           }`}
         >
           {shown?.heading ?? 'Loading…'}
@@ -208,7 +208,7 @@ export function SectionReader({
             whole project rests on a DM being able to tell, and a drawer that
             showed the book and their own invention in the same typeface would
             undo that at the moment it matters most. */}
-        <p className="mb-4 text-xs text-neutral-500">
+        <p className="mb-4 text-meta text-ink-dim">
           {yours ? (
             <>
               <span className="text-amber-400">Yours.</span> Written for this
@@ -222,7 +222,7 @@ export function SectionReader({
           )}
         </p>
 
-        {failed && <p className="text-sm text-red-400">{failed}</p>}
+        {failed && <p className="text-ui text-red-400">{failed}</p>}
 
         {entity && (
           <EntityCard
@@ -238,7 +238,7 @@ export function SectionReader({
         {shown && (
           <>
             {draft === null ? (
-              <div className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200">
+              <div className="whitespace-pre-wrap text-ui leading-relaxed text-ink">
                 <Named
                   text={forReading(shown.text, shown.heading)}
                   mentions={shown.mentions}
@@ -254,23 +254,23 @@ export function SectionReader({
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   rows={16}
-                  className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-neutral-500"
+                  className="w-full rounded-md border border-line bg-surface/60 p-2 text-ui leading-relaxed focus:border-line"
                 />
-                <div className="mt-2 flex items-center gap-3 text-xs">
+                <div className="mt-2 flex items-center gap-3 text-meta">
                   <button
                     onClick={save}
                     disabled={saving}
-                    className="rounded-md bg-neutral-200 px-3 py-1.5 font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-40"
+                    className="rounded-md bg-chrome px-3 py-1.5 font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
                   >
                     {saving ? 'Saving…' : 'Save'}
                   </button>
                   <button
                     onClick={() => setDraft(null)}
-                    className="text-neutral-500 hover:text-neutral-300"
+                    className="text-ink-dim hover:text-ink-dim"
                   >
                     cancel (esc)
                   </button>
-                  <span className="text-neutral-600">
+                  <span className="text-ink-faint">
                     The citations below were made about the original and are
                     not re-checked.
                   </span>
@@ -279,7 +279,7 @@ export function SectionReader({
             )}
 
             {shown.edited && (
-              <p className="mt-3 text-xs text-neutral-400">
+              <p className="mt-3 text-meta text-ink-dim">
                 You edited this after it was drafted. The provenance below
                 describes the original text and was not re-checked.
               </p>
@@ -289,11 +289,11 @@ export function SectionReader({
               shown.from_yours.length > 0 ||
               shown.from_context.length > 0 ||
               shown.invented.length > 0) && (
-              <div className="mt-5 space-y-3 border-t border-neutral-800 pt-4 text-xs">
+              <div className="mt-5 space-y-3 border-t border-line pt-4 text-meta">
                 <Split
                   label="From the book"
                   items={shown.from_canon.map((c) => `${c.claim} ${c.cite}`)}
-                  tone="text-emerald-300/80"
+                  tone="text-book"
                 />
                 {/* BETWEEN the book and the conversation, because that is
                     where it sits: sourced, checkable, and not canon. A model
@@ -303,17 +303,17 @@ export function SectionReader({
                 <Split
                   label="From your own material"
                   items={shown.from_yours.map((c) => `${c.claim} ${c.cite}`)}
-                  tone="text-amber-200/80"
+                  tone="text-yours"
                 />
                 <Split
                   label="From the table"
                   items={shown.from_context}
-                  tone="text-sky-300/80"
+                  tone="text-table"
                 />
                 <Split
                   label="Invented"
                   items={shown.invented}
-                  tone="text-rose-300/80"
+                  tone="text-invented"
                 />
               </div>
             )}
@@ -337,11 +337,11 @@ export function SectionReader({
                 which the prose mentions in passing, and nothing to do with the
                 scene. */}
             {connected.length > 0 && (
-              <div className="mt-5 border-t border-neutral-800 pt-4">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+              <div className="mt-5 border-t border-line pt-4">
+                <div className="text-label font-medium uppercase tracking-wide text-ink-dim">
                   Connected ({connected.length})
                 </div>
-                <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-meta">
                   {connected.map((named) => (
                     <li key={named.entity_id}>
                       <button
@@ -349,13 +349,13 @@ export function SectionReader({
                         className={`hover:underline ${
                           named.plane === 'campaign'
                             ? 'text-amber-200/90'
-                            : 'text-neutral-300'
+                            : 'text-ink-dim'
                         }`}
                       >
                         {named.name}
                       </button>
                       {named.kind && (
-                        <span className="text-neutral-600"> {named.kind}</span>
+                        <span className="text-ink-faint"> {named.kind}</span>
                       )}
                     </li>
                   ))}
@@ -365,7 +365,7 @@ export function SectionReader({
                     wrong about roughly a third, and a DM deciding whether to
                     lean on one needs to see which kind it is. */}
                 {shown.connections.length > 0 && (
-                  <ul className="mt-2 space-y-0.5 text-xs">
+                  <ul className="mt-2 space-y-0.5 text-meta">
                     {shown.connections.map((edge, index) => (
                       <li
                         key={`${edge.from}-${edge.rel}-${edge.to_id}-${index}`}
@@ -373,8 +373,8 @@ export function SectionReader({
                           edge.status === 'accepted' ? '' : 'opacity-60'
                         }`}
                       >
-                        <span className="text-neutral-400">{edge.from}</span>{' '}
-                        <span className="text-neutral-600">
+                        <span className="text-ink-dim">{edge.from}</span>{' '}
+                        <span className="text-ink-faint">
                           {edge.rel.toLowerCase().replace(/_/g, ' ')}
                         </span>{' '}
                         <button
@@ -382,13 +382,13 @@ export function SectionReader({
                           className={`hover:underline ${
                             edge.plane === 'campaign'
                               ? 'text-amber-200/90'
-                              : 'text-neutral-200'
+                              : 'text-ink'
                           }`}
                         >
                           {edge.to}
                         </button>
                         {edge.status !== 'accepted' && (
-                          <span className="text-neutral-600"> · guessed</span>
+                          <span className="text-ink-faint"> · guessed</span>
                         )}
                         {/* SAY NO, AND HAVE IT STAY SAID. Deleting a guess only
                             removed it until the next read-back proposed the same
@@ -400,7 +400,7 @@ export function SectionReader({
                           <button
                             onClick={() => reject(edge.from_id, edge.rel, edge.to_id)}
                             disabled={rejecting === edge.to_id + edge.rel}
-                            className="ml-1 text-[10px] text-neutral-700 opacity-0 transition-opacity group-hover/edge:opacity-100 hover:text-rose-300"
+                            className="ml-1 text-label text-ink-faint opacity-0 transition-opacity group-hover/edge:opacity-100 hover:text-rose-300"
                           >
                             {rejecting === edge.to_id + edge.rel ? '…' : 'no'}
                           </button>
@@ -413,7 +413,7 @@ export function SectionReader({
             )}
 
             {shown.cites.length > 0 && (
-              <p className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-600">
+              <p className="mt-4 border-t border-line pt-3 text-meta text-ink-faint">
                 Built on: {shown.cites.join(', ')}
               </p>
             )}
@@ -480,7 +480,7 @@ function Named({
   mentions: SectionRead['mentions']
   onOpen: (entityId: string) => void
 }) {
-  if (!text) return <span className="text-neutral-600">No prose.</span>
+  if (!text) return <span className="text-ink-faint">No prose.</span>
   const surfaces = [...mentions]
     .filter((m) => m.surface)
     .sort((a, b) => b.surface.length - a.surface.length)
@@ -503,7 +503,7 @@ function Named({
             onClick={() => onOpen(hit.entity_id)}
             title={`${hit.name}${hit.kind ? ` · ${hit.kind}` : ''}`}
             className={`underline decoration-dotted underline-offset-2 hover:decoration-solid ${
-              hit.plane === 'campaign' ? 'text-amber-200/90' : 'text-neutral-100'
+              hit.plane === 'campaign' ? 'text-amber-200/90' : 'text-ink'
             }`}
           >
             {piece}
@@ -531,9 +531,9 @@ function Split({
   return (
     <div>
       <div className={`font-medium ${tone}`}>
-        {label} <span className="text-neutral-600">({items.length})</span>
+        {label} <span className="text-ink-faint">({items.length})</span>
       </div>
-      <ul className="mt-1 space-y-0.5 text-neutral-400">
+      <ul className="mt-1 space-y-0.5 text-ink-dim">
         {items.map((item, index) => (
           <li key={index}>· {item}</li>
         ))}
@@ -569,29 +569,29 @@ function EntityCard({
   // the card says which it is rather than the graph quietly deciding.
   const unnamed = !yours && !entity.named_by_book
   return (
-    <div className="mb-5 rounded-md border border-neutral-800 bg-neutral-900/60 p-4">
+    <div className="mb-5 rounded-md border border-line bg-surface/60 p-4">
       <div className="mb-2 flex items-baseline justify-between gap-4">
         <h3
-          className={`text-sm font-medium ${
-            yours ? 'text-amber-200' : 'text-neutral-100'
+          className={`text-ui font-medium ${
+            yours ? 'text-amber-200' : 'text-ink'
           }`}
         >
           {entity.name}
           {entity.kind && (
-            <span className="ml-2 text-[10px] uppercase tracking-wide text-neutral-600">
+            <span className="ml-2 text-label uppercase tracking-wide text-ink-faint">
               {entity.kind}
             </span>
           )}
         </h3>
         <button
           onClick={onBack}
-          className="shrink-0 text-xs text-neutral-500 hover:text-neutral-300"
+          className="shrink-0 text-meta text-ink-dim hover:text-ink-dim"
         >
           back (esc)
         </button>
       </div>
 
-      <p className="text-xs text-neutral-500">
+      <p className="text-meta text-ink-dim">
         {yours ? (
           <>
             <span className="text-amber-400">Yours.</span> Written for this
@@ -616,7 +616,7 @@ function EntityCard({
       </p>
 
       {unnamed && (
-        <p className="mt-2 rounded border border-rose-900/60 bg-rose-950/30 p-2 text-xs text-rose-200/70">
+        <p className="mt-2 rounded-md border border-rose-900/60 bg-rose-950/30 p-2 text-meta text-rose-200/70">
           No section of the book says this name. It was derived when the book
           was read, so what it connects to may well be right — but do not quote
           it as the book&apos;s wording at the table.
@@ -624,7 +624,7 @@ function EntityCard({
       )}
 
       {entity.invented.length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-xs text-rose-300/80">
+        <ul className="mt-2 space-y-0.5 text-meta text-invented">
           {entity.invented.map((line, index) => (
             <li key={index}>· {line}</li>
           ))}
@@ -634,7 +634,7 @@ function EntityCard({
       {entity.own_section && (
         <button
           onClick={() => onRead(entity.own_section!)}
-          className="mt-3 text-xs text-neutral-400 underline hover:text-neutral-200"
+          className="mt-3 text-meta text-ink-dim underline hover:text-ink"
         >
           read its write-up
         </button>
@@ -648,14 +648,14 @@ function EntityCard({
           checking what is established wants that before what they invented on
           top of it. */}
       {entity.named_in.length > 0 && (
-        <div className="mt-3 space-y-3 border-t border-neutral-800 pt-2">
+        <div className="mt-3 space-y-3 border-t border-line pt-2">
           {[...entity.named_in]
             .sort((a, b) => Number(a.plane === 'campaign') - Number(b.plane === 'campaign'))
             .map((where) => (
               <div key={where.section_id}>
                 <button
                   onClick={() => onRead(where.section_id)}
-                  className={`text-[11px] uppercase tracking-wide hover:underline ${
+                  className={`text-label uppercase tracking-wide hover:underline ${
                     where.plane === 'campaign'
                       ? 'text-amber-300/70'
                       : 'text-emerald-300/60'
@@ -665,7 +665,7 @@ function EntityCard({
                 </button>
                 <ul className="mt-0.5 space-y-0.5">
                   {where.says.map((line, index) => (
-                    <li key={index} className="text-xs leading-relaxed text-neutral-300">
+                    <li key={index} className="text-meta leading-relaxed text-ink-dim">
                       {line}
                     </li>
                   ))}

@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type Found, type Held, type HeldBefore } from '@/lib/api'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { SOURCE } from '@/lib/palette'
 
 /**
  * What the table is carrying, and what it was carrying before.
@@ -64,10 +64,10 @@ export default function PartyPage() {
     <Shell campaign={campaign} section="party">
       <div className="mx-auto max-w-3xl px-6 py-10">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-xl font-medium text-neutral-100">Carried</h1>
+          <h1 className="text-title font-medium text-ink">Carried</h1>
           <button
             onClick={() => setAdding((was) => !was)}
-            className="text-[11px] text-neutral-500 hover:text-neutral-300"
+            className="text-label text-ink-dim hover:text-ink-dim"
           >
             {adding ? 'cancel' : 'give the party something'}
           </button>
@@ -82,29 +82,29 @@ export default function PartyPage() {
           />
         )}
 
-        {failed && <p className="mt-3 text-xs text-neutral-400">⚠ {failed}</p>}
+        {failed && <p className="mt-3 text-meta text-ink-dim">⚠ {failed}</p>}
 
         {[...byHolder.entries()].map(([holder, items]) => (
           <section key={holder} className="mt-7">
-            <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+            <h2 className="text-label uppercase tracking-widest text-ink-faint">
               {holder}
             </h2>
             <ul className="mt-2 flex flex-col">
               {items.map((one) => (
                 <li
                   key={one.item_id}
-                  className="flex items-baseline gap-3 border-b border-neutral-900 py-2"
+                  className="flex items-baseline gap-3 border-b border-line py-2"
                 >
                   <Link
                     href={`/c/${campaign}/e/${encodeURIComponent(one.item_id)}`}
-                    className={`text-sm hover:underline ${
-                      one.plane === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                    className={`text-ui hover:underline ${
+                      one.plane === 'campaign' ? SOURCE.yours : 'text-ink'
                     }`}
                   >
                     {one.name}
                   </Link>
                   {one.since_session && (
-                    <span className="text-[11px] text-neutral-600">
+                    <span className="text-label text-ink-faint">
                       since session {one.since_session}
                     </span>
                   )}
@@ -116,13 +116,13 @@ export default function PartyPage() {
                           .then((r) => setPast({ item: one.name, rows: r.held_by }))
                           .catch(() => undefined)
                       }
-                      className="text-[11px] text-neutral-600 hover:text-neutral-400"
+                      className="text-label text-ink-faint hover:text-ink-dim"
                     >
                       before this
                     </button>
                     <button
                       onClick={() => setGiving(one)}
-                      className="text-[11px] text-neutral-500 hover:text-neutral-300"
+                      className="text-label text-ink-dim hover:text-ink-dim"
                     >
                       hand over
                     </button>
@@ -133,7 +133,7 @@ export default function PartyPage() {
                           .then(load)
                           .catch(() => undefined)
                       }
-                      className="text-[11px] text-neutral-600 hover:text-neutral-400"
+                      className="text-label text-ink-faint hover:text-ink-dim"
                     >
                       drop
                     </button>
@@ -145,16 +145,16 @@ export default function PartyPage() {
         ))}
 
         {held.length === 0 && (
-          <p className="mt-6 text-sm text-neutral-600">Nobody is carrying anything.</p>
+          <p className="mt-6 text-ui text-ink-faint">Nobody is carrying anything.</p>
         )}
 
         {giving && (
           <div className="mt-6">
-            <p className="text-sm text-neutral-400">
+            <p className="text-ui text-ink-dim">
               Hand {giving.name} to&hellip;{' '}
               <button
                 onClick={() => setGiving(null)}
-                className="text-[11px] text-neutral-600 hover:text-neutral-400"
+                className="text-label text-ink-faint hover:text-ink-dim"
               >
                 cancel
               </button>
@@ -176,15 +176,15 @@ export default function PartyPage() {
         )}
 
         {past && (
-          <section className="mt-8 rounded border border-neutral-800 bg-neutral-900/40 p-3">
-            <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <section className="mt-8 rounded-md border border-line bg-surface/40 p-3">
+            <h2 className="text-label uppercase tracking-widest text-ink-faint">
               {past.item} — every hand it passed through
             </h2>
             <ul className="mt-2 flex flex-col gap-1">
               {past.rows.map((row, i) => (
-                <li key={i} className="text-sm text-neutral-400">
+                <li key={i} className="text-ui text-ink-dim">
                   {row.holder}
-                  <span className="ml-2 text-[11px] text-neutral-600">
+                  <span className="ml-2 text-label text-ink-faint">
                     {row.until_session === null
                       ? 'has it now'
                       : row.until_session === ''
@@ -196,7 +196,7 @@ export default function PartyPage() {
             </ul>
             <button
               onClick={() => setPast(null)}
-              className="mt-2 text-[11px] text-neutral-600 hover:text-neutral-400"
+              className="mt-2 text-label text-ink-faint hover:text-ink-dim"
             >
               close
             </button>
@@ -241,29 +241,29 @@ function Picker({
   const rows = extra ? [extra, ...shown] : shown
 
   return (
-    <div className="mt-3 max-w-sm rounded border border-neutral-800 bg-neutral-900/50 p-2">
+    <div className="mt-3 max-w-sm rounded-md border border-line bg-surface/50 p-2">
       <input
         autoFocus
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder={label}
-        className={`w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+        className={`w-full rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
       />
       <ul className="mt-1 flex max-h-48 flex-col overflow-y-auto">
         {rows.map((entity) => (
           <li key={entity.entity_id}>
             <button
               onClick={() => onPick(entity)}
-              className="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-neutral-800"
+              className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-ui hover:bg-overlay"
             >
               <span
                 className={
-                  entity.plane === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                  entity.plane === 'campaign' ? SOURCE.yours : 'text-ink'
                 }
               >
                 {entity.name}
               </span>
-              <span className="ml-auto text-[10px] uppercase tracking-wide text-neutral-600">
+              <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
                 {entity.labels.join(' ').toLowerCase()}
               </span>
             </button>

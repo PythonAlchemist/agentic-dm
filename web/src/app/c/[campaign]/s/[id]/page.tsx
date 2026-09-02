@@ -7,8 +7,8 @@ import { EntityProfile } from '@/components/product/EntityProfile'
 import { Reveal } from '@/components/product/Reveal'
 import { Shell } from '@/components/product/Shell'
 import { labAPI, type EntityRead, type SectionRead } from '@/lib/api'
-import { readingBlocks } from '@/lib/reading'
-import { SOURCE } from '@/lib/palette'
+import { EMPHASIS_MARK, readingBlocks, withEmphasis } from '@/lib/reading'
+import { SOURCE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
 
 /**
  * A section, read the way the book set it.
@@ -22,6 +22,16 @@ import { SOURCE } from '@/lib/palette'
  * CLICKING A NAME OPENS A POPOUT, NOT A NEW PAGE. Mid-session a DM wants to
  * know who somebody is without losing the paragraph they were reading aloud.
  * Escape returns them to it.
+ *
+ * THE BOOK'S WORDS ARE SET IN THE BOOK'S FACE. Literata appears here and in
+ * almost nowhere else in the product, because the face is a provenance channel
+ * rather than a mood: a reader who cannot use the hues at all still sees that
+ * this page is quoting and the app's chrome is not. A DM's own scene is set in
+ * the app's face for exactly the same reason -- it is their writing, not the
+ * book's -- so the two never look alike even in a screenshot with no colour.
+ *
+ * AND IT IS SET TO BE READ, at 16px on a 42rem measure. It was 13px full-width
+ * sans, which is how you set a log file.
  */
 export default function SectionPage() {
   const params = useParams<{ campaign: string; id: string }>()
@@ -64,67 +74,66 @@ export default function SectionPage() {
   return (
     <Shell campaign={campaign} section="library">
       {failed && (
-        <p className="mx-auto max-w-3xl px-6 py-10 text-sm text-neutral-500">
+        <p className="mx-auto max-w-3xl px-6 py-10 text-ui text-ink-dim">
           Could not open that section.
         </p>
       )}
 
       {section && (
-        <article className="mx-auto max-w-3xl px-6 py-10">
-          {/* WHOSE WORDS THESE ARE, before the words. */}
-          <p className="text-xs">
+        <div className="mx-auto grid max-w-5xl gap-10 px-6 py-12 lg:grid-cols-[42rem_1fr]">
+        <article>
+          {/* WHOSE WORDS THESE ARE, before the words -- in all three channels
+              the grammar requires: the glyph, the word, and the hue. */}
+          <p className="text-label uppercase tracking-widest">
             {yours ? (
               <>
-                <span className={SOURCE.yours}>Yours.</span>{' '}
-                <span className="text-neutral-500">Written for this campaign.</span>
+                <span className={SOURCE.yours}>
+                  {SOURCE_GLYPH.yours} {SOURCE_WORD.yours}
+                </span>{' '}
+                <span className="text-ink-faint">written for this campaign</span>
               </>
             ) : (
               <>
-                <span className={SOURCE.book}>The book.</span>{' '}
-                <span className="text-neutral-500">{section.chapter}</span>
+                <span className={SOURCE.book}>
+                  {SOURCE_GLYPH.book} {SOURCE_WORD.book}
+                </span>{' '}
+                <span className="text-ink-faint">{section.chapter}</span>
               </>
             )}
           </p>
-          <h1 className="mt-1 text-2xl font-medium text-neutral-100">
+          <h1 className="mt-2 text-title font-medium text-ink">
             {section.heading}
           </h1>
 
-          {/* THE OTHER HALF OF THE GRANT, and the half the whole design rests
-              on. Telling the table an NPC exists is not letting them read what
-              the book says about him -- a party can know Strahd for ten
-              sessions before they may read the passage. Without this control a
-              DM could reveal people and never a scene, which would make the
-              section grant a thing only the tests could exercise. */}
-          <div className="mt-3">
-            <Reveal
-              campaign={campaign}
-              target={section.section_id}
-              name={section.heading}
-            />
-          </div>
-
-          <div className="mt-6 flex flex-col gap-5">
+          <div className="mt-8 flex flex-col gap-6">
             {readingBlocks(section.text, section.heading).map((block, i) =>
               block.kind === 'illustration' ? (
-                <figure key={i} className="flex flex-col gap-1.5">
+                <figure key={i} className="my-2 flex flex-col gap-2">
+                  {/* THE PLATE IS THE BOOK'S TOO, and says so in the same
+                      grammar as its sentences. No border: a frame around a
+                      printed illustration is a second frame. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={block.src}
                     alt={block.alt}
                     loading="lazy"
-                    className="max-w-full rounded border border-neutral-800"
+                    className="max-w-full rounded-md"
                   />
-                  <figcaption className={`text-[11px] ${SOURCE.book}`}>
-                    the book&rsquo;s art
+                  <figcaption
+                    className={`text-label uppercase tracking-widest ${SOURCE.book}`}
+                  >
+                    {SOURCE_GLYPH.book} the book&rsquo;s art
                   </figcaption>
                 </figure>
               ) : (
                 <p
                   key={i}
-                  className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200"
+                  className={`whitespace-pre-wrap ${
+                    yours ? 'text-body text-ink' : 'font-serif text-canon text-ink'
+                  }`}
                 >
                   <Named
-                    text={block.text}
+                    text={withEmphasis(block.text)}
                     mentions={section.mentions}
                     onOpen={openEntity}
                   />
@@ -133,15 +142,33 @@ export default function SectionPage() {
             )}
           </div>
         </article>
+
+        {/* THE RAIL IS WHERE THE APPARATUS LIVES. The reveal control sat
+            between the title and the first sentence, so a DM's decision
+            interrupted the reading every single time -- and this page exists
+            to be read aloud. Beside the column it is one glance away and never
+            in the way.
+
+            IT IS THE OTHER HALF OF THE GRANT, and the half the whole design
+            rests on: telling the table an NPC exists is not letting them read
+            what the book says about him. */}
+        <aside className="hidden lg:block">
+          <Reveal
+            campaign={campaign}
+            target={section.section_id}
+            name={section.heading}
+          />
+        </aside>
+        </div>
       )}
 
       {popout && (
         <div
-          className="fixed inset-0 z-20 flex items-start justify-center bg-neutral-950/70 p-6 pt-20"
+          className="fixed inset-0 z-20 flex items-start justify-center bg-ground/70 p-6 pt-20"
           onClick={() => setPopout(null)}
         >
           <div
-            className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-900 p-5 shadow-xl"
+            className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-md border border-line bg-surface p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <EntityProfile
@@ -156,6 +183,17 @@ export default function SectionPage() {
         </div>
       )}
     </Shell>
+  )
+}
+
+/** Turn the marked runs into real emphasis. */
+function emphasise(piece: string, key: number) {
+  return (
+    <span key={key}>
+      {piece.split(EMPHASIS_MARK).map((part, n) =>
+        n % 2 === 1 ? <em key={n}>{part}</em> : part,
+      )}
+    </span>
   )
 }
 
@@ -193,13 +231,16 @@ function Named({
     <>
       {text.split(pattern).map((piece, i) => {
         const mention = found.get(piece.toLowerCase())
-        if (!mention) return piece
+        // THE BOOK'S ITALICS, restored. `withEmphasis` marked them with an
+        // invisible separator so this pass can turn them into <em> without a
+        // second regex fighting the mention split.
+        if (!mention) return piece.includes(EMPHASIS_MARK) ? emphasise(piece, i) : piece
         return (
           <button
             key={i}
             onClick={() => onOpen(mention.entity_id)}
             className={`underline decoration-dotted underline-offset-2 hover:decoration-solid ${
-              mention.plane === 'campaign' ? SOURCE.yours : 'text-neutral-100'
+              mention.plane === 'campaign' ? SOURCE.yours : 'text-ink'
             }`}
           >
             {piece}

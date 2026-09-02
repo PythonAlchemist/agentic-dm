@@ -30,9 +30,9 @@ export function Slider({
 }) {
   return (
     <div>
-      <div className="mb-1.5 flex items-baseline justify-between text-sm">
-        <span className="text-neutral-300">{label}</span>
-        <span className="tabular-nums text-neutral-500">{value}</span>
+      <div className="mb-1.5 flex items-baseline justify-between text-ui">
+        <span className="text-ink-dim">{label}</span>
+        <span className="tabular-nums text-ink-dim">{value}</span>
       </div>
       <RadixSlider.Root
         value={[value]}
@@ -42,15 +42,15 @@ export function Slider({
         onValueChange={([next]) => onChange(next)}
         className="relative flex h-5 w-full touch-none select-none items-center"
       >
-        <RadixSlider.Track className="relative h-1 grow rounded-full bg-neutral-800">
-          <RadixSlider.Range className="absolute h-full rounded-full bg-neutral-500" />
+        <RadixSlider.Track className="relative h-1 grow rounded-full bg-overlay">
+          <RadixSlider.Range className="absolute h-full rounded-full bg-ink-dim" />
         </RadixSlider.Track>
         <RadixSlider.Thumb
           aria-label={label}
-          className="block h-4 w-4 rounded-full bg-neutral-200 shadow transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+          className="block h-4 w-4 rounded-full bg-chrome shadow transition-shadow focus:focus-visible:ring-2 focus-visible:ring-amber-400"
         />
       </RadixSlider.Root>
-      {hint && <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">{hint}</p>}
+      {hint && <p className="mt-1.5 text-meta leading-relaxed text-ink-dim">{hint}</p>}
     </div>
   )
 }
@@ -74,7 +74,7 @@ export function Explain({ children, text }: { children: ReactNode; text: string 
           side="top"
           sideOffset={6}
           collisionPadding={12}
-          className="z-50 max-w-xs rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs leading-relaxed text-neutral-300 shadow-xl"
+          className="z-50 max-w-xs rounded-md border border-line bg-surface px-3 py-2 text-meta leading-relaxed text-ink-dim shadow-xl"
         >
           {text}
           <RadixTooltip.Arrow className="fill-neutral-700" />
@@ -96,10 +96,10 @@ export function Card({
   className?: string
 }) {
   return (
-    <div className={`rounded-lg border border-neutral-800 bg-neutral-900/40 ${className}`}>
+    <div className={`rounded-md border border-line bg-surface/40 ${className}`}>
       {title && (
-        <div className="flex items-baseline justify-between border-b border-neutral-800 px-3 py-2">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+        <div className="flex items-baseline justify-between border-b border-line px-3 py-2">
+          <span className="text-label font-medium uppercase tracking-wider text-ink-dim">
             {title}
           </span>
           {right}
@@ -127,17 +127,17 @@ export function TabBar<T extends string>({
   onChange: (id: T) => void
 }) {
   return (
-    <div className="inline-flex gap-1 rounded-lg border border-neutral-800 bg-neutral-900/60 p-1" role="tablist">
+    <div className="inline-flex gap-1 rounded-md border border-line bg-surface/60 p-1" role="tablist">
       {tabs.map((tab) => (
         <button
           key={tab.id}
           role="tab"
           aria-selected={tab.id === active}
           onClick={() => onChange(tab.id)}
-          className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+          className={`rounded-md px-3 py-1.5 text-ui transition-colors ${
             tab.id === active
-              ? 'bg-neutral-800 text-neutral-100'
-              : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-200'
+              ? 'bg-overlay text-ink'
+              : 'text-ink-dim hover:bg-overlay/60 hover:text-ink'
           }`}
         >
           {tab.label}
@@ -166,14 +166,14 @@ export function PaneHeader({
   children?: ReactNode
 }) {
   return (
-    <div className="flex shrink-0 items-baseline gap-3 border-b border-neutral-800 px-3 py-2">
-      <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+    <div className="flex shrink-0 items-baseline gap-3 border-b border-line px-3 py-2">
+      <span className="text-label font-medium uppercase tracking-wider text-ink-dim">
         {title}
       </span>
       {subtitle && (
-        <span className="min-w-0 truncate text-xs text-neutral-400">{subtitle}</span>
+        <span className="min-w-0 truncate text-meta text-ink-dim">{subtitle}</span>
       )}
-      <span className="ml-auto flex shrink-0 items-baseline gap-3 text-xs">
+      <span className="ml-auto flex shrink-0 items-baseline gap-3 text-meta">
         {children}
       </span>
     </div>

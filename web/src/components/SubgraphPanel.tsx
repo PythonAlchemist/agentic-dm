@@ -87,12 +87,12 @@ function GroupLine({ group, held }: { group: Group; held: Map<string, SubgraphVi
           bright/dim encoding is explained once, on the footer's counts. Kept
           hue-free deliberately -- colour already means how a NODE got here,
           and a green rel label would read as "seeded". */}
-      <span className={guessed ? 'text-neutral-500' : 'font-medium text-neutral-200'}>
+      <span className={guessed ? 'text-ink-dim' : 'font-medium text-ink'}>
         {group.dir === 'out' ? `${group.rel} →` : `← ${group.rel}`}
       </span>{' '}
       {group.others.map((other, i) => (
         <span key={`${other}-${i}`} className={guessed ? 'opacity-80' : ''}>
-          {i > 0 && <span className="text-neutral-700"> · </span>}
+          {i > 0 && <span className="text-ink-faint"> · </span>}
           <EndpointName name={other} held={held} />
         </span>
       ))}
@@ -142,35 +142,35 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
+        <span className="text-label font-medium uppercase tracking-wider text-ink-dim">
           In this conversation
         </span>
         <div className="flex items-center gap-2">
           {/* Both views read the same working set, so switching is free and
               never costs a call -- worth making obvious by keeping the toggle
               beside the turn counter rather than in the page's tab bar. */}
-          <div className="flex rounded-md border border-neutral-800">
+          <div className="flex rounded-md border border-line">
             {(['ledger', 'graph'] as const).map((id) => (
               <button
                 key={id}
                 onClick={() => setMode(id)}
-                className={`px-2 py-0.5 text-[11px] first:rounded-l-md last:rounded-r-md ${
+                className={`px-2 py-0.5 text-label first:rounded-l-md last:rounded-r-md ${
                   mode === id
-                    ? 'bg-neutral-800 text-neutral-100'
-                    : 'text-neutral-500 hover:bg-neutral-800/60'
+                    ? 'bg-overlay text-ink'
+                    : 'text-ink-dim hover:bg-overlay/60'
                 }`}
               >
                 {id}
               </button>
             ))}
           </div>
-          {view && <span className="text-xs text-neutral-600">turn {view.turn}</span>}
+          {view && <span className="text-meta text-ink-faint">turn {view.turn}</span>}
         </div>
       </div>
 
       {empty && (
-        <p className="p-3 text-xs leading-relaxed text-neutral-600">
+        <p className="p-3 text-meta leading-relaxed text-ink-faint">
           Nothing held yet. Ask something and what the conversation is about
           will appear here.
         </p>
@@ -190,7 +190,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
         <div
           className={
             mode === 'ledger'
-              ? 'min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 text-xs'
+              ? 'min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 text-meta'
               : 'hidden'
           }
         >
@@ -211,8 +211,8 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                       {HOW_GLYPH[n.how] ?? NOT_HELD_GLYPH}
                     </span>
                   </Explain>
-                  <span className="font-medium text-neutral-200">{n.name}</span>
-                  <span className="truncate text-neutral-600">{n.labels.join('/')}</span>
+                  <span className="font-medium text-ink">{n.name}</span>
+                  <span className="truncate text-ink-faint">{n.labels.join('/')}</span>
                   {/* NOT NAMED BY THE BOOK. Explicitly false only: a node the
                       lookup could not find is left unmarked rather than
                       described either way. */}
@@ -223,7 +223,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                           `sky`, which names THE TABLE -- something said in
                           conversation -- and these were never said by anyone. */}
                       <span
-                        className={`shrink-0 rounded border border-rose-900/70 px-1 text-[10px] ${SOURCE.invented}`}
+                        className={`shrink-0 rounded-md border border-rose-900/70 px-1 text-label ${SOURCE.invented}`}
                       >
                         unnamed
                       </span>
@@ -237,14 +237,14 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                           : 'Touched this turn, so pinned: the current subject cannot be evicted to make room for itself.'
                       }
                     >
-                      <span className={stale ? 'text-neutral-400' : 'text-neutral-600'}>
+                      <span className={stale ? 'text-ink-dim' : 'text-ink-faint'}>
                         t{n.turn}
                       </span>
                     </Explain>
                   </span>
                 </div>
                 {groups.length === 0 ? (
-                  <p className="pl-4 text-neutral-600">no relationships held</p>
+                  <p className="pl-4 text-ink-faint">no relationships held</p>
                 ) : (
                   <ul>
                     {groups.map((g, i) => (
@@ -262,12 +262,12 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
               the model reads is the old panel's sin. */}
           {shaped.orphans.length > 0 && (
             <div>
-              <p className="text-neutral-600">between names not held:</p>
+              <p className="text-ink-faint">between names not held:</p>
               <ul>
                 {shaped.orphans.map((e, i) => (
                   <li key={i} className="pl-4 leading-relaxed">
                     <EndpointName name={e.source} held={shaped.held} />{' '}
-                    <span className={e.status === 'accepted' ? 'font-medium text-neutral-200' : 'text-neutral-500'}>
+                    <span className={e.status === 'accepted' ? 'font-medium text-ink' : 'text-ink-dim'}>
                       {e.rel_type} →
                     </span>{' '}
                     <EndpointName name={e.target} held={shaped.held} />
@@ -279,7 +279,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
         </div>
       )}
 
-      <p className={empty ? 'hidden' : 'shrink-0 border-t border-neutral-800 px-3 py-2 text-xs text-neutral-600'}>
+      <p className={empty ? 'hidden' : 'shrink-0 border-t border-line px-3 py-2 text-meta text-ink-faint'}>
         <Explain text="Derived relationships (the bright lines) come from the book's own structure and are reliable. Guessed ones (the dim lines) come from an extractor and roughly a third are wrong — leads to check, never facts.">
           {(view?.edges.length ?? 0) - (shaped?.guessed ?? 0)} derived ·{' '}
           {shaped?.guessed ?? 0} guessed

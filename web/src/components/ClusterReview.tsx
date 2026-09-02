@@ -91,12 +91,12 @@ export function ClusterReview({
   if (elements.length === 0) return null
 
   return (
-    <div className="mt-3 rounded-md border border-neutral-800 bg-neutral-900/40 p-3">
+    <div className="mt-3 rounded-md border border-line bg-surface/40 p-3">
       <div className="mb-2 flex items-baseline justify-between">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+        <h4 className="text-meta font-medium uppercase tracking-wide text-ink-dim">
           What this contains
         </h4>
-        <span className="text-xs tabular-nums text-neutral-600">
+        <span className="text-meta tabular-nums text-ink-faint">
           {plan ? `${plan.elements.length} to store` : '…'}
         </span>
       </div>
@@ -109,10 +109,10 @@ export function ClusterReview({
           return (
             <li
               key={element.name}
-              className={`rounded border px-2 py-1.5 ${
+              className={`rounded-md border px-2 py-1.5 ${
                 collision
-                  ? 'border-neutral-600 bg-neutral-800/60'
-                  : 'border-neutral-800/80'
+                  ? 'border-line bg-overlay/60'
+                  : 'border-line/80'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -134,23 +134,23 @@ export function ClusterReview({
                   onChange={(e) =>
                     setRenames((prior) => ({ ...prior, [element.name]: e.target.value }))
                   }
-                  className={`min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 text-xs focus:border-neutral-700 focus:outline-none ${
-                    out ? 'text-neutral-600 line-through' : 'text-neutral-200'
+                  className={`min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 text-meta focus:border-line focus:${
+                    out ? 'text-ink-faint line-through' : 'text-ink'
                   }`}
                 />
-                <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-600">
+                <span className="shrink-0 text-label uppercase tracking-wide text-ink-faint">
                   {element.kind}
                 </span>
               </div>
               {element.role && (
-                <p className="ml-6 mt-0.5 text-[11px] text-neutral-500">{element.role}</p>
+                <p className="ml-6 mt-0.5 text-label text-ink-dim">{element.role}</p>
               )}
               {/* A COLLISION BLOCKS THE WRITE. `hb:` and the book's prefix are
                   different namespaces, so this would otherwise mint quietly and
                   leave two things answering to one name. */}
               {collision && (
-                <div className="ml-6 mt-1 text-[11px]">
-                  <span className="text-neutral-200">
+                <div className="ml-6 mt-1 text-label">
+                  <span className="text-ink">
                     {collision.canon_id} already has this name.
                   </span>
                   <div className="mt-1 flex gap-2">
@@ -158,11 +158,11 @@ export function ClusterReview({
                       onClick={() =>
                         setResolutions((p) => ({ ...p, [name]: 'link' }))
                       }
-                      className="rounded border border-neutral-700 px-2 py-0.5 hover:bg-neutral-800"
+                      className="rounded-md border border-line px-2 py-0.5 hover:bg-overlay"
                     >
                       use the book&apos;s
                     </button>
-                    <span className="text-neutral-600">or rename it above</span>
+                    <span className="text-ink-faint">or rename it above</span>
                   </div>
                 </div>
               )}
@@ -174,7 +174,7 @@ export function ClusterReview({
       {/* THE DROP REPORT IS RENDERED, not summarised away. A generation that
           proposed six things and had two kept should say which two and why. */}
       {plan && Object.keys(plan.dropped).length > 0 && (
-        <ul className="mt-2 space-y-0.5 border-t border-neutral-800 pt-2 text-[11px] text-neutral-500">
+        <ul className="mt-2 space-y-0.5 border-t border-line pt-2 text-label text-ink-dim">
           {Object.entries(plan.dropped).map(([reason, n]) => (
             <li key={reason}>
               {n} × {reason}
@@ -188,11 +188,11 @@ export function ClusterReview({
           suggestion where somebody ticks each one. What is listed here has
           already passed the book's own domain/range check. */}
       {plan && plan.edges.length > 0 && (
-        <div className="mt-2 border-t border-neutral-800 pt-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+        <div className="mt-2 border-t border-line pt-2">
+          <div className="text-label font-medium uppercase tracking-wide text-ink-dim">
             How they relate ({plan.edges.length})
           </div>
-          <ul className="mt-1 space-y-0.5 text-[11px] text-neutral-400">
+          <ul className="mt-1 space-y-0.5 text-label text-ink-dim">
             {plan.edges.map((edge) => (
               <li key={`${edge.source}-${edge.rel_type}-${edge.target}`}>
                 {edge.source}{' '}
@@ -209,17 +209,17 @@ export function ClusterReview({
           different claims. So it is offered, and a person decides -- the same
           shape as the name collisions above. */}
       {plan && plan.edges_reversible.length > 0 && (
-        <div className="mt-2 border-t border-neutral-800 pt-2">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-400">
+        <div className="mt-2 border-t border-line pt-2">
+          <div className="text-label font-medium uppercase tracking-wide text-ink-dim">
             Written backwards ({plan.edges_reversible.length})
           </div>
-          <ul className="mt-1 space-y-1 text-[11px] text-neutral-400">
+          <ul className="mt-1 space-y-1 text-label text-ink-dim">
             {plan.edges_reversible.map((edge) => {
               const key = edge.key
               return (
                 <li key={key} className="flex items-baseline gap-2">
                   <span className="min-w-0 flex-1">
-                    <span className="text-neutral-600 line-through">
+                    <span className="text-ink-faint line-through">
                       {edge.target} {edge.rel_type} {edge.source}
                     </span>
                     {' → '}
@@ -235,7 +235,7 @@ export function ClusterReview({
                         return next
                       })
                     }
-                    className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 hover:bg-neutral-800"
+                    className="shrink-0 rounded-md border border-line px-2 py-0.5 hover:bg-overlay"
                   >
                     turn it round
                   </button>
@@ -246,7 +246,7 @@ export function ClusterReview({
         </div>
       )}
       {plan && Object.keys(plan.edges_dropped).length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-[11px] text-neutral-500">
+        <ul className="mt-2 space-y-0.5 text-label text-ink-dim">
           {Object.entries(plan.edges_dropped).map(([reason, n]) => (
             <li key={reason}>
               {n} × relationship dropped — {reason}
@@ -255,13 +255,13 @@ export function ClusterReview({
         </ul>
       )}
       {Object.keys(card.manifest_dropped ?? {}).length > 0 && (
-        <p className="mt-1 text-[11px] text-neutral-600">
+        <p className="mt-1 text-label text-ink-faint">
           {Object.entries(card.manifest_dropped ?? {})
             .map(([reason, n]) => `${n} × ${reason}`)
             .join(' · ')}
         </p>
       )}
-      {failed && <p className="mt-2 text-[11px] text-red-400">{failed}</p>}
+      {failed && <p className="mt-2 text-label text-red-400">{failed}</p>}
     </div>
   )
 }

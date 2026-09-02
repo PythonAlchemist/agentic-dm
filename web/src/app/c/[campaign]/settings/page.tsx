@@ -70,22 +70,22 @@ export default function SettingsPage() {
     <Shell campaign={campaign} section="settings">
       <div className="mx-auto flex max-w-2xl flex-col gap-10 px-6 py-10">
         <section>
-          <h1 className="text-xl font-medium text-neutral-100">This table</h1>
+          <h1 className="text-title font-medium text-ink">This table</h1>
           <div className="mt-4 flex gap-2">
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className={`min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+              className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink`}
             />
             <button
               onClick={() => save({ name })}
-              className={`shrink-0 rounded px-3 py-1.5 text-xs ${CHROME.primary}`}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-meta ${CHROME.primary}`}
             >
               rename
             </button>
           </div>
-          <p className="mt-2 text-[11px] text-neutral-600">
-            Keyed as <span className="text-neutral-400">{campaign}</span>, which
+          <p className="mt-2 text-label text-ink-faint">
+            Keyed as <span className="text-ink-dim">{campaign}</span>, which
             cannot change &mdash; every scene, entity and mention this table has
             ever written carries it.
             {settings?.owner && <> Run by {settings.owner}.</>}
@@ -93,10 +93,10 @@ export default function SettingsPage() {
         </section>
 
         <section>
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             What this campaign is
           </h2>
-          <p className="mt-1 text-[11px] text-neutral-600">
+          <p className="mt-1 text-label text-ink-faint">
             Written down, and read like any other scene &mdash; names you use
             here connect to the book on their own.
           </p>
@@ -105,27 +105,27 @@ export default function SettingsPage() {
             onChange={(e) => setPremise(e.target.value)}
             rows={6}
             placeholder="The pitch, the house rules, what happened before session one."
-            className={`mt-2 w-full resize-y rounded border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm leading-relaxed text-neutral-200 outline-none ${CHROME.focus}`}
+            className={`mt-2 w-full resize-y rounded-md border border-line bg-ground px-3 py-2 text-ui leading-relaxed text-ink`}
           />
           <button
             onClick={() => save({ premise })}
-            className={`mt-2 rounded px-3 py-1.5 text-xs ${CHROME.primary}`}
+            className={`mt-2 rounded-md px-3 py-1.5 text-meta ${CHROME.primary}`}
           >
             save
           </button>
         </section>
 
         <section>
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Books it draws on
           </h2>
           <ul className="mt-2 flex flex-col gap-1">
             {books.map((book) => (
-              <li key={book.slug} className="flex items-baseline gap-3 text-sm">
-                <span className={drawn.has(book.slug) ? SOURCE.book : 'text-neutral-500'}>
+              <li key={book.slug} className="flex items-baseline gap-3 text-ui">
+                <span className={drawn.has(book.slug) ? SOURCE.book : 'text-ink-dim'}>
                   {book.title}
                 </span>
-                <span className="text-[11px] text-neutral-700">
+                <span className="text-label text-ink-faint">
                   {book.chapters} chapters
                 </span>
                 <button
@@ -134,40 +134,40 @@ export default function SettingsPage() {
                       ? tableAPI.dropBook(campaign, book.slug).then(load)
                       : save({ book: book.slug })
                   }
-                  className="ml-auto text-[11px] text-neutral-500 hover:text-neutral-300"
+                  className="ml-auto text-label text-ink-dim hover:text-ink-dim"
                 >
                   {drawn.has(book.slug) ? 'stop playing from it' : 'play from it'}
                 </button>
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] text-neutral-600">
+          <p className="mt-2 text-label text-ink-faint">
             Stopping does not delete anything. New scans stop looking in that
             book; what you wrote about it stays.
           </p>
         </section>
 
         <section>
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Who sits here
           </h2>
           <ul className="mt-2 flex flex-col gap-1">
             {seats.map((seat) => (
-              <li key={seat.reader} className="flex items-baseline gap-3 text-sm">
-                <span className="text-neutral-200">{seat.reader}</span>
-                <span className="text-[11px] uppercase tracking-wide text-neutral-600">
+              <li key={seat.reader} className="flex items-baseline gap-3 text-ui">
+                <span className="text-ink">{seat.reader}</span>
+                <span className="text-label uppercase tracking-wide text-ink-faint">
                   {seat.role}
                 </span>
                 <button
                   onClick={() => tableAPI.unseat(campaign, seat.reader).then(load)}
-                  className="ml-auto text-[11px] text-neutral-600 hover:text-neutral-400"
+                  className="ml-auto text-label text-ink-faint hover:text-ink-dim"
                 >
                   remove
                 </button>
               </li>
             ))}
             {seats.length === 0 && (
-              <li className="text-sm text-neutral-600">
+              <li className="text-ui text-ink-faint">
                 Only you. The owner of a table is its DM without being seated.
               </li>
             )}
@@ -178,12 +178,12 @@ export default function SettingsPage() {
               value={who}
               onChange={(e) => setWho(e.target.value)}
               placeholder="reader name"
-              className={`min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+              className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
             />
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="shrink-0 rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-300"
+              className="shrink-0 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink-dim"
             >
               <option value="player">player</option>
               <option value="dm">dm</option>
@@ -198,7 +198,7 @@ export default function SettingsPage() {
                   })
                   .catch((error) => setFailed(String(error).replace(/^Error:\s*/, '')))
               }
-              className={`shrink-0 rounded px-3 py-1 text-xs ${CHROME.primary}`}
+              className={`shrink-0 rounded-md px-3 py-1 text-meta ${CHROME.primary}`}
             >
               seat
             </button>
@@ -206,7 +206,7 @@ export default function SettingsPage() {
         </section>
 
         {(saved || failed) && (
-          <p className="text-[11px] text-neutral-500">{failed ? `⚠ ${failed}` : saved}</p>
+          <p className="text-label text-ink-dim">{failed ? `⚠ ${failed}` : saved}</p>
         )}
       </div>
     </Shell>

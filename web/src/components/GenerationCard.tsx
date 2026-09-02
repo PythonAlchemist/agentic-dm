@@ -203,7 +203,7 @@ export function GenerationCard({
 
   if (card.error) {
     return (
-      <div className="rounded-md border border-red-900/60 bg-red-950/20 p-3 text-sm">
+      <div className="rounded-md border border-red-900/60 bg-red-950/20 p-3 text-ui">
         <p className="text-red-400">
           The {card.kind} draft failed: {card.error}
         </p>
@@ -214,8 +214,8 @@ export function GenerationCard({
   return (
     <div className="rounded-md border border-amber-900/50 bg-amber-500/[0.03] p-3">
       <div className="mb-2 flex items-baseline justify-between gap-3">
-        <h3 className="text-sm font-medium text-amber-200">{card.title}</h3>
-        <span className="shrink-0 text-xs uppercase tracking-wide text-neutral-600">
+        <h3 className="text-ui font-medium text-amber-200">{card.title}</h3>
+        <span className="shrink-0 text-meta uppercase tracking-wide text-ink-faint">
           draft {card.kind}
         </span>
       </div>
@@ -224,7 +224,7 @@ export function GenerationCard({
         value={body}
         onChange={(e) => setBody(e.target.value)}
         rows={7}
-        className="w-full rounded border border-neutral-800 bg-neutral-900/60 p-2 text-sm leading-relaxed outline-none focus:border-neutral-500"
+        className="w-full rounded-md border border-line bg-surface/60 p-2 text-ui leading-relaxed focus:border-line"
       />
       {onRevise && (
         <div className="mt-2 flex items-center gap-2">
@@ -238,7 +238,7 @@ export function GenerationCard({
               }
             }}
             placeholder="Same again, but… (make her older, lose the storm)"
-            className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-neutral-500"
+            className="min-w-0 flex-1 rounded-md border border-line bg-surface/60 px-2 py-1 text-meta focus:border-line"
           />
           <button
             onClick={() => {
@@ -247,7 +247,7 @@ export function GenerationCard({
               setNote('')
             }}
             disabled={!note.trim() || revising}
-            className="shrink-0 rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-400 hover:text-amber-300 disabled:opacity-40"
+            className="shrink-0 rounded-md border border-line px-2 py-1 text-meta text-ink-dim hover:text-amber-300 disabled:opacity-40"
           >
             {revising ? 'writing…' : 'again'}
           </button>
@@ -257,13 +257,13 @@ export function GenerationCard({
       {/* Said plainly, because nothing re-checks a body after a person edits
           it -- the citations below still claim what the model claimed. */}
       {edited && (
-        <p className="mt-1 text-xs text-neutral-400">
+        <p className="mt-1 text-meta text-ink-dim">
           Edited. The citations below were made about the original text and are
           not re-checked.
         </p>
       )}
 
-      <div className="mt-3 space-y-2 text-xs">
+      <div className="mt-3 space-y-2 text-meta">
         {/* FOUR SOURCES, FOUR HUES, AND NO TWO OF THEM ADJACENT. `From your own
             material` and `Invented` were amber-200 and amber-300 -- one shade
             step apart, in the one product whose entire promise is that a DM can
@@ -278,14 +278,14 @@ export function GenerationCard({
           label="From the book"
           hint="Each cites a passage. A pointer for you to check, not a proof."
           items={card.from_canon.map((c) => `${c.claim} ${c.cite}`)}
-          tone="text-emerald-300/80"
+          tone="text-book"
         />
         {(card.from_yours?.length ?? 0) > 0 && (
           <Provenance
             label="From your own material"
             hint="Cited, but to a section you wrote — not to the book."
             items={(card.from_yours ?? []).map((c) => `${c.claim} ${c.cite}`)}
-            tone="text-amber-200/80"
+            tone="text-yours"
           />
         )}
         {(card.from_context?.length ?? 0) > 0 && (
@@ -293,14 +293,14 @@ export function GenerationCard({
             label="From this conversation"
             hint="Taken from what you said at the table, not from the book."
             items={card.from_context ?? []}
-            tone="text-sky-300/80"
+            tone="text-table"
           />
         )}
         <Provenance
           label="Invented"
           hint="The model supplied these. Nothing in the book says them."
           items={card.invented}
-          tone="text-rose-300/80"
+          tone="text-invented"
         />
       </div>
 
@@ -314,27 +314,27 @@ export function GenerationCard({
       )}
 
       {campaign && isRevision && (
-        <div className="mt-3 border-t border-neutral-800 pt-3">
+        <div className="mt-3 border-t border-line pt-3">
           <div className="flex items-center gap-3">
             <button
               onClick={store}
               disabled={busy || !!stored}
-              className="rounded-md bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-40"
+              className="rounded-md bg-chrome px-3 py-1.5 text-meta font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
             >
               {stored ? 'Replaced' : busy ? 'Replacing…' : 'Replace what you have'}
             </button>
-            <span className="text-xs text-neutral-500">
+            <span className="text-meta text-ink-dim">
               Rewrites the section in place. It keeps its position, its
               citations and everything pointing at it.
             </span>
           </div>
-          {failed && <p className="mt-2 text-xs text-red-400">{failed}</p>}
+          {failed && <p className="mt-2 text-meta text-red-400">{failed}</p>}
         </div>
       )}
 
       {campaign && !isRevision ? (
-        <div className="mt-3 border-t border-neutral-800 pt-3">
-          <label className="block text-xs text-neutral-400">
+        <div className="mt-3 border-t border-line pt-3">
+          <label className="block text-meta text-ink-dim">
             {card.expands
               ? 'Where it goes in your running order (a write-up usually goes nowhere)'
               : 'Where it goes in your running order'}
@@ -352,10 +352,10 @@ export function GenerationCard({
                   <button
                     key={`chip-${row.section_id}`}
                     onClick={() => setAnchor(row.section_id)}
-                    className={`rounded-full border px-2 py-0.5 text-[11px] transition-colors ${
+                    className={`rounded-full border px-2 py-0.5 text-label transition-colors ${
                       anchor === row.section_id
-                        ? 'border-neutral-500 bg-neutral-700 text-neutral-100'
-                        : 'border-neutral-800 text-neutral-500 hover:border-neutral-600 hover:text-neutral-300'
+                        ? 'border-line bg-overlay text-ink'
+                        : 'border-line text-ink-dim hover:border-line hover:text-ink-dim'
                     }`}
                   >
                     {row.heading}
@@ -366,7 +366,7 @@ export function GenerationCard({
             <select
               value={anchor}
               onChange={(e) => setAnchor(e.target.value)}
-              className="mt-1 w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-xs text-neutral-200"
+              className="mt-1 w-full rounded-md border border-line bg-surface px-2 py-1.5 text-meta text-ink"
             >
               <option value="">Nowhere in particular</option>
               {/* THE PASSAGES THIS WAS WRITTEN AGAINST, first and by
@@ -408,7 +408,7 @@ export function GenerationCard({
               ))}
             </select>
             {card.anchor && anchor === card.anchor && (
-              <span className="mt-1 block text-[11px] text-neutral-500">
+              <span className="mt-1 block text-label text-ink-dim">
                 Suggested from the passages this draft was written against.
               </span>
             )}
@@ -418,19 +418,19 @@ export function GenerationCard({
             <button
               onClick={store}
               disabled={busy || !!stored || blocked}
-              className="rounded-md bg-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-950 transition-colors hover:bg-white disabled:opacity-40"
+              className="rounded-md bg-chrome px-3 py-1.5 text-meta font-medium text-ground transition-colors hover:bg-white disabled:opacity-40"
             >
               {stored ? 'Stored' : busy ? 'Storing…' : 'Store in my campaign'}
             </button>
             {stored && (
-              <span className="text-xs text-neutral-500">
-                Written as <code className="text-neutral-400">{stored}</code>
+              <span className="text-meta text-ink-dim">
+                Written as <code className="text-ink-dim">{stored}</code>
               </span>
             )}
             {/* Named, not merely disabled: a greyed button with no reason
                 beside it is a dead end rather than a decision. */}
             {blocked && (
-              <span className="text-xs text-neutral-300">
+              <span className="text-meta text-ink-dim">
                 Resolve the name{plan!.collisions.length === 1 ? '' : 's'} above first.
               </span>
             )}
@@ -445,7 +445,7 @@ export function GenerationCard({
               <button
                 onClick={findCast}
                 disabled={finding || busy}
-                className="text-xs text-neutral-500 underline-offset-2 transition-colors hover:text-neutral-200 hover:underline disabled:opacity-40"
+                className="text-meta text-ink-dim underline-offset-2 transition-colors hover:text-ink hover:underline disabled:opacity-40"
               >
                 {finding ? 'reading…' : 'find what it contains'}
               </button>
@@ -457,16 +457,16 @@ export function GenerationCard({
             {!stored && onDiscard && (
               <button
                 onClick={onDiscard}
-                className="ml-auto text-xs text-neutral-600 transition-colors hover:text-rose-300"
+                className="ml-auto text-meta text-ink-faint transition-colors hover:text-rose-300"
               >
                 discard
               </button>
             )}
           </div>
-          {failed && <p className="mt-2 text-xs text-red-400">{failed}</p>}
+          {failed && <p className="mt-2 text-meta text-red-400">{failed}</p>}
         </div>
       ) : campaign ? null : (
-        <p className="mt-3 border-t border-neutral-800 pt-3 text-xs text-neutral-500">
+        <p className="mt-3 border-t border-line pt-3 text-meta text-ink-dim">
           Pick a table on the left to store this. Canon-only sessions have
           nowhere to put it.
         </p>
@@ -544,11 +544,11 @@ function Provenance({
   return (
     <div>
       <div className={`font-medium ${tone}`}>
-        {label} <span className="text-neutral-600">({items.length})</span>
+        {label} <span className="text-ink-faint">({items.length})</span>
       </div>
-      <p className="text-neutral-600">{hint}</p>
+      <p className="text-ink-faint">{hint}</p>
       {items.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-neutral-400">
+        <ul className="mt-1 space-y-0.5 text-ink-dim">
           {items.map((item, index) => (
             <li key={index}>· {item}</li>
           ))}

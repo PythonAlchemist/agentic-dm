@@ -68,8 +68,11 @@ export function Reveal({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-baseline gap-2">
-        <span className="text-[11px] text-neutral-600">
+      {/* STACKED, NOT A ROW. This sits in the section reader's narrow rail as
+          well as under a profile heading, and a horizontal row wrapped "tell
+          them" onto two lines mid-phrase. */}
+      <div className="flex flex-col items-start gap-1.5">
+        <span className="text-meta text-ink-faint">
           {grant
             ? grant.as_name
               ? `Your table knows this as “${grant.as_name}”.`
@@ -79,25 +82,25 @@ export function Reveal({
         {grant ? (
           <button
             onClick={() => act(tableAPI.conceal(campaign, target))}
-            className="text-[11px] text-neutral-500 hover:text-neutral-300"
+            className="text-label uppercase tracking-widest text-ink-dim hover:text-ink"
           >
             take it back
           </button>
         ) : (
-          <>
+          <div className="flex flex-col items-start gap-1">
             <button
               onClick={() => act(tableAPI.tellTable(campaign, target))}
-              className={`rounded px-1.5 py-0.5 text-[11px] ${CHROME.selected}`}
+              className={`rounded-md px-2 py-1 text-label uppercase tracking-widest ${CHROME.selected}`}
             >
               tell them
             </button>
             <button
               onClick={() => setNaming((was) => !was)}
-              className="text-[11px] text-neutral-600 hover:text-neutral-400"
+              className="text-meta text-ink-faint hover:text-ink-dim"
             >
               under another name
             </button>
-          </>
+          </div>
         )}
       </div>
 
@@ -115,11 +118,11 @@ export function Reveal({
             // How a party actually meets somebody: the coachman for three
             // sessions before Strahd.
             placeholder={`what they call ${name}`}
-            className={`min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[11px] text-neutral-200 outline-none ${CHROME.focus}`}
+            className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-0.5 text-label text-ink`}
           />
           <button
             onClick={() => alias.trim() && act(tableAPI.tellTable(campaign, target, alias.trim()))}
-            className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${CHROME.selected}`}
+            className={`shrink-0 rounded-md px-1.5 py-0.5 text-label ${CHROME.selected}`}
           >
             tell them that
           </button>
@@ -127,12 +130,12 @@ export function Reveal({
       )}
 
       {grant && (
-        <p className="text-[10px] leading-tight text-neutral-700">
+        <p className="text-label leading-tight text-ink-faint">
           Taking it back hides it from here on. It does not unsay it.
         </p>
       )}
 
-      {failed && <p className="text-[11px] text-neutral-500">⚠ {failed}</p>}
+      {failed && <p className="text-label text-ink-dim">⚠ {failed}</p>}
     </div>
   )
 }

@@ -83,18 +83,18 @@ export function Shell({
   }
 
   return (
-    <div className="flex h-full flex-col bg-neutral-950 text-neutral-200">
-      <header className="flex shrink-0 items-center gap-1 border-b border-neutral-800 px-4 py-2">
+    <div className="flex h-full flex-col bg-ground text-ink">
+      <header className="flex shrink-0 items-center gap-1 border-b border-line px-4 py-2">
         <Link
           href="/"
-          className="mr-3 text-sm font-medium text-neutral-300 hover:text-neutral-100"
+          className="mr-3 text-ui font-medium text-ink-dim hover:text-ink"
         >
           Table
         </Link>
 
         {campaign && role !== null && (
           <>
-            <span className="mr-3 truncate text-xs text-neutral-500">{campaign}</span>
+            <span className="mr-3 truncate text-meta text-ink-dim">{campaign}</span>
             <Tab href={`/c/${campaign}`} on={section === 'prep'}>
               {runs ? 'Prep' : 'Your table'}
             </Tab>
@@ -136,7 +136,7 @@ export function Shell({
           {runs && (
             <Link
               href="/lab"
-              className="text-xs text-neutral-600 hover:text-neutral-400"
+              className="text-meta text-ink-faint hover:text-ink-dim"
               title="The research instrument: retrieval, subgraph, cost"
             >
               Lab
@@ -157,10 +157,10 @@ function Tab({ href, on, children }: { href: string; on: boolean; children: Reac
       // CONTRAST, NEVER HUE. `palette.ts` reserves every hue for a source, so
       // a selected tab may not borrow one -- a brighter neutral against a dark
       // ground is legible without competing for meaning.
-      className={`rounded px-2.5 py-1 text-sm transition-colors ${
+      className={`rounded-md px-2.5 py-1 text-ui transition-colors ${
         on
-          ? 'bg-neutral-800 text-neutral-100'
-          : 'text-neutral-500 hover:text-neutral-300'
+          ? 'bg-overlay text-ink'
+          : 'text-ink-dim hover:text-ink-dim'
       }`}
     >
       {children}

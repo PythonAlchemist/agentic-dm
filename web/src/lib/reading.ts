@@ -18,6 +18,29 @@ export type ReadingBlock =
   | { kind: 'prose'; text: string }
   | { kind: 'illustration'; src: string; alt: string }
 
+/**
+ * The book's emphasis, which was reaching the reader as punctuation.
+ *
+ * `_An Adventure for 1st-Level Characters_` rendered with its underscores
+ * showing. The transcription preserves the book's italics as Markdown -- it
+ * was told to -- and nothing downstream turned them back into italics, so
+ * every emphasised line in 1,378 sections carried two stray characters.
+ *
+ * ONLY EMPHASIS, and only where it wraps whole words. This is not a Markdown
+ * renderer and must not become one: the prose is the book's and the fewer
+ * transformations between the page and the reader, the better. Headings,
+ * links and lists are left exactly as the book set them.
+ */
+const EMPHASIS = /(^|[\s(\["'])_([^_\n]+)_(?=[\s).,;:!?\]"']|$)/g
+
+export function withEmphasis(text: string): string {
+  return text.replace(EMPHASIS, (_all, before, inner) => `${before}\u2063${inner}\u2063`)
+}
+
+/** The marker `withEmphasis` leaves around an emphasised run. An invisible
+ *  separator, so it cannot collide with anything the book actually prints. */
+export const EMPHASIS_MARK = '\u2063' 
+
 /** An image on a line of its own -- the book's own figure placement. */
 const FIGURE = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/
 

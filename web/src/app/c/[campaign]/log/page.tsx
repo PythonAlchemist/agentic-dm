@@ -43,8 +43,8 @@ export default function LogPage() {
   return (
     <Shell campaign={campaign} section="log">
       <div className="mx-auto max-w-2xl px-6 py-10">
-        <h1 className="text-xl font-medium text-neutral-100">The adventure so far</h1>
-        <p className="mt-1 text-sm text-neutral-500">
+        <h1 className="text-title font-medium text-ink">The adventure so far</h1>
+        <p className="mt-1 text-ui text-ink-dim">
           What your table has been told, and the night you were told it.
         </p>
 
@@ -52,22 +52,22 @@ export default function LogPage() {
           {nights.map((night) => (
             <li key={night.number}>
               <div className="flex items-baseline gap-3">
-                <h2 className="text-sm font-medium text-neutral-200">
+                <h2 className="text-ui font-medium text-ink">
                   {night.number === 0
                     ? 'Before the first session'
                     : `Session ${night.number}`}
                 </h2>
                 {night.title && (
-                  <span className="text-sm text-neutral-400">{night.title}</span>
+                  <span className="text-ui text-ink-dim">{night.title}</span>
                 )}
                 {night.held_on && (
-                  <span className="ml-auto text-[11px] tabular-nums text-neutral-600">
+                  <span className="ml-auto text-label tabular-nums text-ink-faint">
                     {night.held_on.slice(0, 10)}
                   </span>
                 )}
               </div>
 
-              <ul className="mt-2 flex flex-col gap-1 border-l border-neutral-800 pl-3">
+              <ul className="mt-2 flex flex-col gap-1 border-l border-line pl-3">
                 {night.learned.map((one) => (
                   <li key={one.id} className="flex items-baseline gap-2">
                     <Link
@@ -76,11 +76,11 @@ export default function LogPage() {
                           ? `/c/${campaign}/s/${encodeURIComponent(one.id)}`
                           : `/c/${campaign}/e/${encodeURIComponent(one.id)}`
                       }
-                      className="text-sm text-neutral-300 hover:underline"
+                      className="text-ui text-ink-dim hover:underline"
                     >
                       {one.name}
                     </Link>
-                    <span className="text-[10px] uppercase tracking-wide text-neutral-700">
+                    <span className="text-label uppercase tracking-wide text-ink-faint">
                       {one.kind === 'scene' ? 'read' : 'met'}
                     </span>
                   </li>
@@ -91,12 +91,12 @@ export default function LogPage() {
         </ol>
 
         {ready && nights.length === 0 && (
-          <p className="mt-8 text-sm text-neutral-600">
+          <p className="mt-8 text-ui text-ink-faint">
             Nothing yet. Your DM has not shown the table anything.
           </p>
         )}
 
-        <p className={`mt-10 text-[11px] ${SOURCE.book}`}>
+        <p className={`mt-10 text-label ${SOURCE.book}`}>
           Everything here is quoted from the book or written by your DM. None of
           it was made up by a machine.
         </p>

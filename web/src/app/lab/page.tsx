@@ -140,11 +140,11 @@ export default function Lab() {
   if (failed) {
     return (
       <div className="p-8">
-        <h1 className="mb-2 text-lg">Agent Lab</h1>
-        <p className="text-sm text-red-400">Could not reach the API: {failed}</p>
-        <p className="mt-2 text-sm text-neutral-500">
+        <h1 className="mb-2 text-title">Agent Lab</h1>
+        <p className="text-ui text-red-400">Could not reach the API: {failed}</p>
+        <p className="mt-2 text-ui text-ink-dim">
           Start the backend with{' '}
-          <code className="text-neutral-300">
+          <code className="text-ink-dim">
             uv run uvicorn backend.api.main:app --reload
           </code>
           .
@@ -155,7 +155,7 @@ export default function Lab() {
 
   // `locked === null` is the round trip still in flight, and lands here.
   if (!config) {
-    return <div className="p-8 text-sm text-neutral-600">Loading…</div>
+    return <div className="p-8 text-ui text-ink-faint">Loading…</div>
   }
 
   const here = config.books.find((b) => b.slug === book)
@@ -168,23 +168,23 @@ export default function Lab() {
             phrase replaces two rail cards: it has to stay VISIBLE (the lab once
             said "Curse of Strahd" while answering out of a heist anthology) but
             it does not have to stay EDITABLE. */}
-        <header className="flex shrink-0 items-baseline gap-4 border-b border-neutral-800 px-6 py-3">
-          <h1 className="text-base font-medium">Agent Lab</h1>
+        <header className="flex shrink-0 items-baseline gap-4 border-b border-line px-6 py-3">
+          <h1 className="text-body font-medium">Agent Lab</h1>
           <button
             onClick={() => setSetupOpen(true)}
-            className="text-xs text-neutral-500 hover:text-neutral-300"
+            className="text-meta text-ink-dim hover:text-ink-dim"
           >
             {here ? here.title : 'no books loaded'}
-            <span className="text-neutral-700"> · </span>
+            <span className="text-ink-faint"> · </span>
             {campaigns.find((c) => c.slug === campaign)?.name ?? 'canon only'}
-            <span className="text-neutral-700"> · </span>
+            <span className="text-ink-faint"> · </span>
             {model}
           </button>
           <div className="ml-auto flex items-baseline gap-4">
             <SpendChip running={running} onReset={resetSession} debug={debug} />
             <button
               onClick={() => setDebug(!debug)}
-              className={`text-xs ${debug ? 'text-neutral-100' : 'text-neutral-700 hover:text-neutral-500'}`}
+              className={`text-meta ${debug ? 'text-ink' : 'text-ink-faint hover:text-ink-dim'}`}
               title="Show how answers were produced (⌘.)"
             >
               debug
@@ -218,7 +218,7 @@ export default function Lab() {
             </div>
           </Panel>
 
-          <Separator className="mx-1.5 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+          <Separator className="mx-1.5 w-1.5 rounded-md bg-overlay transition-colors hover:bg-ink-faint" />
 
           <Panel defaultSize="46%" minSize="24%">
             <SectionReader
@@ -231,7 +231,7 @@ export default function Lab() {
             />
           </Panel>
 
-          <Separator className="mx-1.5 w-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+          <Separator className="mx-1.5 w-1.5 rounded-md bg-overlay transition-colors hover:bg-ink-faint" />
 
           <Panel defaultSize="34%" minSize="22%">
             <ChatPane

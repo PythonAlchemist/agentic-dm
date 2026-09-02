@@ -94,8 +94,8 @@ export default function MapPage() {
         <button
           onClick={() => setPreview((was) => !was)}
           aria-pressed={preview}
-          className={`rounded px-2 py-1 text-xs ${
-            preview ? CHROME.selected : 'text-neutral-500 hover:text-neutral-300'
+          className={`rounded-md px-2 py-1 text-meta ${
+            preview ? CHROME.selected : 'text-ink-dim hover:text-ink-dim'
           }`}
           title="What the table sees. Asks the API for the player's view."
         >
@@ -105,18 +105,18 @@ export default function MapPage() {
     >
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="flex items-baseline gap-3">
-          <h1 className="text-xl font-medium text-neutral-100">
+          <h1 className="text-title font-medium text-ink">
             {sheet?.name ?? mapId}
           </h1>
           {sheet && (
             <Link
               href={`/c/${campaign}/e/${encodeURIComponent(sheet.place_id)}`}
-              className="text-sm text-neutral-500 hover:underline"
+              className="text-ui text-ink-dim hover:underline"
             >
               {sheet.place}
             </Link>
           )}
-          <span className="ml-auto text-xs text-neutral-600">
+          <span className="ml-auto text-meta text-ink-faint">
             {asPlayer
               ? 'the table’s view — only what you have revealed'
               : 'your view — click the map to pin something'}
@@ -124,13 +124,13 @@ export default function MapPage() {
         </div>
 
         {failed && (
-          <p className="mt-3 text-xs text-neutral-400">⚠ {failed}</p>
+          <p className="mt-3 text-meta text-ink-dim">⚠ {failed}</p>
         )}
 
         <div
           ref={image}
           onClick={onClick}
-          className={`relative mt-4 overflow-hidden rounded border border-neutral-800 bg-neutral-900 ${
+          className={`relative mt-4 overflow-hidden rounded-md border border-line bg-surface ${
             asPlayer ? '' : 'cursor-crosshair'
           }`}
         >
@@ -143,7 +143,7 @@ export default function MapPage() {
               draggable={false}
             />
           ) : (
-            <div className="flex h-64 items-center justify-center text-sm text-neutral-600">
+            <div className="flex h-64 items-center justify-center text-ui text-ink-faint">
               No image for this map.
             </div>
           )}
@@ -170,11 +170,11 @@ export default function MapPage() {
               <span
                 className={`block h-3 w-3 rounded-full border-2 ${
                   pin.revealed && pin.known
-                    ? 'border-neutral-950 bg-neutral-200'
-                    : 'border-neutral-400 bg-transparent'
+                    ? 'border-line bg-chrome'
+                    : 'border-ink-dim bg-transparent'
                 }`}
               />
-              <span className="mt-0.5 block whitespace-nowrap rounded bg-neutral-950/80 px-1 text-[10px] text-neutral-200">
+              <span className="mt-0.5 block whitespace-nowrap rounded-md bg-ground/80 px-1 text-label text-ink">
                 {pin.name}
               </span>
             </button>
@@ -183,7 +183,7 @@ export default function MapPage() {
           {placing && (
             <span
               style={{ left: `${placing.x * 100}%`, top: `${placing.y * 100}%` }}
-              className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 text-lg text-neutral-300"
+              className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 text-title text-ink-dim"
             >
               +
             </span>
@@ -201,30 +201,30 @@ export default function MapPage() {
         {!asPlayer && pins.length > 0 && (
           <ul className="mt-6 flex flex-col gap-1">
             {pins.map((pin) => (
-              <li key={pin.entity_id} className="flex items-baseline gap-3 text-sm">
+              <li key={pin.entity_id} className="flex items-baseline gap-3 text-ui">
                 <Link
                   href={`/c/${campaign}/e/${encodeURIComponent(pin.entity_id)}`}
                   className={`hover:underline ${
-                    pin.plane === 'campaign' ? SOURCE.yours : 'text-neutral-300'
+                    pin.plane === 'campaign' ? SOURCE.yours : 'text-ink-dim'
                   }`}
                 >
                   {pin.name}
                 </Link>
                 {pin.as_name && (
-                  <span className="text-xs text-neutral-500">
+                  <span className="text-meta text-ink-dim">
                     the table knows it as &ldquo;{pin.as_name}&rdquo;
                   </span>
                 )}
                 {/* WHY A FACE-UP PIN IS STILL INVISIBLE, said rather than left
                     for the DM to work out. */}
                 {pin.revealed && !pin.known && (
-                  <span className="text-[11px] text-neutral-500">
+                  <span className="text-label text-ink-dim">
                     face-up, but your table has not been told this exists
                   </span>
                 )}
                 <button
                   onClick={() => toggleReveal(pin)}
-                  className="ml-auto text-[11px] text-neutral-500 hover:text-neutral-300"
+                  className="ml-auto text-label text-ink-dim hover:text-ink-dim"
                 >
                   {pin.revealed ? 'hide' : 'reveal'}
                 </button>
@@ -232,7 +232,7 @@ export default function MapPage() {
                   onClick={() =>
                     tableAPI.unpin(campaign, mapId, pin.entity_id).then(loadPins)
                   }
-                  className="text-[11px] text-neutral-600 hover:text-neutral-400"
+                  className="text-label text-ink-faint hover:text-ink-dim"
                 >
                   unpin
                 </button>
@@ -283,16 +283,16 @@ function PinPicker({
   const shown = q.trim() ? found : []
 
   return (
-    <div className="mt-4 max-w-sm rounded border border-neutral-800 bg-neutral-900/60 p-3">
+    <div className="mt-4 max-w-sm rounded-md border border-line bg-surface/60 p-3">
       <div className="flex items-baseline gap-2">
         <input
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="what is here?"
-          className={`flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+          className={`flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
         />
-        <button onClick={onCancel} className="text-[11px] text-neutral-500 hover:text-neutral-300">
+        <button onClick={onCancel} className="text-label text-ink-dim hover:text-ink-dim">
           cancel
         </button>
       </div>
@@ -301,16 +301,16 @@ function PinPicker({
           <li key={entity.entity_id}>
             <button
               onClick={() => onPick(entity)}
-              className="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-neutral-800"
+              className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-ui hover:bg-overlay"
             >
               <span
                 className={
-                  entity.plane === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                  entity.plane === 'campaign' ? SOURCE.yours : 'text-ink'
                 }
               >
                 {entity.name}
               </span>
-              <span className="ml-auto text-[10px] uppercase tracking-wide text-neutral-600">
+              <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
                 {entity.labels.join(' ').toLowerCase()}
               </span>
             </button>

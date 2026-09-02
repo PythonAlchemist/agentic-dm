@@ -65,20 +65,20 @@ export function EntityProfile({
 
         <div className="min-w-0 flex-1">
           <h1
-            className={`font-medium text-neutral-100 ${
-              compact ? 'text-lg' : 'text-2xl'
+            className={`font-medium text-ink ${
+              compact ? 'text-title' : 'text-title'
             }`}
           >
             {entity.name}
           </h1>
 
-          <p className="mt-1 text-xs">
+          <p className="mt-1 text-meta">
             {yours ? (
               <>
                 <span className={SOURCE.yours}>
                   {runs === false ? 'Your DM wrote this.' : 'Yours.'}
                 </span>{' '}
-                <span className="text-neutral-500">
+                <span className="text-ink-dim">
                   {runs === false
                     ? 'It is not in the book.'
                     : 'Written for this campaign.'}
@@ -87,24 +87,24 @@ export function EntityProfile({
             ) : unnamed ? (
               <>
                 <span className={SOURCE.invented}>Not named in the book.</span>{' '}
-                <span className="text-neutral-500">Came from extraction.</span>
+                <span className="text-ink-dim">Came from extraction.</span>
               </>
             ) : (
               <>
                 <span className={SOURCE.book}>The book.</span>{' '}
-                <span className="text-neutral-500">
+                <span className="text-ink-dim">
                   Named in {quotes.length} section{quotes.length === 1 ? '' : 's'}.
                 </span>
               </>
             )}
           </p>
 
-          <p className="mt-1.5 text-xs uppercase tracking-wide text-neutral-600">
+          <p className="mt-1.5 text-meta uppercase tracking-wide text-ink-faint">
             {entity.labels.join(' · ').toLowerCase() || 'unclassified'}
           </p>
 
           {entity.role && (
-            <p className="mt-2 text-sm text-neutral-400">{entity.role}</p>
+            <p className="mt-2 text-ui text-ink-dim">{entity.role}</p>
           )}
 
           {/* WHAT THE TABLE KNOWS, decided where the DM is already reading.
@@ -124,7 +124,7 @@ export function EntityProfile({
       </header>
 
       {unnamed && !compact && (
-        <p className="mt-4 rounded border border-rose-900/60 bg-rose-950/30 p-3 text-xs leading-relaxed text-rose-200/70">
+        <p className="mt-4 rounded-md border border-rose-900/60 bg-rose-950/30 p-3 text-meta leading-relaxed text-rose-200/70">
           No section of the book says this name. It came from the extraction, so
           what it connects to may well be right &mdash; but do not quote it as
           the book&rsquo;s wording at the table.
@@ -136,7 +136,7 @@ export function EntityProfile({
           settled wants the published word before their own. */}
       {shown.length > 0 && (
         <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Established
           </h2>
           <ul className="mt-2 flex flex-col gap-3">
@@ -148,13 +148,13 @@ export function EntityProfile({
                   className="block w-full text-left disabled:cursor-default"
                 >
                   <span
-                    className={`text-[11px] ${
-                      where.plane === 'campaign' ? SOURCE.yours : 'text-neutral-500'
+                    className={`text-label ${
+                      where.plane === 'campaign' ? SOURCE.yours : 'text-ink-dim'
                     }`}
                   >
                     {where.heading || where.section_id}
                   </span>
-                  <p className="mt-0.5 text-sm leading-relaxed text-neutral-300">
+                  <p className="mt-0.5 text-ui leading-relaxed text-ink-dim">
                     {where.says[0]}
                   </p>
                 </button>
@@ -162,7 +162,7 @@ export function EntityProfile({
             ))}
           </ul>
           {compact && quotes.length > shown.length && (
-            <p className="mt-2 text-xs text-neutral-600">
+            <p className="mt-2 text-meta text-ink-faint">
               and {quotes.length - shown.length} more
             </p>
           )}
@@ -173,10 +173,10 @@ export function EntityProfile({
           all -- this is the second lock on the same door. */}
       {entity.invented.length > 0 && !compact && runs === true && (
         <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Invented for this campaign
           </h2>
-          <ul className={`mt-2 flex flex-col gap-1 text-sm ${SOURCE.invented}`}>
+          <ul className={`mt-2 flex flex-col gap-1 text-ui ${SOURCE.invented}`}>
             {entity.invented.map((line, i) => (
               <li key={i}>{line}</li>
             ))}
@@ -186,24 +186,24 @@ export function EntityProfile({
 
       {connections.length > 0 && (
         <section className="mt-6">
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Connections
           </h2>
           <ul className="mt-2 flex flex-col gap-1">
             {connections.map((c, i) => (
-              <li key={i} className="flex items-baseline gap-2 text-sm">
+              <li key={i} className="flex items-baseline gap-2 text-ui">
                 {/* A GUESS SAYS SO. The extractor is wrong about roughly a
                     third of these, and a profile that rendered them like
                     derived facts would be the tidiest place in the product to
                     launder one. */}
                 <span
                   className={
-                    c.status === 'accepted' ? 'text-neutral-500' : 'text-neutral-700'
+                    c.status === 'accepted' ? 'text-ink-dim' : 'text-ink-faint'
                   }
                 >
                   {c.dir === 'out' ? '→' : '←'}
                 </span>
-                <span className="text-xs uppercase tracking-wide text-neutral-600">
+                <span className="text-meta uppercase tracking-wide text-ink-faint">
                   {c.rel.toLowerCase().replace(/_/g, ' ')}
                 </span>
                 <Link
@@ -211,19 +211,19 @@ export function EntityProfile({
                   className={
                     c.other_plane === 'campaign'
                       ? `${SOURCE.yours} hover:underline`
-                      : 'text-neutral-300 hover:underline'
+                      : 'text-ink-dim hover:underline'
                   }
                 >
                   {c.other}
                 </Link>
                 {c.status !== 'accepted' && (
-                  <span className="text-[11px] text-neutral-700">guessed</span>
+                  <span className="text-label text-ink-faint">guessed</span>
                 )}
               </li>
             ))}
           </ul>
           {compact && entity.connections.length > connections.length && (
-            <p className="mt-2 text-xs text-neutral-600">
+            <p className="mt-2 text-meta text-ink-faint">
               and {entity.connections.length - connections.length} more
             </p>
           )}
@@ -233,7 +233,7 @@ export function EntityProfile({
       {compact && (
         <Link
           href={`/c/${campaign}/e/${encodeURIComponent(entity.entity_id)}`}
-          className="mt-5 inline-block text-xs text-neutral-400 underline hover:text-neutral-200"
+          className="mt-5 inline-block text-meta text-ink-dim underline hover:text-ink"
         >
           Open profile
         </Link>

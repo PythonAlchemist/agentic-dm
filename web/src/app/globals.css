@@ -1,23 +1,108 @@
 @import "tailwindcss";
 
-/* Dark ALWAYS, not dark-by-preference. Every component hardcodes dark
-   neutrals (text-neutral-200 on neutral-900 cards), so honouring a light OS
-   scheme rendered pale grey text on a white page — the scaffold's media query
-   survived the rewrite and nothing else did. */
-:root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
+/* Table's design tokens. `DESIGN.md` is the specification; this file is the
+   only place its values live, and every component reads them by name.
+   
+   DARK ALWAYS, NOT DARK-BY-PREFERENCE, and now for a measured reason as well
+   as a practical one: all four source hues fail 3:1 on paper (book 2.31,
+   yours 1.52, table 1.52, invented 1.72), so a light theme needs a second
+   full set of source hues, CVD-simulated before it ships. DESIGN.md §7 sets
+   the gate. */
+
+@theme {
+  /* GROUND LADDER. Elevation is lightness, never shadow -- a drop shadow is
+     invisible on a near-black ground, which is why the product currently
+     looks flat rather than deliberate. */
+  --color-ground: #131110;
+  --color-surface: #1c1917;
+  --color-overlay: #262220;
+  --color-line: #2e2a24;
+
+  /* INK LADDER. Three text roles, assigned rather than accidental: the two
+     most common text colours in the old UI were neutral-500 and neutral-600,
+     so most of the product was low-contrast by accident. `ink-faint` is the
+     floor at 4.56:1 on surface -- nothing readable may be darker. */
+  --color-ink: #eae6df;
+  --color-ink-dim: #a89f93;
+  --color-ink-faint: #8a8175;
+  --color-chrome: #f4f0e8;
+
+  /* THE FOUR SOURCES, unchanged. Three designers each moved a hue "for
+     colour blindness" and each made it worse: measured worst-pair separation
+     under deuteranopia/protanopia is 29.9/35.0 for these against 16.6/22.4
+     and 24.2/10.2 for the proposed sets. The at-risk pair is book vs table,
+     not book vs invented -- which is why the redundant channel in DESIGN.md
+     §6 separates those two by KIND (serif face vs quotation glyph). */
+  --color-book: #6ee7b7;
+  --color-yours: #fde68a;
+  --color-table: #7dd3fc;
+  --color-invented: #fda4af;
+
+  --radius-md: 6px;
+
+  /* SEVEN STEPS, ONE ROLE EACH, replacing nine sizes with no roles --
+     `text-sm`, `text-[11px]` and `text-xs` were doing one job 308 times. */
+  --text-label: 0.6875rem;
+  --text-label--line-height: 1rem;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.125rem;
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.25rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.375rem;
+  --text-canon: 1rem;
+  --text-canon--line-height: 1.625rem;
+  --text-aloud: 1.125rem;
+  --text-aloud--line-height: 1.75rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.75rem;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* THE SERIF IS A PROVENANCE CHANNEL, not a mood. It appears exactly where
+     the words are the published book's -- see DESIGN.md §4. */
+  --font-serif: var(--font-literata);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* ONE LIGHT SOURCE, from above, static. It is what makes a warm near-black
+     read as a table at night rather than as an admin panel, and it costs a
+     reader nothing: no animation, below all content, and every contrast
+     ratio in DESIGN.md is computed against the wash's brightest point. */
+  background:
+    radial-gradient(80rem 40rem at 50% -10rem, rgb(234 230 223 / 0.04), transparent 70%),
+    var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* A SURFACE CATCHES THE LIGHT ON ITS TOP EDGE. This replaces `box-shadow`,
+   which is banned product-wide. */
+@utility lit {
+  border-top: 1px solid rgb(244 240 232 / 0.08);
+}
+
+/* THE CHROME LADDER. Hueless chrome reads as interactive through lightness
+   over the ground ladder -- never a hue, because every hue is spoken for.
+   Defined once so no component hand-picks a per-surface hex. */
+@utility chrome-row {
+  &:hover {
+    background-color: rgb(234 230 223 / 0.05);
+  }
+}
+
+@utility chrome-selected {
+  background-color: rgb(234 230 223 / 0.09);
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+@layer base {
+  /* ONE FOCUS TREATMENT, everywhere, at 16.57:1 against the ground. */
+  :focus-visible {
+    outline: 1.5px solid var(--color-chrome);
+    outline-offset: 1px;
+  }
 }

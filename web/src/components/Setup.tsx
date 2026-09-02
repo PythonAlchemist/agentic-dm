@@ -52,21 +52,21 @@ export function Setup({
   return (
     <div className="fixed inset-0 z-40 flex justify-start bg-black/50" onClick={onClose}>
       <div
-        className="h-full w-full max-w-sm overflow-y-auto border-r border-neutral-800 bg-neutral-950 p-5"
+        className="h-full w-full max-w-sm overflow-y-auto border-r border-line bg-ground p-5"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 flex items-baseline justify-between">
-          <h2 className="text-base font-medium text-neutral-200">Setup</h2>
+          <h2 className="text-body font-medium text-ink">Setup</h2>
           <button
             onClick={onClose}
-            className="text-xs text-neutral-500 hover:text-neutral-300"
+            className="text-meta text-ink-dim hover:text-ink-dim"
           >
             close (esc)
           </button>
         </div>
         {/* SAID HERE, at the moment it applies, rather than standing in the
             rail forever where it was read once and then cost space. */}
-        <p className="mb-4 text-xs leading-relaxed text-neutral-500">
+        <p className="mb-4 text-meta leading-relaxed text-ink-dim">
           Changing the book or the table starts a new conversation — a session
           reads one book, so what the agent is holding onto has to go with it.
         </p>

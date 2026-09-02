@@ -12,7 +12,7 @@ import {
   type MapRow,
   type OrderRow,
 } from '@/lib/api'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { CHROME, SOURCE, SOURCE_EDGE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
 
 /**
  * Everything this table has: the book's running order, and its maps.
@@ -25,6 +25,19 @@ import { CHROME, SOURCE } from '@/lib/palette'
  * THE PLACE PICKER IS NARROWED TO LOCATIONS, matching the range `MAP_OF` keeps
  * in the graph. Offering an NPC and then refusing the write would be a rule
  * enforced twice and explained nowhere.
+ *
+ * 547 HAIRLINES IS GREY FOG. Every row carried a bottom border, which at this
+ * length stops separating anything and just lowers the contrast of the whole
+ * screen. Rows are separated by rhythm -- fixed height and whitespace -- and a
+ * rule is spent only where the book itself changes chapter.
+ *
+ * THE CHAPTER STAYS A COLUMN, and that is a finding rather than a preference.
+ * Sticky chapter headings were the plan until the data said otherwise: this
+ * table's running order ALTERNATES between the introduction and the first
+ * adventure row by row, so grouping by chapter produced a heading above every
+ * single row -- louder than the repetition it replaced. The order is what the
+ * table plays and must not be re-sorted to suit a layout, so the chapter goes
+ * back to a quiet right-hand label and the rhythm does the separating.
  */
 export default function LibraryPage() {
   const params = useParams<{ campaign: string }>()
@@ -46,49 +59,62 @@ export default function LibraryPage() {
 
   return (
     <Shell campaign={campaign} section="library">
-      <div className="mx-auto grid max-w-5xl gap-10 px-6 py-10 md:grid-cols-[1fr_18rem]">
+      <div className="mx-auto max-w-3xl px-6 py-10">
         <div>
-          <h1 className="text-xl font-medium text-neutral-100">The whole book</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+          <h1 className="text-title font-medium text-ink">The whole book</h1>
+          <p className="mt-1 text-ui text-ink-dim">
             In the order it runs, with your scenes where you put them.
           </p>
 
-          <ol className="mt-5 flex flex-col">
-            {order.map((row) => (
+          <ol className="mt-6 flex flex-col">
+            {order.map((row, i) => (
               <li key={row.section_id}>
                 <Link
                   href={`/c/${campaign}/s/${encodeURIComponent(row.section_id)}`}
-                  className={`flex items-baseline gap-3 border-b border-neutral-900 py-2 hover:bg-neutral-900/40 ${
+                  className={`flex h-8 items-center gap-3 rounded-md px-2 ${CHROME.row} ${
                     row.skipped ? 'opacity-40' : ''
-                  }`}
+                  } ${row.origin === 'campaign' ? SOURCE_EDGE.yours : ''}`}
                 >
                   <span
-                    className={`truncate text-sm ${
-                      row.origin === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                    className={`truncate text-ui ${
+                      row.origin === 'campaign' ? SOURCE.yours : 'text-ink'
                     }`}
                   >
                     {row.heading}
                   </span>
-                  <span className="ml-auto shrink-0 text-[11px] text-neutral-600">
-                    {row.skipped ? 'skipped' : row.chapter}
+                  {row.origin === 'campaign' && (
+                    <span className={`shrink-0 text-label ${SOURCE.yours}`}>
+                      {SOURCE_GLYPH.yours} {SOURCE_WORD.yours}
+                    </span>
+                  )}
+                  {/* SAID ONCE PER RUN. Where the order stays in one chapter
+                      the label appears on the first row and then stops, so a
+                      long chapter reads as a block rather than as 40 copies of
+                      its own name. */}
+                  <span className="ml-auto shrink-0 text-label text-ink-faint">
+                    {row.skipped
+                      ? 'skipped'
+                      : row.chapter && row.chapter !== order[i - 1]?.chapter
+                        ? row.chapter
+                        : ''}
                   </span>
                 </Link>
               </li>
             ))}
             {order.length === 0 && (
-              <li className="py-2 text-sm text-neutral-600">Nothing here yet.</li>
+              <li className="py-2 text-ui text-ink-faint">Nothing here yet.</li>
             )}
           </ol>
         </div>
 
-        <aside>
+        <section className="mt-12 border-t border-line pt-6">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+            <h2 className="text-label uppercase tracking-widest text-ink-faint">
               Maps
             </h2>
             <button
               onClick={() => setMaking((was) => !was)}
-              className="text-[11px] text-neutral-500 hover:text-neutral-300"
+              className="text-label text-ink-dim hover:text-ink-dim"
             >
               {making ? 'cancel' : 'add one'}
             </button>
@@ -109,18 +135,18 @@ export default function LibraryPage() {
               <li key={m.id}>
                 <Link
                   href={`/c/${campaign}/m/${encodeURIComponent(m.id)}`}
-                  className="text-sm text-neutral-300 hover:underline"
+                  className="text-ui text-ink-dim hover:underline"
                 >
                   {m.name}
                 </Link>
-                <span className="ml-2 text-[11px] text-neutral-600">{m.place}</span>
+                <span className="ml-2 text-label text-ink-faint">{m.place}</span>
               </li>
             ))}
             {maps.length === 0 && !making && (
-              <li className="text-sm text-neutral-600">No maps yet.</li>
+              <li className="text-ui text-ink-faint">No maps yet.</li>
             )}
           </ul>
-        </aside>
+        </section>
       </div>
     </Shell>
   )
@@ -174,13 +200,13 @@ function NewMap({
   }
 
   return (
-    <div className="mt-3 rounded border border-neutral-800 bg-neutral-900/50 p-2">
+    <div className="mt-3 rounded-md border border-line bg-surface/50 p-2">
       {place ? (
-        <p className="text-sm text-neutral-300">
+        <p className="text-ui text-ink-dim">
           {place.name}{' '}
           <button
             onClick={() => setPlace(null)}
-            className="ml-1 text-[11px] text-neutral-500 hover:text-neutral-300"
+            className="ml-1 text-label text-ink-dim hover:text-ink-dim"
           >
             change
           </button>
@@ -191,7 +217,7 @@ function NewMap({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="which place?"
-          className={`w-full rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+          className={`w-full rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
         />
       )}
 
@@ -200,7 +226,7 @@ function NewMap({
           <li key={entity.entity_id}>
             <button
               onClick={() => setPlace(entity)}
-              className="w-full rounded px-1.5 py-1 text-left text-sm text-neutral-300 hover:bg-neutral-800"
+              className="w-full rounded-md px-1.5 py-1 text-left text-ui text-ink-dim hover:bg-overlay"
             >
               {entity.name}
             </button>
@@ -220,14 +246,14 @@ function NewMap({
           <button
             onClick={() => file.current?.click()}
             disabled={busy}
-            className={`mt-2 w-full rounded px-2 py-1 text-[11px] ${CHROME.primary}`}
+            className={`mt-2 w-full rounded-md px-2 py-1 text-label ${CHROME.primary}`}
           >
             {busy ? 'storing…' : 'choose the image'}
           </button>
         </>
       )}
 
-      {failed && <p className="mt-2 text-[11px] text-neutral-400">⚠ {failed}</p>}
+      {failed && <p className="mt-2 text-label text-ink-dim">⚠ {failed}</p>}
     </div>
   )
 }

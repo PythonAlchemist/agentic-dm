@@ -5,51 +5,93 @@
  * button, a focus ring, the DM's question text, a keyword-match caveat, an
  * unverified price, YOUR material, and INVENTED material — the last two one
  * shade apart in the same hue, which are the two a DM must never confuse.
- * Twenty-one amber values across thirteen files, meaning at least four
- * different things.
  *
  * THE RULE: a hue names a SOURCE, and nothing else may borrow it.
  *
- *   emerald  the published book
- *   amber    yours — written for this campaign
- *   sky      the table — said in conversation, in no book
- *   rose     invented — the model supplied it, nothing stands behind it
+ *   book      the published book
+ *   yours     written for this campaign
+ *   table     said in conversation, in no book
+ *   invented  the model supplied it, nothing stands behind it
  *
  * Chrome gets no hue at all. Selection, focus and the primary action are
- * carried by CONTRAST — a brighter neutral against a dark ground — which is
- * legible without competing for meaning, and leaves the four above to say the
- * only thing they say.
+ * carried by CONTRAST — see `CHROME` below and `DESIGN.md` §3.
  *
  * CAUTION IS NOT A SOURCE and does not get a hue either. "This rate is
- * unverified" and "you edited this, the citations were not re-checked" are
- * claims about RELIABILITY, on a different axis from where a sentence came
- * from. They carry a ⚠ and muted text: the glyph is the signal.
+ * unverified" is a claim about RELIABILITY, on a different axis from where a
+ * sentence came from. It carries a ⚠ and muted text: the glyph is the signal.
  *
- * Kept as strings rather than a Tailwind theme extension because these are
- * read by a person auditing what a colour means, and one file they can open is
- * worth more than a config indirection.
+ * THE HUES SURVIVED A DESIGN REVIEW THAT TRIED TO CHANGE THEM. Three designers
+ * independently moved one "for colour blindness"; simulation says all three
+ * made it worse. Worst-pair separation (CIELab dE under deuteranopia and
+ * protanopia): these four 29.9/35.0, a teal book 16.6/22.2, a magenta invented
+ * 24.2/10.2 — that last pair being book-against-invented, the exact two the
+ * promise exists to keep apart. The measured at-risk pair is BOOK vs TABLE.
+ *
+ * WHICH IS WHY HUE NEVER WORKS ALONE. Every source is marked by hue AND a
+ * redundant channel, and book and table differ in KIND: the book's words are
+ * set in a serif and carry `§` with a citation; table talk carries `❝` with a
+ * speaker. A reader who sees no colour at all still reads the provenance.
+ *
+ * The values live in `globals.css` as tokens; this file names their jobs.
  */
 
 /** The four sources. Nothing else may use these. */
 export const SOURCE = {
-  book: 'text-emerald-300/80',
-  yours: 'text-amber-200/80',
-  table: 'text-sky-300/80',
-  invented: 'text-rose-300/80',
+  book: 'text-book',
+  yours: 'text-yours',
+  table: 'text-table',
+  invented: 'text-invented',
 } as const
 
-/** Chrome: contrast, never hue. */
+/** The left edge that marks a row or a block. Dashed for invented: nothing
+ *  stands behind it, and the broken line says so without colour. */
+export const SOURCE_EDGE = {
+  book: 'border-l-2 border-book',
+  yours: 'border-l-2 border-yours',
+  table: 'border-l-2 border-table',
+  invented: 'border-l-2 border-dashed border-invented',
+} as const
+
+/** The mandatory non-colour channel. An inline mention in a hue with no glyph
+ *  is a bug, not a style choice. */
+export const SOURCE_GLYPH = {
+  book: '§',
+  yours: '✎',
+  table: '❝',
+  invented: '◇',
+} as const
+
+/** What a reader is told the source IS, in words. Kept beside the hue so the
+ *  label and the colour cannot drift apart. */
+export const SOURCE_WORD = {
+  book: 'BOOK',
+  yours: 'YOURS',
+  table: 'TABLE',
+  invented: 'INVENTED',
+} as const
+
+export type Source = keyof typeof SOURCE
+
+/** Chrome: contrast, never hue.
+ *
+ *  THE LADDER IS THE WHOLE ANSWER to why a product with no accent colour looks
+ *  unfinished. Interactivity is lightness over the ground ladder, applied
+ *  consistently: hover lifts, selection lifts further and adds weight, focus
+ *  rings in `chrome`, and exactly one primary action per screen is filled.
+ */
 export const CHROME = {
-  /** A selected tab, a chosen option. */
-  selected: 'bg-neutral-800 text-neutral-100',
-  /** The one action a screen is for: Ask, Store, Generate. */
+  /** A row or tab that responds to the pointer. */
+  row: 'chrome-row transition-colors',
+  /** The chosen row, tab or option. Fill plus weight — never colour. */
+  selected: 'chrome-selected',
+  /** The one action a screen is for. Once per screen. */
   primary:
-    'bg-neutral-200 text-neutral-950 hover:bg-white transition-colors disabled:opacity-30',
-  /** A focused input. */
-  focus: 'focus:border-neutral-500',
+    'bg-chrome text-ground font-medium hover:bg-[#fffdf8] transition-colors disabled:opacity-40',
+  /** A panel that catches the light from above, instead of a shadow. */
+  lit: 'bg-surface lit',
   /** A draggable divider under the cursor. */
-  grip: 'hover:bg-neutral-600',
+  grip: 'bg-line hover:bg-ink-faint transition-colors',
 } as const
 
 /** Reliability, on its own axis. The glyph carries it, not the colour. */
-export const CAUTION = 'text-neutral-400'
+export const CAUTION = 'text-ink-dim'

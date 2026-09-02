@@ -75,7 +75,7 @@ export function YourMaterial({
   if (!campaign) {
     return (
       <Card title="Your material">
-        <p className="p-3 text-xs leading-relaxed text-neutral-500">
+        <p className="p-3 text-meta leading-relaxed text-ink-dim">
           Pick a table to see what it has made.
         </p>
       </Card>
@@ -87,10 +87,10 @@ export function YourMaterial({
 
   return (
     <Card title="Your material">
-      <p className="border-b border-neutral-800 px-3 py-2 text-xs text-neutral-500">
+      <p className="border-b border-line px-3 py-2 text-meta text-ink-dim">
         {elements.length} made · {stubs.length} still just a name
       </p>
-      {failed && <p className="px-3 py-2 text-xs text-red-400">{failed}</p>}
+      {failed && <p className="px-3 py-2 text-meta text-red-400">{failed}</p>}
       <div className="max-h-[22rem] overflow-y-auto p-1">
         {/* UNWRITTEN FIRST, because that is the work. A name with a role and
             no prose is a thing the DM meant to come back to. */}
@@ -106,7 +106,7 @@ export function YourMaterial({
           />
         ))}
         {written.length > 0 && (
-          <p className="mt-2 border-t border-neutral-800 px-2 pt-2 text-[10px] uppercase tracking-wide text-neutral-600">
+          <p className="mt-2 border-t border-line px-2 pt-2 text-label uppercase tracking-wide text-ink-faint">
             written up
           </p>
         )}
@@ -162,7 +162,7 @@ function Row({
   // the action that stub actually offers.
   const readable = element.own_section
   return (
-    <div className="group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40">
+    <div className="group flex items-baseline gap-2 rounded-md px-2 py-1 hover:bg-overlay/40">
       {draft !== null ? (
         <input
           autoFocus
@@ -176,32 +176,32 @@ function Row({
             // to commit half a rewrite.
             if (event.key === 'Escape') setDraft(null)
           }}
-          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-1 text-xs text-neutral-200 outline-none"
+          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-1 text-meta text-ink"
         />
       ) : (
       <button
         disabled={!readable}
         onClick={() => readable && onRead(readable)}
-        className={`min-w-0 flex-1 truncate text-left text-xs ${
+        className={`min-w-0 flex-1 truncate text-left text-meta ${
           readable
-            ? 'text-neutral-400 hover:underline'
+            ? 'text-ink-dim hover:underline'
             : 'cursor-default text-amber-300'
         }`}
         title={element.role || element.entity_id}
       >
         {element.name}
         {element.role && (
-          <span className="text-neutral-600"> · {element.role}</span>
+          <span className="text-ink-faint"> · {element.role}</span>
         )}
       </button>
       )}
-      <span className="shrink-0 text-[10px] uppercase tracking-wide text-neutral-600">
+      <span className="shrink-0 text-label uppercase tracking-wide text-ink-faint">
         {element.kind}
       </span>
       {draft === null && (
         <button
           onClick={() => setDraft(element.role || '')}
-          className="shrink-0 text-[10px] text-neutral-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300"
+          className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300"
         >
           role
         </button>
@@ -210,7 +210,7 @@ function Row({
         <button
           onClick={onDraft}
           disabled={busy}
-          className="shrink-0 text-[10px] text-neutral-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300 disabled:opacity-100"
+          className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300 disabled:opacity-100"
         >
           {busy ? 'drafting…' : 'flesh out'}
         </button>

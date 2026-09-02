@@ -68,16 +68,16 @@ export default function CampaignHome() {
             for. */}
         {plays && (
           <div>
-            <h1 className="text-xl font-medium text-neutral-100">
+            <h1 className="text-title font-medium text-ink">
               Where we got to
             </h1>
-            <p className="mt-1 text-sm text-neutral-500">
+            <p className="mt-1 text-ui text-ink-dim">
               The last of what your DM has shown the table.
             </p>
 
             {recent.slice(0, 2).map((night) => (
               <section key={night.number} className="mt-6">
-                <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+                <h2 className="text-label uppercase tracking-widest text-ink-faint">
                   {night.number === 0
                     ? 'Before the first session'
                     : `Session ${night.number}`}
@@ -92,7 +92,7 @@ export default function CampaignHome() {
                             ? `/c/${campaign}/s/${encodeURIComponent(one.id)}`
                             : `/c/${campaign}/e/${encodeURIComponent(one.id)}`
                         }
-                        className="text-sm text-neutral-300 hover:underline"
+                        className="text-ui text-ink-dim hover:underline"
                       >
                         {one.name}
                       </Link>
@@ -103,7 +103,7 @@ export default function CampaignHome() {
             ))}
 
             {recent.length === 0 && (
-              <p className="mt-6 text-sm text-neutral-600">
+              <p className="mt-6 text-ui text-ink-faint">
                 Your DM has not shown the table anything yet.
               </p>
             )}
@@ -111,7 +111,7 @@ export default function CampaignHome() {
             {recent.length > 2 && (
               <Link
                 href={`/c/${campaign}/log`}
-                className="mt-6 inline-block text-xs text-neutral-500 hover:text-neutral-300"
+                className="mt-6 inline-block text-meta text-ink-dim hover:text-ink-dim"
               >
                 the whole log →
               </Link>
@@ -121,8 +121,8 @@ export default function CampaignHome() {
 
         {runs && (
         <div>
-          <h1 className="text-xl font-medium text-neutral-100">What&rsquo;s next</h1>
-          <p className="mt-1 text-sm text-neutral-500">
+          <h1 className="text-title font-medium text-ink">What&rsquo;s next</h1>
+          <p className="mt-1 text-ui text-ink-dim">
             The book&rsquo;s order, with your scenes where you put them.
           </p>
 
@@ -131,23 +131,23 @@ export default function CampaignHome() {
               <li key={row.section_id}>
                 <Link
                   href={`/c/${campaign}/s/${encodeURIComponent(row.section_id)}`}
-                  className="flex items-baseline gap-3 border-b border-neutral-900 py-2.5 hover:bg-neutral-900/40"
+                  className="flex items-baseline gap-3 border-b border-line py-2.5 hover:bg-surface/40"
                 >
                   <span
-                    className={`text-sm ${
-                      row.origin === 'campaign' ? SOURCE.yours : 'text-neutral-200'
+                    className={`text-ui ${
+                      row.origin === 'campaign' ? SOURCE.yours : 'text-ink'
                     }`}
                   >
                     {row.heading}
                   </span>
-                  <span className="ml-auto shrink-0 text-[11px] text-neutral-600">
+                  <span className="ml-auto shrink-0 text-label text-ink-faint">
                     {row.chapter}
                   </span>
                 </Link>
               </li>
             ))}
             {order.length === 0 && (
-              <li className="py-2 text-sm text-neutral-600">
+              <li className="py-2 text-ui text-ink-faint">
                 Nothing in the running order yet.
               </li>
             )}
@@ -158,7 +158,7 @@ export default function CampaignHome() {
         <aside>
           {runs && (
           <>
-          <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+          <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Your cast
           </h2>
           <ul className="mt-3 flex flex-col gap-1">
@@ -166,22 +166,22 @@ export default function CampaignHome() {
               <li key={element.entity_id}>
                 <Link
                   href={`/c/${campaign}/e/${encodeURIComponent(element.entity_id)}`}
-                  className={`text-sm hover:underline ${SOURCE.yours}`}
+                  className={`text-ui hover:underline ${SOURCE.yours}`}
                 >
                   {element.name}
                 </Link>
                 {element.role && (
-                  <span className="ml-2 text-[11px] text-neutral-600">
+                  <span className="ml-2 text-label text-ink-faint">
                     {element.role}
                   </span>
                 )}
               </li>
             ))}
             {cast.length === 0 && (
-              <li className="text-sm text-neutral-600">Nobody yet.</li>
+              <li className="text-ui text-ink-faint">Nobody yet.</li>
             )}
           </ul>
-          <p className="mt-4 text-[11px] text-neutral-700">
+          <p className="mt-4 text-label text-ink-faint">
             {yours.length} of {order.length} scenes are yours
           </p>
           </>

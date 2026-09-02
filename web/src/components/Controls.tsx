@@ -56,12 +56,12 @@ export function Controls({
               onClick={() => onBook(b.slug)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
                 b.slug === book
-                  ? 'border-neutral-600 bg-neutral-800'
-                  : 'border-transparent hover:bg-neutral-800/50'
+                  ? 'border-line bg-overlay'
+                  : 'border-transparent hover:bg-overlay/50'
               }`}
             >
-              <span className="text-sm font-medium text-neutral-200">{b.title}</span>
-              <span className="mt-0.5 block text-xs tabular-nums text-neutral-600">
+              <span className="text-ui font-medium text-ink">{b.title}</span>
+              <span className="mt-0.5 block text-meta tabular-nums text-ink-faint">
                 {b.chapters} chapters loaded
               </span>
             </button>
@@ -78,12 +78,12 @@ export function Controls({
             onClick={() => onCampaign(null)}
             className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
               campaign === null
-                ? 'border-neutral-600 bg-neutral-800'
-                : 'border-transparent hover:bg-neutral-800/50'
+                ? 'border-line bg-overlay'
+                : 'border-transparent hover:bg-overlay/50'
             }`}
           >
-            <span className="text-sm font-medium text-neutral-200">Canon only</span>
-            <span className="mt-0.5 block text-xs leading-relaxed text-neutral-500">
+            <span className="text-ui font-medium text-ink">Canon only</span>
+            <span className="mt-0.5 block text-meta leading-relaxed text-ink-dim">
               The published book, with nothing of yours in it.
             </span>
           </button>
@@ -93,12 +93,12 @@ export function Controls({
               onClick={() => onCampaign(c.slug)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
                 c.slug === campaign
-                  ? 'border-neutral-600 bg-neutral-800'
-                  : 'border-transparent hover:bg-neutral-800/50'
+                  ? 'border-line bg-overlay'
+                  : 'border-transparent hover:bg-overlay/50'
               }`}
             >
-              <span className="text-sm font-medium text-neutral-200">{c.name}</span>
-              <span className="mt-0.5 block text-xs tabular-nums text-neutral-600">
+              <span className="text-ui font-medium text-ink">{c.name}</span>
+              <span className="mt-0.5 block text-meta tabular-nums text-ink-faint">
                 {c.sections} sections in your running order
               </span>
             </button>
@@ -115,15 +115,15 @@ export function Controls({
               onClick={() => onModel(m.id)}
               className={`block w-full rounded-md border px-3 py-2 text-left transition-colors ${
                 m.id === model
-                  ? 'border-neutral-600 bg-neutral-800'
-                  : 'border-transparent hover:bg-neutral-800/50'
+                  ? 'border-line bg-overlay'
+                  : 'border-transparent hover:bg-overlay/50'
               }`}
             >
-              <span className="text-sm font-medium text-neutral-200">{m.label}</span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-neutral-500">
+              <span className="text-ui font-medium text-ink">{m.label}</span>
+              <span className="mt-0.5 block text-meta leading-relaxed text-ink-dim">
                 {m.note}
               </span>
-              <span className="mt-1 block text-xs tabular-nums text-neutral-600">
+              <span className="mt-1 block text-meta tabular-nums text-ink-faint">
                 {m.input_per_1m === null || m.output_per_1m === null
                   ? 'no rate on file'
                   : `$${m.input_per_1m} in / $${m.output_per_1m} out per 1M`}
@@ -136,7 +136,7 @@ export function Controls({
             to be spent. What must never happen is showing it as though it had
             been checked. */}
         {chosen && !chosen.last_verified && (
-          <p className="border-t border-neutral-800 px-3 py-2 text-xs text-neutral-500">
+          <p className="border-t border-line px-3 py-2 text-meta text-ink-dim">
             <Explain text="Costs are arithmetic on an unchecked number. Correct backend/core/pricing.yaml and set last_verified.">
               rate unverified
             </Explain>
@@ -164,23 +164,23 @@ export function Controls({
           />
 
           <div>
-            <div className="mb-1.5 text-sm text-neutral-300">Passage width</div>
-            <div className="inline-flex gap-1 rounded-md border border-neutral-800 p-1">
+            <div className="mb-1.5 text-ui text-ink-dim">Passage width</div>
+            <div className="inline-flex gap-1 rounded-md border border-line p-1">
               {(['section', 'sentence'] as const).map((w) => (
                 <button
                   key={w}
                   onClick={() => onDepth({ ...depth, passage_width: w })}
-                  className={`rounded px-3 py-1 text-xs transition-colors ${
+                  className={`rounded-md px-3 py-1 text-meta transition-colors ${
                     depth.passage_width === w
-                      ? 'bg-neutral-800 text-neutral-100'
-                      : 'text-neutral-400 hover:bg-neutral-800/60'
+                      ? 'bg-overlay text-ink'
+                      : 'text-ink-dim hover:bg-overlay/60'
                   }`}
                 >
                   {w}
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">
+            <p className="mt-1.5 text-meta leading-relaxed text-ink-dim">
               A sentence is cheap and often too narrow: the tavern&apos;s owners
               are named 3,300 characters after its first mention, in the same
               section.
@@ -194,9 +194,9 @@ export function Controls({
               checked={depth.include_proposed}
               onChange={(e) => onDepth({ ...depth, include_proposed: e.target.checked })}
             />
-            <span className="text-sm text-neutral-300">
+            <span className="text-ui text-ink-dim">
               Include unverified relationships
-              <span className="mt-0.5 block text-xs leading-relaxed text-neutral-500">
+              <span className="mt-0.5 block text-meta leading-relaxed text-ink-dim">
                 Extractor guesses, wrong about a third of the time. Turn off and
                 re-ask to see whether a bad answer came from the model or from a
                 false edge fed to it.

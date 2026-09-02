@@ -42,7 +42,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
 
   return (
     <section>
-      <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+      <h2 className="text-label uppercase tracking-widest text-ink-faint">
         What we know
       </h2>
 
@@ -52,11 +52,11 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && setAsked(q)}
           placeholder="who was the burgomaster again?"
-          className={`min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+          className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink`}
         />
         <button
           onClick={() => setAsked(q)}
-          className={`shrink-0 rounded px-3 py-1.5 text-xs ${CHROME.primary}`}
+          className={`shrink-0 rounded-md px-3 py-1.5 text-meta ${CHROME.primary}`}
         >
           look it up
         </button>
@@ -68,7 +68,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
             <li key={a.entity_id}>
               <Link
                 href={`/c/${campaign}/e/${encodeURIComponent(a.entity_id)}`}
-                className="text-sm text-neutral-300 hover:underline"
+                className="text-ui text-ink-dim hover:underline"
               >
                 {a.name}
               </Link>
@@ -83,7 +83,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
             <li key={p.section_id}>
               <Link
                 href={`/c/${campaign}/s/${encodeURIComponent(p.section_id)}`}
-                className={`text-[11px] hover:underline ${
+                className={`text-label hover:underline ${
                   p.origin === 'campaign' ? SOURCE.yours : SOURCE.book
                 }`}
               >
@@ -91,7 +91,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
               </Link>
               {/* QUOTED, NEVER SUMMARISED. Trimmed for length only, and the
                   link goes to the whole of it. */}
-              <p className="mt-0.5 line-clamp-4 text-sm leading-relaxed text-neutral-300">
+              <p className="mt-0.5 line-clamp-4 text-ui leading-relaxed text-ink-dim">
                 {p.text}
               </p>
             </li>
@@ -100,7 +100,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
       )}
 
       {found && found.passages.length === 0 && found.why && (
-        <p className="mt-3 text-sm text-neutral-500">{found.why}.</p>
+        <p className="mt-3 text-ui text-ink-dim">{found.why}.</p>
       )}
     </section>
   )

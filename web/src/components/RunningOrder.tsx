@@ -134,7 +134,7 @@ export function RunningOrder({
   if (!campaign) {
     return (
       <Card title="Running order">
-        <p className="p-3 text-xs leading-relaxed text-neutral-500">
+        <p className="p-3 text-meta leading-relaxed text-ink-dim">
           Pick a table to see what it plays. A canon-only session has no running
           order — it is just the book.
         </p>
@@ -174,20 +174,20 @@ export function RunningOrder({
 
   return (
     <Card title="Running order">
-      <div className="flex items-baseline gap-2 border-b border-neutral-800 px-3 py-2">
+      <div className="flex items-baseline gap-2 border-b border-line px-3 py-2">
         <input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
           placeholder="find a scene…"
-          className="min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs outline-none focus:border-neutral-500"
+          className="min-w-0 flex-1 rounded-md border border-line bg-surface/60 px-2 py-1 text-meta focus:border-line"
         />
-        <span className="shrink-0 text-xs tabular-nums text-neutral-600">
+        <span className="shrink-0 text-meta tabular-nums text-ink-faint">
           {shown.length === rows.length
             ? `${rows.length - cut} · ${mine} yours`
             : `${shown.length} found`}
         </span>
       </div>
-      {failed && <p className="px-3 py-2 text-xs text-red-400">{failed}</p>}
+      {failed && <p className="px-3 py-2 text-meta text-red-400">{failed}</p>}
       <ol className="max-h-[26rem] overflow-y-auto p-1">
         {groups.map((group) => (
           <li key={group.chapter}>
@@ -205,15 +205,15 @@ export function RunningOrder({
                     return next
                   })
                 }
-                className="flex w-full items-baseline gap-1 rounded px-2 py-1 text-left text-[11px] uppercase tracking-wide text-neutral-500 hover:bg-neutral-800/40"
+                className="flex w-full items-baseline gap-1 rounded-md px-2 py-1 text-left text-label uppercase tracking-wide text-ink-dim hover:bg-overlay/40"
               >
-                <span className="text-neutral-700">
+                <span className="text-ink-faint">
                   {isOpen(group.chapter) ? '▾' : '▸'}
                 </span>
                 <span className="min-w-0 flex-1 truncate">
                   {prettyChapter(group.chapter)}
                 </span>
-                <span className="tabular-nums text-neutral-700">
+                <span className="tabular-nums text-ink-faint">
                   {group.rows.length}
                   {group.mine > 0 && (
                     <span className="text-amber-500/70"> ·{group.mine}</span>
@@ -247,25 +247,25 @@ export function RunningOrder({
                       event.preventDefault()
                       drop(row, over?.where ?? 'inside')
                     }}
-                    className={`group flex items-baseline gap-2 rounded px-2 py-1 hover:bg-neutral-800/40 ${
-                      row.section_id === playing ? 'bg-neutral-800' : ''
+                    className={`group flex items-baseline gap-2 rounded-md px-2 py-1 hover:bg-overlay/40 ${
+                      row.section_id === playing ? 'bg-overlay' : ''
                     } ${dragging === row.section_id ? 'opacity-40' : ''} ${
                       over?.id === row.section_id && over.where === 'inside'
-                        ? 'bg-neutral-700/60'
+                        ? 'bg-overlay/60'
                         : ''
                     } ${
                       over?.id === row.section_id && over.where === 'after'
-                        ? 'border-b border-neutral-300'
+                        ? 'border-b border-ink-dim'
                         : ''
                     }`}
                   >
                     <button
                       onClick={() => markPlaying(row.section_id)}
                       title={row.section_id === playing ? 'not here any more' : 'we are here'}
-                      className={`w-2 shrink-0 text-[10px] ${
+                      className={`w-2 shrink-0 text-label ${
                         row.section_id === playing
-                          ? 'text-neutral-100'
-                          : 'text-transparent group-hover:text-neutral-700'
+                          ? 'text-ink'
+                          : 'text-transparent group-hover:text-ink-faint'
                       }`}
                     >
                       ▶
@@ -276,19 +276,19 @@ export function RunningOrder({
             <button
               onClick={() => onRead(row.section_id)}
               style={{ paddingLeft: `${(depthOf.get(row.section_id) ?? 1) - 1}rem` }}
-              className={`min-w-0 flex-1 truncate text-left text-xs hover:underline ${
+              className={`min-w-0 flex-1 truncate text-left text-meta hover:underline ${
                 row.skipped
-                  ? 'text-neutral-600 line-through'
+                  ? 'text-ink-faint line-through'
                   : row.origin === 'campaign'
                     ? 'text-amber-300'
-                    : 'text-neutral-300'
+                    : 'text-ink-dim'
               }`}
               title={row.section_id}
             >
               {row.heading}
             </button>
             {row.origin === 'campaign' && (
-              <span className="shrink-0 text-[10px] uppercase tracking-wide text-amber-600/80">
+              <span className="shrink-0 text-label uppercase tracking-wide text-amber-600/80">
                 yours
               </span>
             )}
@@ -296,7 +296,7 @@ export function RunningOrder({
               <button
                 onClick={() => toggle(row)}
                 disabled={busy === row.section_id}
-                className="shrink-0 text-[10px] text-neutral-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-neutral-300"
+                className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink-dim"
               >
                 {row.skipped ? 'restore' : 'cut'}
               </button>

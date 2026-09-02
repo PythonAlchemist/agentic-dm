@@ -62,7 +62,7 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
 
   return (
     <section>
-      <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+      <h2 className="text-label uppercase tracking-widest text-ink-faint">
         When we can play
       </h2>
 
@@ -76,11 +76,11 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
             // six people in the group, and a picker would refuse the shorthand
             // they actually use while adding no correctness anybody wanted.
             placeholder="another evening"
-            className={`min-w-0 flex-1 rounded border border-neutral-800 bg-neutral-950 px-2 py-1 text-sm text-neutral-200 outline-none ${CHROME.focus}`}
+            className={`min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-ink`}
           />
           <button
             onClick={propose}
-            className={`shrink-0 rounded px-2 py-1 text-[11px] ${CHROME.primary}`}
+            className={`shrink-0 rounded-md px-2 py-1 text-label ${CHROME.primary}`}
           >
             propose
           </button>
@@ -91,14 +91,14 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
         {sittings.map((sitting) => (
           <li key={sitting.id}>
             <div className="flex items-baseline gap-2">
-              <span className="text-sm text-neutral-200">{sitting.on}</span>
-              <span className="text-[11px] tabular-nums text-neutral-600">
+              <span className="text-ui text-ink">{sitting.on}</span>
+              <span className="text-label tabular-nums text-ink-faint">
                 {sitting.yes.length} of {sitting.seated}
               </span>
               {isDM && (
                 <button
                   onClick={() => tableAPI.withdraw(campaign, sitting.id).then(load)}
-                  className="ml-auto text-[11px] text-neutral-700 hover:text-neutral-500"
+                  className="ml-auto text-label text-ink-faint hover:text-ink-dim"
                 >
                   withdraw
                 </button>
@@ -108,7 +108,7 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
             <Bar sitting={sitting} />
 
             {sitting.unanswered > 0 && (
-              <p className="mt-1 text-[11px] text-neutral-600">
+              <p className="mt-1 text-label text-ink-faint">
                 {sitting.unanswered} {sitting.unanswered === 1 ? 'has' : 'have'} not
                 said either way
               </p>
@@ -124,10 +124,10 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
                     key={answer}
                     onClick={() => say(sitting.id, answer)}
                     aria-pressed={sitting[answer].includes(who.reader)}
-                    className={`rounded px-1.5 py-0.5 text-[11px] ${
+                    className={`rounded-md px-1.5 py-0.5 text-label ${
                       sitting[answer].includes(who.reader)
                         ? CHROME.selected
-                        : 'text-neutral-600 hover:text-neutral-400'
+                        : 'text-ink-faint hover:text-ink-dim'
                     }`}
                   >
                     {answer}
@@ -138,11 +138,11 @@ export function Sittings({ campaign, who }: { campaign: string; who: Whoami | nu
           </li>
         ))}
         {sittings.length === 0 && (
-          <li className="text-sm text-neutral-600">No evenings on the table.</li>
+          <li className="text-ui text-ink-faint">No evenings on the table.</li>
         )}
       </ul>
 
-      {failed && <p className="mt-2 text-[11px] text-neutral-400">⚠ {failed}</p>}
+      {failed && <p className="mt-2 text-label text-ink-dim">⚠ {failed}</p>}
     </section>
   )
 }
@@ -153,10 +153,10 @@ function Bar({ sitting }: { sitting: Sitting }) {
   const total = Math.max(sitting.seated, 1)
   const width = (n: number) => `${(n / total) * 100}%`
   return (
-    <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded bg-neutral-900">
-      <span style={{ width: width(sitting.yes.length) }} className="bg-neutral-200" />
-      <span style={{ width: width(sitting.maybe.length) }} className="bg-neutral-500" />
-      <span style={{ width: width(sitting.no.length) }} className="bg-neutral-700" />
+    <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-md bg-surface">
+      <span style={{ width: width(sitting.yes.length) }} className="bg-chrome" />
+      <span style={{ width: width(sitting.maybe.length) }} className="bg-ink-dim" />
+      <span style={{ width: width(sitting.no.length) }} className="bg-overlay" />
     </div>
   )
 }

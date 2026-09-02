@@ -76,20 +76,20 @@ export default function Home() {
       .catch((error) => setFailed(String(error).replace(/^Error:\s*/, '')))
   }
 
-  if (locked === null) return <div className="h-full bg-neutral-950" />
+  if (locked === null) return <div className="h-full bg-ground" />
   if (locked) return <Door onOpened={open} />
 
   return (
     <Shell>
       <div className="mx-auto max-w-3xl px-6 py-14">
-        <h1 className="text-2xl font-medium text-neutral-100">Your tables</h1>
-        <p className="mt-2 max-w-prose text-sm leading-relaxed text-neutral-500">
+        <h1 className="text-title font-medium text-ink">Your tables</h1>
+        <p className="mt-2 max-w-prose text-ui leading-relaxed text-ink-dim">
           Each one draws on the books it was set up with. What the book says and
           what you wrote are kept apart everywhere in here.
         </p>
 
         {!reachable && (
-          <p className="mt-8 rounded border border-amber-900/60 bg-amber-950/20 p-3 text-sm text-amber-200/80">
+          <p className="mt-8 rounded-md border border-amber-900/60 bg-amber-950/20 p-3 text-ui text-yours">
             Could not reach the API. This is not &ldquo;you have no
             campaigns&rdquo; &mdash; it may be starting up.
           </p>
@@ -100,20 +100,20 @@ export default function Home() {
             <Link
               key={c.slug}
               href={`/c/${c.slug}`}
-              className="group flex items-baseline gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-4 py-3 transition-colors hover:border-neutral-700 hover:bg-neutral-900"
+              className="group flex items-baseline gap-3 rounded-md border border-line bg-surface/40 px-4 py-3 transition-colors hover:border-line hover:bg-surface"
             >
-              <span className="font-medium text-neutral-200 group-hover:text-neutral-100">
+              <span className="font-medium text-ink group-hover:text-ink">
                 {c.name}
               </span>
-              <span className="text-xs text-neutral-600">{c.slug}</span>
-              <span className="ml-auto text-xs tabular-nums text-neutral-600">
+              <span className="text-meta text-ink-faint">{c.slug}</span>
+              <span className="ml-auto text-meta tabular-nums text-ink-faint">
                 {c.sections} sections
               </span>
             </Link>
           ))}
 
           {reachable && campaigns.length === 0 && !making && (
-            <p className="text-sm text-neutral-500">No tables yet.</p>
+            <p className="text-ui text-ink-dim">No tables yet.</p>
           )}
         </div>
 
@@ -122,18 +122,18 @@ export default function Home() {
             which was not true of the lab either. */}
         <div className="mt-6">
           {making ? (
-            <div className="flex flex-col gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 p-4">
+            <div className="flex flex-col gap-2 rounded-md border border-line bg-surface/40 p-4">
               <input
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="what do you call it?"
-                className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none focus:border-neutral-500"
+                className="rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink focus:border-line"
               />
               <select
                 value={book}
                 onChange={(e) => setBook(e.target.value)}
-                className="rounded border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-300"
+                className="rounded-md border border-line bg-ground px-2 py-1.5 text-ui text-ink-dim"
               >
                 <option value="">no book yet</option>
                 {books.map((b) => (
@@ -146,24 +146,24 @@ export default function Home() {
                 <button
                   onClick={make}
                   disabled={!slug}
-                  className="rounded bg-neutral-200 px-3 py-1.5 text-xs text-neutral-950 transition-colors hover:bg-white disabled:opacity-30"
+                  className="rounded-md bg-chrome px-3 py-1.5 text-meta text-ground transition-colors hover:bg-white disabled:opacity-30"
                 >
                   make it
                 </button>
                 <button
                   onClick={() => setMaking(false)}
-                  className="text-[11px] text-neutral-600 hover:text-neutral-400"
+                  className="text-label text-ink-faint hover:text-ink-dim"
                 >
                   cancel
                 </button>
-                {slug && <span className="text-[11px] text-neutral-600">{slug}</span>}
+                {slug && <span className="text-label text-ink-faint">{slug}</span>}
               </div>
-              {failed && <p className="text-[11px] text-neutral-400">⚠ {failed}</p>}
+              {failed && <p className="text-label text-ink-dim">⚠ {failed}</p>}
             </div>
           ) : (
             <button
               onClick={() => setMaking(true)}
-              className="text-sm text-neutral-500 hover:text-neutral-300"
+              className="text-ui text-ink-dim hover:text-ink-dim"
             >
               Start a table
             </button>

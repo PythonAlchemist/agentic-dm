@@ -42,7 +42,7 @@ export default function EntityPage() {
   return (
     <Shell campaign={campaign} section="library">
       {failed && (
-        <p className="mx-auto max-w-3xl px-6 py-10 text-sm text-neutral-500">
+        <p className="mx-auto max-w-3xl px-6 py-10 text-ui text-ink-dim">
           {failed.includes('404')
             ? `This table holds nothing called ${entityId}.`
             : 'Could not reach the API.'}

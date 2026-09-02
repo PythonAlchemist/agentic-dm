@@ -146,13 +146,13 @@ export function ChatPane({
     // names in it. Opening downward is what the shape of the pane wants.
     <Group orientation="vertical" className="h-full">
       <Panel defaultSize={openHeld ? '62%' : '100%'} minSize="30%">
-        <div className="flex h-full flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/20">
+        <div className="flex h-full flex-col overflow-hidden rounded-md border border-line bg-surface/20">
           <PaneHeader title="Chat" subtitle={focus ? focus.label : undefined}>
             {focus && (
               <button
                 onClick={onClearFocus}
                 title="Ask about the whole book instead"
-                className="text-neutral-600 hover:text-neutral-300"
+                className="text-ink-faint hover:text-ink-dim"
               >
                 unfocus
               </button>
@@ -163,7 +163,7 @@ export function ChatPane({
             {raisedCards.map((card, index) => (
               discarded.has(`raised-${index}`) ? null : (
               <div key={`raised-${index}`} className="mb-4">
-                <p className="mb-1 text-xs text-neutral-500">
+                <p className="mb-1 text-meta text-ink-dim">
                   Drafted from your material panel — nothing is stored yet.
                 </p>
                 <GenerationCard
@@ -178,7 +178,7 @@ export function ChatPane({
               )
             ))}
             {turns.length === 0 && raisedCards.length === 0 && (
-              <p className="text-sm leading-relaxed text-neutral-600">
+              <p className="text-ui leading-relaxed text-ink-faint">
                 Ask about the setting. Answers are grounded in the chapters
                 loaded into the graph, and every one is cited.
               </p>
@@ -186,22 +186,22 @@ export function ChatPane({
 
             {turns.map((turn, i) => (
               <div key={i} className="space-y-2">
-                <p className="text-sm font-medium text-neutral-100">{turn.question}</p>
+                <p className="text-ui font-medium text-ink">{turn.question}</p>
 
                 {turn.error && (
-                  <p className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-sm text-red-400">
+                  <p className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-ui text-red-400">
                     {turn.error}
                   </p>
                 )}
 
                 {turn.reply && (
                   <>
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-200">
+                    <div className="whitespace-pre-wrap text-ui leading-relaxed text-ink">
                       {turn.reply.message}
                     </div>
 
                     {turn.reply.sources.length > 0 && (
-                      <ul className="space-y-0.5 text-xs text-neutral-600">
+                      <ul className="space-y-0.5 text-meta text-ink-faint">
                         {turn.reply.sources.map((s) => (
                           <li key={s.citation}>
                             {s.citation} {s.section}
@@ -210,7 +210,7 @@ export function ChatPane({
                                 QUESTION resolved credited the graph for
                                 answers a keyword match earned. */}
                             {s.path === 'text' && (
-                              <span className="text-neutral-500"> · keyword match</span>
+                              <span className="text-ink-dim"> · keyword match</span>
                             )}
                             {/* THE PRIOR, MADE VISIBLE. A passage here because
                                 of what is open — not because the question named
@@ -218,7 +218,7 @@ export function ChatPane({
                                 toward whatever they last clicked with no way to
                                 know why. */}
                             {s.path === 'focus' && (
-                              <span className="text-neutral-500">
+                              <span className="text-ink-dim">
                                 {' '}· from what you’re reading
                               </span>
                             )}
@@ -262,13 +262,13 @@ export function ChatPane({
                 )}
 
                 {!turn.reply && !turn.error && (
-                  <p className="text-sm text-neutral-600">thinking…</p>
+                  <p className="text-ui text-ink-faint">thinking…</p>
                 )}
               </div>
             ))}
           </div>
 
-          <div className="mt-4 flex shrink-0 gap-2 border-t border-neutral-800 pt-4">
+          <div className="mt-4 flex shrink-0 gap-2 border-t border-line pt-4">
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -282,12 +282,12 @@ export function ChatPane({
                 }
               }}
               placeholder={suggestion}
-              className="flex-1 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-sm outline-none placeholder:text-neutral-600 focus:border-neutral-500"
+              className="flex-1 rounded-md border border-line bg-surface/60 px-3 py-2 text-ui placeholder:text-ink-faint focus:border-line"
             />
             <button
               onClick={ask}
               disabled={busy || !draft.trim()}
-              className="rounded-md bg-neutral-200 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white transition-opacity disabled:opacity-30"
+              className="rounded-md bg-chrome px-4 py-2 text-ui font-medium text-ground hover:bg-white transition-opacity disabled:opacity-30"
             >
               Ask
             </button>
@@ -295,7 +295,7 @@ export function ChatPane({
 
           <button
             onClick={() => setOpenHeld((prior) => !prior)}
-            className="mt-2 self-start text-xs text-neutral-600 hover:text-neutral-300"
+            className="mt-2 self-start text-meta text-ink-faint hover:text-ink-dim"
           >
             {openHeld ? '▾' : '▸'} in this conversation — {counts}
           </button>
@@ -307,9 +307,9 @@ export function ChatPane({
           two guesses at what somebody wanted to read, and both were wrong. */}
       {openHeld && (
         <>
-          <Separator className="my-1 h-1.5 rounded bg-neutral-800 transition-colors hover:bg-neutral-600" />
+          <Separator className="my-1 h-1.5 rounded-md bg-overlay transition-colors hover:bg-ink-faint" />
           <Panel defaultSize="38%" minSize="20%">
-            <div className="h-full overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/30">
+            <div className="h-full overflow-hidden rounded-md border border-line bg-surface/30">
               <SubgraphPanel view={held} />
             </div>
           </Panel>
