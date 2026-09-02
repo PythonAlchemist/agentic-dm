@@ -907,7 +907,8 @@ class DMAgent:
                     "tool_call_id": tool_call.id,
                     "content": json.dumps(payload, default=str),
                 }
-            result = graph_tools.call(name, arguments)
+            # THE SESSION'S BOOK, so a tool cannot reach into the other one.
+            result = graph_tools.call(name, arguments, book=self.canon.book)
             self._fold_tool_result(name, result)
             payload = result.as_dict
         except Exception as exc:  # noqa: BLE001 - handed back for a retry

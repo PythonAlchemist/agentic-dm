@@ -296,6 +296,11 @@ MATCH (c:Chapter)-[:HAS_SECTION]->(s)
 OPTIONAL MATCH (m)-[:USES_ALIAS]->(a:Alias)
 WITH n, m, c, s, collect(DISTINCT a.name) AS aliases
 RETURN n.id AS entity_id, m.id AS mention_id, c.slug AS chapter, c.index AS chapter_index,
+       // THE SECTION'S OWN ID, so no caller has to rebuild one out of the
+       // chapter and the index. `graph_tools.passages` did, as
+       // `f"cos:{chapter}#{index}"` -- correct for one book and a fabricated
+       // id for the other, naming a section that does not exist.
+       s.id AS section_id,
        s.heading AS section, s.index AS section_index, s.key AS section_key,
        aliases AS aliases, s.text AS section_text, m.offsets[0] AS offset,
        m.occurrences AS occurrences

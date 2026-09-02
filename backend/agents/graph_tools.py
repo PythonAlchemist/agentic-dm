@@ -63,7 +63,8 @@ def _bounded(rows: list[dict], limit: int) -> Result:
     return Result(tuple(rows[:limit]), max(0, len(rows) - limit))
 
 
-def resolve(name: str, plane: str = CANON_PLANE) -> Result:
+def resolve(name: str, plane: str = CANON_PLANE,
+            book: str | None = None) -> Result:
     """Which entities answer to a name. Several is a legitimate answer.
 
     THE ALIAS PATH, and the only one. `Barovia` names a region and a village;
@@ -90,7 +91,13 @@ def resolve(name: str, plane: str = CANON_PLANE) -> Result:
                 {
                     "normalized": normalize(name),
                     "plane": plane,
-                    "book": None,
+                    # THE SESSION'S BOOK. `CanonRetriever` is emphatic that a
+                    # session reads ONE book, and measured the cost of not
+                    # doing so -- but these tools were book-blind, so a model
+                    # could resolve `Strahd` inside a Golden Vault session and
+                    # fold Barovia into the subgraph, which is the session's
+                    # memory. The cross-book bleed re-entering by the tool door.
+                    "book": book,
                     "campaign_prefix": None,
                 },
             )
@@ -112,7 +119,8 @@ def resolve(name: str, plane: str = CANON_PLANE) -> Result:
     return Result(tuple(rows))
 
 
-def expand(entity_id: str, limit: int = DEFAULT_LIMIT, plane: str = CANON_PLANE) -> Result:
+def expand(entity_id: str, limit: int = DEFAULT_LIMIT,
+           plane: str = CANON_PLANE, book: str | None = None) -> Result:
     """The relationships of one entity, in the direction the graph stores them.
 
     BOTH DIRECTIONS, because half of what a DM wants about an NPC is written
@@ -129,11 +137,20 @@ def expand(entity_id: str, limit: int = DEFAULT_LIMIT, plane: str = CANON_PLANE)
             dict(record)
             for record in session.run(EDGES, {"ids": [entity_id], "plane": plane})
         ]
+    if book:
+        # KEPT INSIDE THE BOOK, filtered here rather than in `EDGES` because
+        # that query is the lookup's and answers a question about an ENTITY,
+        # which already names its book in its id. An edge reaching out of the
+        # session's book is one the retriever would never have shown, and
+        # folding its far end into the subgraph puts Barovia in front of a
+        # heist -- through the session's own memory, where it then persists.
+        rows = [r for r in rows if str(r.get("other_id", "")).startswith(f"{book}:")]
     rows.sort(key=lambda r: (r.get("status") != "accepted", str(r.get("other"))))
     return _bounded(rows, limit)
 
 
-def passages(entity_id: str, limit: int = DEFAULT_LIMIT, plane: str = CANON_PLANE) -> Result:
+def passages(entity_id: str, limit: int = DEFAULT_LIMIT,
+             plane: str = CANON_PLANE, book: str | None = None) -> Result:
     """Where in the book an entity is named, loudest section first.
 
     The TEXT is not returned. A section's prose is 82% of a turn's input and the
@@ -146,12 +163,16 @@ def passages(entity_id: str, limit: int = DEFAULT_LIMIT, plane: str = CANON_PLAN
         found = [
             dict(record)
             for record in session.run(
-                MENTIONS, {"ids": [entity_id], "plane": plane, "book_slug": None}
+                MENTIONS,
+                {"ids": [entity_id], "plane": plane, "book_slug": book},
             )
         ]
     rows = [
         {
-            "section_id": f"cos:{row['chapter']}#{row['section_index']}",
+            # THE SECTION'S OWN ID. This was rebuilt as `f"cos:{chapter}#..."`
+            # -- the book slug hardcoded, so every id it returned for the
+            # second book named a section that does not exist.
+            "section_id": row["section_id"],
             "chapter": row["chapter"],
             "section": row["section"],
             "occurrences": row["occurrences"],
@@ -222,8 +243,12 @@ SCHEMA = [
 TOOLS = {"resolve": resolve, "expand": expand, "passages": passages}
 
 
-def call(name: str, arguments: dict) -> Result:
+def call(name: str, arguments: dict, book: str | None = None) -> Result:
     """Run one tool by name. An unknown name is an error, never a no-op.
+
+    `book` IS THE SESSION'S, NOT THE MODEL'S. It is applied after the model's
+    arguments, so a tool call cannot reach into the other book by asking: the
+    caller holds the book and the model holds the question.
 
     A model naming a tool that does not exist has misunderstood what it was
     offered, and returning an empty result would let it conclude the graph
@@ -233,4 +258,4 @@ def call(name: str, arguments: dict) -> Result:
     tool = TOOLS.get(name)
     if tool is None:
         raise KeyError(f"no such tool {name!r}; offered: {sorted(TOOLS)}")
-    return tool(**arguments)
+    return tool(**{**arguments, "book": book}) if book else tool(**arguments)
