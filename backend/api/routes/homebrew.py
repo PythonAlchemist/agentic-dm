@@ -24,7 +24,7 @@ import json
 import logging
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 
 from backend.agents.generator import KINDS, SHAPES
@@ -32,6 +32,7 @@ from backend.campaign import homebrew, ontology, store
 from backend.campaign.chain import move_plan, position_for, remove_plan, walk
 from backend.campaign.model import PART_OF
 from backend.core.config import settings
+from backend.api import auth
 from backend.core.database import neo4j_session, read_only_session
 
 logger = logging.getLogger(__name__)
@@ -278,6 +279,38 @@ def _plan_for(request: ClusterRequest):
     )
 
 
+def guard(http: Request, campaign: str) -> str:
+    """Refuse a write to a table this reader does not own. Returns the owner.
+
+    CALLED BY EVERY MUTATING ROUTE HERE, and `test_every_write_route_is_guarded`
+    fails if one is added without it -- the same shape as the auth sweep, which
+    exists because a router added later must be covered the day it is added.
+
+    IT CLAIMS AS WELL AS CHECKS. A campaign with no owner is taken by the first
+    identified reader who writes to it, so protection arrives without a
+    migration and without a DM being locked out of a table they made before any
+    of this existed.
+
+    ON THE OPEN DEPLOYMENT THIS DOES NOTHING, which is correct: with
+    `ACCESS_TOKENS` unset nobody is identified, and there is no one to check.
+    """
+    from backend.campaign import ownership
+
+    reader = auth.reader_of(http)
+    with neo4j_session() as session:
+        owner = session.execute_read(
+            lambda tx: ownership.owner_of(tx, campaign))
+        if not ownership.may_write(owner, reader):
+            raise HTTPException(
+                status_code=403,
+                detail=f"{campaign!r} belongs to another reader",
+            )
+        if not owner and reader:
+            owner = session.execute_write(
+                lambda tx: ownership.claim(tx, campaign, reader))
+    return owner
+
+
 @router.post("/plan-cluster")
 def plan_cluster_route(request: ClusterRequest) -> dict:
     """What storing this WOULD do. Writes nothing.
@@ -290,8 +323,9 @@ def plan_cluster_route(request: ClusterRequest) -> dict:
 
 
 @router.post("/store-cluster")
-def store_cluster(request: ClusterRequest) -> dict:
+def store_cluster(http: Request, request: ClusterRequest) -> dict:
     """Write an approved cluster. One transaction, or nothing."""
+    guard(http, request.campaign)
     plan = _plan_for(request)
     if not plan.storable:
         raise HTTPException(
@@ -354,8 +388,9 @@ def store_cluster(request: ClusterRequest) -> dict:
 
 
 @router.delete("/store-cluster")
-def delete_cluster_route(campaign: str, entity_id: str, cascade: bool = False) -> dict:
+def delete_cluster_route(http: Request, campaign: str, entity_id: str, cascade: bool = False) -> dict:
     """Remove a cluster, refusing by default while its elements would orphan."""
+    guard(http, campaign)
     try:
         with neo4j_session() as session:
             return session.execute_write(
@@ -371,8 +406,9 @@ def delete_cluster_route(campaign: str, entity_id: str, cascade: bool = False) -
 
 
 @router.post("/store")
-def store_generation(request: StoreRequest) -> dict:
+def store_generation(http: Request, request: StoreRequest) -> dict:
     """Write an approved generation. One transaction, or nothing."""
+    guard(http, request.campaign)
     if not request.from_canon and not request.invented:
         raise HTTPException(
             status_code=400,
@@ -440,8 +476,9 @@ def store_generation(request: StoreRequest) -> dict:
 
 
 @router.delete("/store")
-def delete_generation(campaign: str, entity_id: str) -> dict:
+def delete_generation(http: Request, campaign: str, entity_id: str) -> dict:
     """Remove a stored generation, splicing the running order shut."""
+    guard(http, campaign)
     with neo4j_session() as session:
         return session.execute_write(
             lambda tx: homebrew.delete(tx, slug=campaign, entity_id=entity_id)
@@ -704,8 +741,9 @@ def _client():
 
 
 @router.post("/expand")
-def expand_element(request: ExpandRequest) -> dict:
+def expand_element(http: Request, request: ExpandRequest) -> dict:
     """Write prose for an existing element. Creates no entity."""
+    guard(http, request.campaign)
     _resolved, bad = homebrew.cited_sections(
         [*request.from_canon, *request.from_yours], request.sources
     )
@@ -840,8 +878,9 @@ class RoleRequest(BaseModel):
 
 
 @router.post("/role")
-def set_role(request: RoleRequest) -> dict:
+def set_role(http: Request, request: RoleRequest) -> dict:
     """Change the one line a stub is made of."""
+    guard(http, request.campaign)
     with neo4j_session() as session:
         try:
             return session.execute_write(
@@ -867,7 +906,7 @@ class RejectRequest(BaseModel):
 
 
 @router.post("/reject-edge")
-def reject_edge(request: RejectRequest) -> dict:
+def reject_edge(http: Request, request: RejectRequest) -> dict:
     """Say no to a guess, so it stays said.
 
     THE VERDICT THAT WAS MISSING. Accepting a proposed edge promotes it;
@@ -875,6 +914,7 @@ def reject_edge(request: RejectRequest) -> dict:
     2,145 proposed edges stood against 593 accepted and 7 authored with one
     exit between them, and a DM who threw a guess out watched it return.
     """
+    guard(http, request.campaign)
     with neo4j_session() as session:
         return session.execute_write(
             lambda tx: homebrew.reject_edge(
@@ -891,7 +931,7 @@ class DeriveRequest(BaseModel):
 
 
 @router.post("/derive-edges")
-async def derive_edges(request: DeriveRequest) -> dict:
+async def derive_edges(http: Request, request: DeriveRequest) -> dict:
     """Read a stored section back and propose the relationships in it.
 
     RUN AFTER A WRITE OR AN EDIT, not inside one. It is a model call and a real
@@ -913,6 +953,7 @@ async def derive_edges(request: DeriveRequest) -> dict:
     guessing one from their sentences are different claims, and the second gets
     dimmed and labelled rather than mixed in with the first.
     """
+    guard(http, request.campaign)
     from openai import AsyncOpenAI
 
     from backend.agents import generator
@@ -981,7 +1022,7 @@ class NestRequest(BaseModel):
 
 
 @router.post("/nest")
-def nest(request: NestRequest) -> dict:
+def nest(http: Request, request: NestRequest) -> dict:
     """Put a section INSIDE another, or take it out of one.
 
     SEQUENCE IS NOT TOUCHED. `/move` reorders; this re-parents; and a story has
@@ -993,6 +1034,7 @@ def nest(request: NestRequest) -> dict:
     this reaches a person, and "an encounter goes inside a scene, not inside an
     encounter" is the whole explanation.
     """
+    guard(http, request.campaign)
     with neo4j_session() as session:
         rows = {
             dict(r)["id"]: dict(r)
@@ -1032,7 +1074,7 @@ class RescanRequest(BaseModel):
 
 
 @router.post("/rescan")
-def rescan_campaign(request: RescanRequest) -> dict:
+def rescan_campaign(http: Request, request: RescanRequest) -> dict:
     """Read every stored section's prose again, for this campaign.
 
     NEW WRITES AND EDITS SCAN THEMSELVES, so this is for what predates that --
@@ -1044,6 +1086,7 @@ def rescan_campaign(request: RescanRequest) -> dict:
     Idempotent by construction: `rescan` reconciles rather than appends, so
     running it twice is running it once.
     """
+    guard(http, request.campaign)
     with neo4j_session() as session:
         sections = [
             r["id"]
@@ -1072,13 +1115,14 @@ class EditRequest(BaseModel):
 
 
 @router.post("/edit")
-def edit_section(request: EditRequest) -> dict:
+def edit_section(http: Request, request: EditRequest) -> dict:
     """Rewrite the prose of something this campaign already stored.
 
     Refuses anything that is not this campaign's, which includes the book.
     404 rather than 403: whether an id exists elsewhere is not this caller's
     business.
     """
+    guard(http, request.campaign)
     with neo4j_session() as session:
         try:
             return session.execute_write(
@@ -1094,8 +1138,9 @@ def edit_section(request: EditRequest) -> dict:
 
 
 @router.post("/skip")
-def skip(request: OrderRequest) -> dict:
+def skip(http: Request, request: OrderRequest) -> dict:
     """Cut a section from the running order, RECORDING that it was cut."""
+    guard(http, request.campaign)
     with neo4j_session() as session:
         def run(tx):
             links, start = store.read_chain(tx, request.campaign)
@@ -1113,12 +1158,13 @@ def skip(request: OrderRequest) -> dict:
 
 
 @router.post("/unskip")
-def unskip(request: OrderRequest) -> dict:
+def unskip(http: Request, request: OrderRequest) -> dict:
     """Put a cut section back at its BOOK position, not at the end.
 
     The same rule reconciliation uses, deliberately: a section the DM has
     expressed no opinion about where to put goes where the book puts it.
     """
+    guard(http, request.campaign)
     with read_only_session() as session:
         found = {c.slug: c for c in store.read_campaigns(session)}
         campaign = found.get(request.campaign)
@@ -1146,8 +1192,9 @@ def unskip(request: OrderRequest) -> dict:
 
 
 @router.post("/move")
-def move(request: OrderRequest) -> dict:
+def move(http: Request, request: OrderRequest) -> dict:
     """Put a section somewhere else in the running order."""
+    guard(http, request.campaign)
     with neo4j_session() as session:
         def run(tx):
             links, start = store.read_chain(tx, request.campaign)

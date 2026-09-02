@@ -193,14 +193,22 @@ def running_order(session, slug: str) -> list[str]:
 # -- writes -----------------------------------------------------------------
 
 
-def create(tx, campaign: Campaign) -> None:
-    """The Campaign node and what it draws on. No chain yet."""
+def create(tx, campaign: Campaign, owner: str = "") -> None:
+    """The Campaign node and what it draws on. No chain yet.
+
+    `owner` IS A READER'S NAME, the same string the gate identifies a request
+    by, and it is empty on an open deployment where nobody is identified. Set
+    ON CREATE only: re-running `create` for an existing table must not hand it
+    to whoever ran it last. See `campaign/ownership.py`.
+    """
     tx.run(
         """
         MERGE (c:Campaign {slug:$slug})
+        ON CREATE SET c.owner = $owner
         SET c.name = $name, c.plane = $plane
         """,
-        {"slug": campaign.slug, "name": campaign.name, "plane": CAMPAIGN_PLANE},
+        {"slug": campaign.slug, "name": campaign.name,
+         "plane": CAMPAIGN_PLANE, "owner": owner},
     )
     for book in campaign.books:
         tx.run(
