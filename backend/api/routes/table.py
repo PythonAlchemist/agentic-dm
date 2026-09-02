@@ -525,7 +525,15 @@ WITH collect(b.slug + ':') AS prefixes
 MATCH (e:Entity)
 WHERE toLower(e.name) CONTAINS toLower($q)
   AND (e.campaign = $slug
-       OR any(p IN prefixes WHERE e.id STARTS WITH p))
+       OR any(p IN prefixes WHERE e.id STARTS WITH p)
+       // THE RULES ARE IN SCOPE FOR EVERYBODY, whatever this table plays.
+       // Without this the DM was the only person who could not find
+       // `Fireball`: a player reaches it through the public branch, and a DM
+       // reached it through `DRAWS_ON` alone.
+       OR EXISTS {
+         MATCH (b:Book)
+         WHERE b.reference = true AND e.id STARTS WITH b.slug + ':'
+       })
   AND ($label = '' OR $label IN labels(e))
 RETURN e.id AS entity_id, e.name AS name, e.plane AS plane,
        [l IN labels(e) WHERE l <> 'Entity'] AS labels,

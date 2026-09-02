@@ -202,3 +202,45 @@ class TestPeopleSaySurnames:
         unknown = _ask("what about the archmage?")
         assert "but nothing your table has been shown" in known.miss_reason
         assert "nothing your table has been told about" in unknown.miss_reason
+
+
+class TestTheRulebookHasToEarnAHit:
+    """A table has a handful of granted sections, all about this campaign. The
+    rulebook has 889 entries about everything, and there one common word is
+    noise rather than a guess."""
+
+    def test_a_common_word_does_not_pull_in_the_rules(self, graph):
+        graph.run(
+            "CREATE (b:Book {slug:$b, id:$b, plane:'canon', reference:true}) "
+            "CREATE (:Section {id:$s, plane:'canon', heading:'Bandit Captain', "
+            "  text:'It takes a strong personality to keep a gang in line.'})",
+            {"b": f"{PREFIX}-rules", "s": f"{PREFIX}-rules:bandit-captain"}).consume()
+        try:
+            found = _ask("who is captain Pytestrand")
+            assert found.passages == ()
+        finally:
+            graph.run("MATCH (b:Book {slug:$b}) DETACH DELETE b",
+                      {"b": f"{PREFIX}-rules"}).consume()
+            graph.run("MATCH (n) WHERE n.id STARTS WITH $p DETACH DELETE n",
+                      {"p": f"{PREFIX}-rules"}).consume()
+
+    def test_one_word_is_enough_when_it_is_the_whole_question(self, graph):
+        """"Fireball" is a lookup, and a lookup of one word is the normal way
+        somebody uses a rulebook."""
+        graph.run(
+            "CREATE (b:Book {slug:$b, id:$b, plane:'canon', reference:true}) "
+            "CREATE (:Section {id:$s, plane:'canon', heading:'Fireball', "
+            "  text:'A bright streak flashes from your pointing finger.'})",
+            {"b": f"{PREFIX}-rules", "s": f"{PREFIX}-rules:fireball"}).consume()
+        try:
+            assert [p.section for p in _ask("fireball").passages] == ["Fireball"]
+        finally:
+            graph.run("MATCH (b:Book {slug:$b}) DETACH DELETE b",
+                      {"b": f"{PREFIX}-rules"}).consume()
+            graph.run("MATCH (n) WHERE n.id STARTS WITH $p DETACH DELETE n",
+                      {"p": f"{PREFIX}-rules"}).consume()
+
+    def test_the_tables_own_prose_still_answers_on_one_word(self, graph):
+        _reveal(graph, VILLAGE)
+        assert [p.section for p in _ask("what happened in the village?").passages] \
+            == ["The Village"]

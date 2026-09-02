@@ -103,13 +103,28 @@ LIMIT $limit
 #: thing they can actually quote back.
 GRANTED_TEXT = """
 MATCH (c:Campaign {slug:$slug}), (s:Section)
-WHERE (c)-[:REVEALED]->(s) OR """ + PUBLIC_CLAUSE % "s.id" + """
-WITH s, toLower(coalesce(s.heading, '') + ' ' + coalesce(s.text, '')) AS prose
-WHERE any(t IN $terms WHERE prose CONTAINS t)
+WHERE (c)-[:REVEALED]->(s) OR EXISTS {
+    MATCH (b:Book) WHERE b.reference = true AND s.id STARTS WITH b.slug + ':'
+  }
+WITH c, s, toLower(coalesce(s.heading, '') + ' ' + coalesce(s.text, '')) AS prose
+WITH c, s, size([t IN $terms WHERE prose CONTAINS t]) AS hits,
+     EXISTS { (c)-[:REVEALED]->(s) } AS ours
+// THE BAR IS HIGHER FOR THE RULEBOOK THAN FOR THIS TABLE'S OWN PROSE.
+//
+// A table has a handful of granted sections and every one of them is about
+// this campaign, so a single word hitting one is a decent guess. The rulebook
+// is 889 entries about everything, and there one word is noise: "who is
+// Captain Saltmarrow" matched `Bandit Captain` on "captain" and answered a
+// question about somebody's campaign with a stat block.
+//
+// A reference work is looked up by NAME -- which the anchors above already do
+// -- so its prose has to earn a hit rather than merely contain a common word.
+WHERE hits >= CASE WHEN ours OR size($terms) < 2 THEN 1 ELSE 2 END
 RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
-       s.plane AS plane,
-       size([t IN $terms WHERE prose CONTAINS t]) AS hits
-ORDER BY hits DESC, s.id
+       s.plane AS plane, hits
+// A TABLE'S OWN MATERIAL OUTRANKS THE RULEBOOK. Both are legitimate answers
+// and only one of them is about this campaign.
+ORDER BY ours DESC, hits DESC, s.id
 LIMIT $limit
 """
 
