@@ -16,6 +16,11 @@ import { auth } from '@/lib/api'
  * something to get past. Naming the reason -- these are books you have to own
  * -- makes the gate legible to the person meeting it, who is a friend at the
  * table rather than an intruder.
+ *
+ * IT IS NOT THE LAB'S DOOR ANY MORE. It said "Agent Lab" and "this lab reads
+ * from...", which was true when the lab was the only thing behind it and is
+ * now the first thing a PLAYER sees -- a player who has never heard of the
+ * lab and never will.
  */
 export function Door({ onOpened }: { onOpened: () => void }) {
   const [token, setToken] = useState('')
@@ -47,9 +52,9 @@ export function Door({ onOpened }: { onOpened: () => void }) {
   return (
     <div className="flex h-full items-center justify-center p-8">
       <form onSubmit={tryIt} className="w-full max-w-sm">
-        <h1 className="text-base font-medium text-neutral-200">Agent Lab</h1>
+        <h1 className="text-base font-medium text-neutral-200">Your table</h1>
         <p className="mt-2 text-sm leading-relaxed text-neutral-500">
-          This lab reads from the text of <em>Curse of Strahd</em> and{' '}
+          This reads from the text of <em>Curse of Strahd</em> and{' '}
           <em>Keys from the Golden Vault</em>, so it is shared only with people
           who own them. Ask the DM for a reader token.
         </p>

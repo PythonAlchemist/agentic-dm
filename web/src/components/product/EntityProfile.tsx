@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { EntityRead } from '@/lib/api'
 import { Portraits } from '@/components/product/Portraits'
 import { Reveal } from '@/components/product/Reveal'
+import { useRuns } from '@/lib/role'
 import { SOURCE } from '@/lib/palette'
 
 /**
@@ -41,6 +42,11 @@ export function EntityProfile({
   compact?: boolean
   onOpenSection?: (sectionId: string) => void
 }) {
+  // THE PROVENANCE LINE IS ADDRESSED TO SOMEBODY. "Yours. Written for this
+  // campaign." is the DM reading their own material; a player reading the same
+  // words is being told the campaign belongs to them, which is both wrong and
+  // confusing about the one thing this line exists to say.
+  const runs = useRuns(campaign)
   const yours = entity.plane === 'campaign'
   const unnamed = !yours && !entity.named_by_book
   const quotes = entity.named_in.filter((n) => n.says.length > 0)
@@ -69,8 +75,14 @@ export function EntityProfile({
           <p className="mt-1 text-xs">
             {yours ? (
               <>
-                <span className={SOURCE.yours}>Yours.</span>{' '}
-                <span className="text-neutral-500">Written for this campaign.</span>
+                <span className={SOURCE.yours}>
+                  {runs === false ? 'Your DM wrote this.' : 'Yours.'}
+                </span>{' '}
+                <span className="text-neutral-500">
+                  {runs === false
+                    ? 'It is not in the book.'
+                    : 'Written for this campaign.'}
+                </span>
               </>
             ) : unnamed ? (
               <>
@@ -157,7 +169,9 @@ export function EntityProfile({
         </section>
       )}
 
-      {entity.invented.length > 0 && !compact && (
+      {/* THE DM'S OWN NOTE, and the server does not send it to a player at
+          all -- this is the second lock on the same door. */}
+      {entity.invented.length > 0 && !compact && runs === true && (
         <section className="mt-6">
           <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
             Invented for this campaign

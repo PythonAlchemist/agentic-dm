@@ -157,14 +157,21 @@ class TestTheDoorsItDoesNotOpen:
 
 
 class TestTheShapeThatKeepsItTrue:
-    def test_every_query_begins_at_the_grant(self):
-        """The same sweep the gated routes get: a leak here would be a query
-        that selects prose before it checks a grant."""
+    def test_every_query_gates_before_it_returns(self):
+        """The same sweep the gated routes get, in the same stronger form.
+
+        A leak here is a query that selects prose before it checks whether the
+        table may have it -- so everything before the first RETURN must carry
+        both legitimate branches, the grant and the rulebook. A third branch
+        added later fails this until somebody writes it down.
+        """
         from backend.player import retrieval
 
         for name in ("GRANTED_ENTITIES", "GRANTED_PASSAGES", "GRANTED_TEXT"):
-            first = getattr(retrieval, name).strip().splitlines()[0]
-            assert "REVEALED" in first, f"{name} starts at {first!r}"
+            selection = getattr(retrieval, name).split("RETURN")[0]
+            assert "REVEALED" in selection, f"{name} does not check a grant"
+            assert "b.reference = true" in selection, (
+                f"{name} does not check for a rulebook")
 
 
 class TestPeopleSaySurnames:

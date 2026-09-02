@@ -143,18 +143,40 @@ class TestTheShapeThatKeepsItTrue:
     anchored on one.
     """
 
-    def test_every_player_query_is_anchored_on_a_grant(self):
+    def _queries(self) -> dict:
         import backend.api.routes.table as table_routes
 
-        queries = {
+        return {
             "ENTITY_PLAYER": visibility.ENTITY_PLAYER,
             "SECTION_PLAYER": visibility.SECTION_PLAYER,
             "SEARCH_PLAYER": table_routes.SEARCH_PLAYER,
         }
-        for name, cypher in queries.items():
-            first = cypher.strip().splitlines()[0]
-            assert "REVEALED" in first, (
-                f"{name} selects rows before it checks a grant: {first!r}")
+
+    def test_every_player_query_gates_before_it_returns(self):
+        """The rule survived the rulebook, in a stronger form.
+
+        It used to be "the first line matches REVEALED", which stopped holding
+        when public material gave the selection a second legitimate branch. The
+        thing that actually matters is unchanged: the gate is part of choosing
+        the rows, not something applied to rows already chosen. So everything
+        before the first RETURN must carry BOTH branches -- the grant and the
+        rulebook -- and a query that gained a third would fail here until
+        somebody wrote it down.
+        """
+        for name, cypher in self._queries().items():
+            selection = cypher.split("RETURN")[0]
+            assert "REVEALED" in selection, f"{name} does not check a grant"
+            assert "b.reference = true" in selection, (
+                f"{name} does not check for a rulebook")
+
+    def test_no_player_query_takes_its_visibility_from_a_parameter(self):
+        """An argument a caller can get wrong is one they can get wrong in the
+        widening direction. `['']` would make the whole graph public, since
+        every id starts with the empty string."""
+        for name, cypher in self._queries().items():
+            selection = cypher.split("RETURN")[0]
+            assert "$public" not in selection, f"{name} is told what is public"
+            assert "$prefixes" not in selection, f"{name} is told what is public"
 
     def test_there_are_player_queries_to_check(self):
         """Without this the sweep above passes by finding nothing, which is how
@@ -235,3 +257,88 @@ class TestTheScreensThatAreTheDMsWhole:
             got = _as(DM_TOKEN).get(f"/api/homebrew/{path}",
                                     params={"campaign": SLUG})
             assert got.status_code == 200, path
+
+
+class TestTheAdventureLog:
+    def test_a_player_may_read_it(self, table):
+        """Safe by construction: it reports grants, and a grant is the
+        permission."""
+        _as(DM_TOKEN).post("/api/table/reveal",
+                           json={"campaign": SLUG, "target": STRAHD})
+        got = _as(PLAYER_TOKEN).get("/api/table/log", params={"campaign": SLUG})
+        assert got.status_code == 200
+        assert got.json()["log"][0]["learned"][0]["name"] == "Strahd von Zarovich"
+
+    def test_it_holds_nothing_ungranted(self, table):
+        _as(DM_TOKEN).post("/api/table/reveal",
+                           json={"campaign": SLUG, "target": STRAHD})
+        got = _as(PLAYER_TOKEN).get("/api/table/log", params={"campaign": SLUG})
+        assert "lost bride" not in got.text and "The Twist" not in got.text
+
+    def test_an_alias_is_what_the_log_remembers(self, table):
+        _as(DM_TOKEN).post("/api/table/reveal", json={
+            "campaign": SLUG, "target": STRAHD, "as_name": "the coachman"})
+        got = _as(PLAYER_TOKEN).get("/api/table/log", params={"campaign": SLUG})
+        assert "coachman" in got.text and "Strahd" not in got.text
+
+
+class TestThePartysPockets:
+    def test_a_player_does_not_read_an_npc_s_inventory(self, table):
+        """The full ledger names every holder, so reading it would tell a
+        player that somebody called Strahd is carrying a tome."""
+        table.run(
+            "MERGE (i:Entity:ITEM {id:$i, plane:'canon', name:'Tome'})",
+            {"i": f"{PREFIX}:tome"}).consume()
+        _as(DM_TOKEN).post("/api/table/inventory/give", json={
+            "campaign": SLUG, "item": f"{PREFIX}:tome", "holder": STRAHD})
+        got = _as(PLAYER_TOKEN).get("/api/table/inventory",
+                                    params={"campaign": SLUG})
+        assert got.json()["held"] == []
+        assert "Strahd" not in got.text
+
+    def test_but_does_read_the_party_s(self, table):
+        table.run(
+            "MERGE (i:Entity:ITEM {id:$i, plane:'canon', name:'Rope'})",
+            {"i": f"{PREFIX}:rope"}).consume()
+        _as(DM_TOKEN).post("/api/table/inventory/give", json={
+            "campaign": SLUG, "item": f"{PREFIX}:rope",
+            "holder": f"hb:{SLUG}:the-party"})
+        got = _as(PLAYER_TOKEN).get("/api/table/inventory",
+                                    params={"campaign": SLUG}).json()["held"]
+        assert [h["name"] for h in got] == ["Rope"]
+
+    def test_a_player_cannot_hand_things_around(self, table):
+        got = _as(PLAYER_TOKEN).post("/api/table/inventory/give", json={
+            "campaign": SLUG, "item": f"{PREFIX}:rope", "holder": STRAHD})
+        assert got.status_code == 403
+
+
+class TestARefusalSaysWhyItRefused:
+    """One gate now guards three different things, and a message that explains
+    the wrong one reads as a broken product rather than a closed door."""
+
+    def test_the_running_order_talks_about_the_running_order(self, table):
+        detail = _as(PLAYER_TOKEN).get("/api/homebrew/running-order",
+                                       params={"campaign": SLUG}).json()["detail"]
+        assert "running order" in detail and "assistant" not in detail
+
+    def test_the_cast_talks_about_the_cast(self, table):
+        detail = _as(PLAYER_TOKEN).get("/api/homebrew/elements",
+                                       params={"campaign": SLUG}).json()["detail"]
+        assert "not met" in detail and "assistant" not in detail
+
+    def test_the_assistant_talks_about_the_assistant(self, table):
+        detail = _as(PLAYER_TOKEN).post("/api/lab/chat", json={
+            "message": "hello", "campaign": SLUG,
+            "session_id": "t"}).json()["detail"]
+        assert "assistant" in detail
+
+    def test_no_refusal_names_what_it_is_hiding(self, table):
+        """A 403 that quotes the secret has refused nothing."""
+        for got in (
+            _as(PLAYER_TOKEN).get("/api/homebrew/running-order",
+                                  params={"campaign": SLUG}),
+            _as(PLAYER_TOKEN).get("/api/homebrew/elements",
+                                  params={"campaign": SLUG}),
+        ):
+            assert "Strahd" not in got.text and "lost bride" not in got.text

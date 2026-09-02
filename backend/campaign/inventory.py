@@ -86,6 +86,21 @@ RETURN item.id AS item_id, item.name AS name, item.plane AS plane,
 ORDER BY item.name
 """
 
+#: What the PARTY is holding, for the people holding it.
+#:
+#: A PLAYER'S INVENTORY IS THE PARTY'S, NOT THE TABLE'S. The full ledger names
+#: every holder, so a player reading it would learn that somebody called Strahd
+#: is carrying a tome -- an NPC's pockets are the DM's material, and the
+#: sentence "party inventory" already says whose this is.
+PARTY_LEDGER = """
+MATCH (holder:Entity {id:$party})-[h:HOLDS {campaign:$slug}]->(item:Entity)
+WHERE h.until_session IS NULL
+RETURN holder.id AS holder_id, holder.name AS holder,
+       item.id AS item_id, item.name AS name, item.plane AS plane,
+       h.since_session AS since_session, coalesce(h.note, '') AS note
+ORDER BY item.name
+"""
+
 #: Everything this table is holding, whoever is holding it.
 LEDGER = """
 MATCH (holder:Entity)-[h:HOLDS {campaign:$slug}]->(item:Entity)
@@ -163,8 +178,14 @@ def held_by(tx, *, slug: str, holder: str) -> list[dict]:
 
 
 def ledger(tx, *, slug: str) -> list[dict]:
-    """Everything this table is carrying, by holder."""
+    """Everything this table is carrying, by holder. The DM's view."""
     return [dict(r) for r in tx.run(LEDGER, {"slug": slug})]
+
+
+def party_ledger(tx, *, slug: str) -> list[dict]:
+    """What the party is carrying. The players'."""
+    return [dict(r) for r in tx.run(PARTY_LEDGER,
+                                    {"slug": slug, "party": party_id(slug)})]
 
 
 def provenance(tx, *, slug: str, item: str) -> list[dict]:

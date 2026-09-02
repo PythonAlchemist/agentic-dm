@@ -27,6 +27,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://127.0.0.1:8000/api'
 const TOKEN_KEY = 'agentic-dm.reader-token'
 
 let token = ''
+//: Whether `auth.load()` has run in this browser. Not "is there a token" --
+//: an empty token is a legitimate answer on an open deployment, and retrying
+//: the read on every request would make `clear()` meaningless.
+let loaded = false
 let refusedHandler: (() => void) | null = null
 
 const SESSION_KEY = 'agentic-dm.session'
@@ -62,14 +66,20 @@ export const auth = {
   load(): string {
     if (typeof window === 'undefined') return ''
     token = window.localStorage.getItem(TOKEN_KEY) ?? ''
+    loaded = true
     return token
   },
   set(value: string) {
     token = value.trim()
+    loaded = true
     if (typeof window !== 'undefined') window.localStorage.setItem(TOKEN_KEY, token)
   },
   clear() {
     token = ''
+    // STILL LOADED. A cleared token is a known answer -- "this browser has
+    // none" -- and marking it unloaded would make the next request read the
+    // key back off disk and undo the clear.
+    loaded = true
     if (typeof window !== 'undefined') window.localStorage.removeItem(TOKEN_KEY)
   },
   has(): boolean {
@@ -118,6 +128,15 @@ export const auth = {
  * sending the old one at every endpoint the page touches.
  */
 async function send(url: string, init: RequestInit = {}): Promise<Response> {
+  // LOADED HERE, LAZILY, RATHER THAN BY WHOEVER REMEMBERS. React runs a
+  // child's effects before its parent's, so every page's own fetches went out
+  // before the shell could call `auth.load()` -- and the 401 they earned
+  // CLEARED the stored token, which made the Door impossible to get through:
+  // enter a good token, reload, and the first render throws it away again.
+  //
+  // The token is needed exactly here, so it is read exactly here. No screen
+  // can now be the one that forgot.
+  if (!loaded) auth.load()
   const headers = new Headers(init.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const response = await fetch(url, { ...init, headers })
@@ -864,7 +883,20 @@ export interface Known {
   why: string
 }
 
+export interface LogNight {
+  number: number
+  title: string
+  held_on: string
+  learned: { id: string; name: string; kind: 'scene' | 'who' }[]
+}
+
 export const tableAPI = {
+  /** The adventure so far. Open to everyone at the table: it reports grants,
+   *  and a grant IS the permission. */
+  log(campaign: string): Promise<{ log: LogNight[] }> {
+    return getJSON(`/table/log?${query({ campaign })}`)
+  },
+
   /** What this table has been told, quoted back. No model in the loop: these
    *  are the passages they were actually shown. */
   ask(campaign: string, q: string): Promise<Known> {

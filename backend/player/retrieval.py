@@ -28,6 +28,7 @@ difference is which rows exist.
 
 from __future__ import annotations
 
+from backend.player.reader import PUBLIC as _PUBLIC
 from backend.canon.retrieval import (
     PATH_GRAPH,
     PATH_NONE,
@@ -38,7 +39,14 @@ from backend.canon.retrieval import (
     find_names,
 )
 
-#: Every entity this table has been told about, under the names it was told.
+#: Reused from `player/reader.py` so the retriever and the reads cannot
+#: disagree about what a rulebook is.
+PUBLIC_CLAUSE = _PUBLIC
+
+
+#: Every entity this table may reach: what it was told, plus whatever a
+#: rulebook says. A player owns the Player's Handbook, and making a DM reveal
+#: `Fireball` to their own party is a rule whose only effect is busywork.
 #:
 #: A GRANTED ALIAS REPLACES THE FORMS, IT DOES NOT JOIN THEM. A player who only
 #: knows "the coachman" types "the coachman", and letting "Strahd" anchor as
@@ -50,7 +58,9 @@ from backend.canon.retrieval import (
 #: Zarovich"; they type "Strahd", and `ALIAS_OF` is where the book's spellings
 #: already live. Reusing them keeps one record of what a thing may be called.
 GRANTED_ENTITIES = """
-MATCH (:Campaign {slug:$slug})-[g:REVEALED]->(e:Entity)
+MATCH (c:Campaign {slug:$slug}), (e:Entity)
+WHERE (c)-[:REVEALED]->(e) OR """ + PUBLIC_CLAUSE % "e.id" + """
+WITH c, e, [(c)-[r:REVEALED]->(e) | r][0] AS g
 OPTIONAL MATCH (a:Alias)-[:ALIAS_OF]->(e)
 WITH e, g, [x IN collect(a.name) WHERE x IS NOT NULL] AS aliases
 RETURN e.id AS id,
@@ -69,9 +79,11 @@ ORDER BY name
 #: revealed section cannot be reached through an unrevealed name and an
 #: unrevealed section cannot be reached through a revealed one.
 GRANTED_PASSAGES = """
-MATCH (c:Campaign {slug:$slug})-[:REVEALED]->(s:Section)
+MATCH (c:Campaign {slug:$slug}), (s:Section)
+WHERE (c)-[:REVEALED]->(s) OR """ + PUBLIC_CLAUSE % "s.id" + """
 MATCH (e:Entity)<-[:REFERS_TO]-(m:Mention)-[:IN_SECTION]->(s)
-WHERE e.id IN $ids AND (c)-[:REVEALED]->(e)
+WHERE e.id IN $ids
+  AND ((c)-[:REVEALED]->(e) OR """ + PUBLIC_CLAUSE % "e.id" + """)
 WITH s, collect(DISTINCT e.id) AS entity_ids, sum(m.occurrences) AS hits
 RETURN s.id AS section_id, s.heading AS heading, s.text AS text,
        s.plane AS plane, entity_ids, hits
@@ -90,7 +102,8 @@ LIMIT $limit
 #: most likely to have remembered -- searching only the body misses the one
 #: thing they can actually quote back.
 GRANTED_TEXT = """
-MATCH (:Campaign {slug:$slug})-[:REVEALED]->(s:Section)
+MATCH (c:Campaign {slug:$slug}), (s:Section)
+WHERE (c)-[:REVEALED]->(s) OR """ + PUBLIC_CLAUSE % "s.id" + """
 WITH s, toLower(coalesce(s.heading, '') + ' ' + coalesce(s.text, '')) AS prose
 WHERE any(t IN $terms WHERE prose CONTAINS t)
 RETURN s.id AS section_id, s.heading AS heading, s.text AS text,

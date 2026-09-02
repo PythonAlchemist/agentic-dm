@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { tableAPI, type Portrait } from '@/lib/api'
+import { useRuns } from '@/lib/role'
 import { CHROME, SOURCE } from '@/lib/palette'
 
 /** A draft nobody has kept. It lives in the browser and nowhere else -- see
@@ -62,6 +63,9 @@ export function Portraits({
   const [draft, setDraft] = useState<Draft | null>(null)
   const [note, setNote] = useState('')
   const file = useRef<HTMLInputElement>(null)
+  // A PLAYER SEES THE PICTURE AND NONE OF THE MACHINERY. Uploading is the
+  // DM's, and "imagine one" is a model -- which players do not get at all.
+  const runs = useRuns(campaign)
 
   const load = useCallback(() => {
     tableAPI
@@ -165,7 +169,7 @@ export function Portraits({
         )}
       </div>
 
-      {!compact && (
+      {!compact && runs === true && (
         <>
           {found.length > 1 && (
             <div className="flex flex-wrap gap-1">

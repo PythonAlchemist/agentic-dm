@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { tableAPI, type Grant } from '@/lib/api'
+import { useRuns } from '@/lib/role'
 import { CHROME } from '@/lib/palette'
 
 /**
@@ -34,6 +35,10 @@ export function Reveal({
   const [alias, setAlias] = useState('')
   const [naming, setNaming] = useState(false)
   const [failed, setFailed] = useState('')
+  // WHAT THE TABLE KNOWS IS THE DM'S DECISION, so it is the DM's control. A
+  // player was being shown "your table knows about this — take it back", which
+  // is the one sentence on the screen that is not addressed to them.
+  const runs = useRuns(campaign)
 
   const load = useCallback(() => {
     tableAPI
@@ -50,7 +55,7 @@ export function Reveal({
 
   useEffect(load, [load])
 
-  if (!ready) return null
+  if (!ready || runs !== true) return null
 
   const act = (call: Promise<unknown>) =>
     call

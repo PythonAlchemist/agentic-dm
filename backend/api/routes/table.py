@@ -172,6 +172,19 @@ def read_revealed(campaign: str) -> dict:
         return {"revealed": player.revealed(session, slug=campaign)}
 
 
+@router.get("/log")
+def read_log(campaign: str) -> dict:
+    """The adventure so far, newest night first.
+
+    OPEN TO EVERYONE AT THE TABLE, and safe by construction: it reports grants,
+    and a grant IS the permission. There is nothing in here a reader could see
+    that they were not already allowed to see, so this is the one campaign
+    read that needs no gate of its own.
+    """
+    with read_only_session() as session:
+        return {"log": player.log(session, slug=campaign)}
+
+
 @router.post("/reveal")
 def reveal_to_table(http: Request, request: RevealRequest2) -> dict:
     """Hand something to the table, optionally under another name."""
@@ -414,7 +427,8 @@ def session_diff(http: Request, campaign: str, session_id: str) -> dict:
     defined, and a screen that showed it to the table would hand over the
     running order of everything they have not reached.
     """
-    dm_only(http, campaign)
+    dm_only(http, campaign,
+            "what your DM planned for tonight is theirs to know.")
     with read_only_session() as session:
         return sessions.diff(session, slug=campaign, session=session_id)
 
@@ -481,7 +495,8 @@ def transcript_touched(http: Request, campaign: str, session_id: str) -> dict:
 
     THE DM'S, LIKE THE DIFF: it names the planned scenes and the cast in them.
     """
-    dm_only(http, campaign)
+    dm_only(http, campaign,
+            "what your DM planned for tonight is theirs to know.")
     from backend.campaign import transcripts
 
     with read_only_session() as session:
@@ -528,9 +543,11 @@ LIMIT $limit
 #: So the player's query is anchored on the reveal, like every other player
 #: query here, and it returns the name the table knows rather than the true one.
 SEARCH_PLAYER = """
-MATCH (c:Campaign {slug:$slug})-[g:REVEALED]->(e:Entity)
-WHERE toLower(coalesce(g.as_name, e.name)) CONTAINS toLower($q)
+MATCH (c:Campaign {slug:$slug}), (e:Entity)
+WHERE ((c)-[:REVEALED]->(e) OR """ + player.public_clause("e") + """)
   AND ($label = '' OR $label IN labels(e))
+WITH c, e, [(c)-[g:REVEALED]->(e) | g][0] AS g
+WHERE toLower(coalesce(g.as_name, e.name)) CONTAINS toLower($q)
 RETURN e.id AS entity_id,
        CASE WHEN coalesce(g.as_name, '') <> '' THEN g.as_name ELSE e.name END
          AS name,
@@ -784,14 +801,23 @@ class GiveRequest(BaseModel):
 
 
 @router.get("/inventory")
-def read_inventory(campaign: str, holder: str = "") -> dict:
+def read_inventory(http: Request, campaign: str, holder: str = "") -> dict:
     """What this table is carrying, or what one holder is.
 
     THE PARTY IS JUST A HOLDER. `hb:<slug>:the-party` is an entity like any
     other, so there is no separate party-inventory route and no second shape
     for a caller to get wrong.
+
+    A PLAYER SEES THE PARTY'S POCKETS AND NOBODY ELSE'S. The full ledger names
+    every holder, so reading it would tell a player that somebody called Strahd
+    is carrying a tome. An NPC's inventory is the DM's material, and "party
+    inventory" already says whose this is.
     """
     with read_only_session() as session:
+        as_dm = player.audience(
+            session, slug=campaign, reader=_reader(http)) == player.DM
+        if not as_dm:
+            return {"held": inventory.party_ledger(session, slug=campaign)}
         if holder:
             return {"held": inventory.held_by(session, slug=campaign,
                                               holder=holder)}

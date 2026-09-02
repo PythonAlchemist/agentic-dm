@@ -11,6 +11,7 @@ import {
   labAPI,
   tableAPI,
   type CampaignElement,
+  type LogNight,
   type OrderRow,
   type Whoami,
 } from '@/lib/api'
@@ -30,27 +31,94 @@ export default function CampaignHome() {
   const [order, setOrder] = useState<OrderRow[]>([])
   const [cast, setCast] = useState<CampaignElement[]>([])
   const [who, setWho] = useState<Whoami | null>(null)
+  const [recent, setRecent] = useState<LogNight[]>([])
 
   useEffect(() => {
+    tableAPI.whoami(campaign).then(setWho).catch(() => undefined)
+    tableAPI.log(campaign).then((r) => setRecent(r.log)).catch(() => undefined)
+  }, [campaign])
+
+  // ASKED FOR ONLY BY THE PERSON ALLOWED TO HAVE IT. Both of these are refused
+  // to a player, and firing them anyway meant every player's first page load
+  // spent two requests earning two 403s and printing them to the console.
+  useEffect(() => {
+    if (!who || (who.identified && who.role !== 'dm')) return
     labAPI.runningOrder(campaign).then((r) => setOrder(r.sections)).catch(() => undefined)
     labAPI.elements(campaign).then((r) => setCast(r.elements)).catch(() => undefined)
-    tableAPI.whoami(campaign).then(setWho).catch(() => undefined)
-  }, [campaign])
+  }, [campaign, who])
 
   const yours = order.filter((row) => row.origin === 'campaign')
   const next = order.filter((row) => !row.skipped).slice(0, 8)
   // A PLAYER GETS NO PREP COLUMN AT ALL. Both of its sources are refused to
   // them, so the honest rendering is to leave it out rather than to draw an
   // empty list that reads as "your DM has planned nothing".
-  const runs = who === null || who.role === 'dm' || !who.identified
+  //
+  // UNKNOWN IS NOT THE DM. While `whoami` is in flight nobody is either
+  // column, which costs a moment of blank space and avoids showing a player
+  // the DM's headings before the answer arrives.
+  const runs = who !== null && (who.role === 'dm' || !who.identified)
+  const plays = who !== null && !runs
 
   return (
     <Shell campaign={campaign} section="prep">
-      <div
-        className={`mx-auto grid max-w-5xl gap-10 px-6 py-10 ${
-          runs ? 'md:grid-cols-[1fr_18rem]' : ''
-        }`}
-      >
+      <div className="mx-auto grid max-w-5xl gap-10 px-6 py-10 md:grid-cols-[1fr_18rem]">
+        {/* A PLAYER GETS THEIR OWN COLUMN, not the absence of the DM's. An
+            empty page reads as a product that does not work; the last night's
+            worth of what they were told is the thing they actually came back
+            for. */}
+        {plays && (
+          <div>
+            <h1 className="text-xl font-medium text-neutral-100">
+              Where we got to
+            </h1>
+            <p className="mt-1 text-sm text-neutral-500">
+              The last of what your DM has shown the table.
+            </p>
+
+            {recent.slice(0, 2).map((night) => (
+              <section key={night.number} className="mt-6">
+                <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
+                  {night.number === 0
+                    ? 'Before the first session'
+                    : `Session ${night.number}`}
+                  {night.title ? ` — ${night.title}` : ''}
+                </h2>
+                <ul className="mt-2 flex flex-col gap-1">
+                  {night.learned.map((one) => (
+                    <li key={one.id}>
+                      <Link
+                        href={
+                          one.kind === 'scene'
+                            ? `/c/${campaign}/s/${encodeURIComponent(one.id)}`
+                            : `/c/${campaign}/e/${encodeURIComponent(one.id)}`
+                        }
+                        className="text-sm text-neutral-300 hover:underline"
+                      >
+                        {one.name}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+
+            {recent.length === 0 && (
+              <p className="mt-6 text-sm text-neutral-600">
+                Your DM has not shown the table anything yet.
+              </p>
+            )}
+
+            {recent.length > 2 && (
+              <Link
+                href={`/c/${campaign}/log`}
+                className="mt-6 inline-block text-xs text-neutral-500 hover:text-neutral-300"
+              >
+                the whole log →
+              </Link>
+            )}
+          </div>
+        )}
+
         {runs && (
         <div>
           <h1 className="text-xl font-medium text-neutral-100">What&rsquo;s next</h1>

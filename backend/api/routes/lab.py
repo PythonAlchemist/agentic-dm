@@ -29,6 +29,14 @@ from backend.core.config import settings
 logger = logging.getLogger(__name__)
 from backend.api.routes.homebrew import dm_only
 
+#: The assistant reads the whole book, so it cannot be narrowed to what a
+#: table has been shown -- and a model given a secret and asked not to say it
+#: has already been given the secret.
+_ASSISTANT_IS_THE_DMS = (
+    "the assistant reads the whole book, so it answers the DM only. What your "
+    "table has been shown is on the log and on the entity and scene pages."
+)
+
 router = APIRouter()
 
 #: How many conversations one process keeps. Reached only by a deployment with
@@ -225,7 +233,7 @@ async def chat(http: Request, request: ChatRequest) -> dict:
     surface that cannot be narrowed to what a table has been shown -- see
     `homebrew.dm_only` for why it is closed rather than filtered.
     """
-    dm_only(http, request.campaign or "")
+    dm_only(http, request.campaign or "", _ASSISTANT_IS_THE_DMS)
     model = request.model or settings.openai_model
     depth = request.depth.to_domain()
     agent = _agent_for(request.session_id, model, depth, request.book, request.campaign)
@@ -265,7 +273,7 @@ async def chat(http: Request, request: ChatRequest) -> dict:
 @router.post("/generate")
 async def generate(http: Request, request: GenerateRequest) -> dict:
     """A quest, NPC or monster, with canon and invention kept apart."""
-    dm_only(http, request.campaign or "")
+    dm_only(http, request.campaign or "", _ASSISTANT_IS_THE_DMS)
     model = request.model or settings.openai_model
     depth = request.depth.to_domain()
 

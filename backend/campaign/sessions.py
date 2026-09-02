@@ -113,6 +113,23 @@ def open_session(tx, *, slug: str, title: str = "", held_on: str = "",
     return dict(row)
 
 
+CURRENT = """
+MATCH (:Campaign {slug:$slug})-[:HAS_SESSION]->(s:Session)
+RETURN s.id AS id ORDER BY s.number DESC LIMIT 1
+"""
+
+
+def current(tx, *, slug: str) -> str:
+    """The session a table is in, or `""` before there is one.
+
+    THE HIGHEST NUMBER, not a flag on the node. "Which session is open" would
+    be a second piece of state to keep in step with the numbering, and it would
+    be wrong exactly when somebody forgot to close one.
+    """
+    row = tx.run(CURRENT, {"slug": slug}).single()
+    return str(row["id"]) if row else ""
+
+
 def sessions(tx, *, slug: str) -> list[dict]:
     """Every session, newest first, with how much was meant and reached."""
     return [dict(r) for r in tx.run(LIST, {"slug": slug})]

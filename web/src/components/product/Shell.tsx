@@ -1,7 +1,10 @@
 'use client'
 
 import Link from 'next/link'
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+
+import { Door } from '@/components/Door'
+import { auth, tableAPI } from '@/lib/api'
 
 /**
  * The frame every product screen sits in.
@@ -15,6 +18,23 @@ import type { ReactNode } from 'react'
  * looking something up while five people wait. The bar does not collapse, move
  * or animate, and the campaign it belongs to is named in it so a DM with two
  * tables open in two tabs can tell them apart at a glance.
+ *
+ * AND IT KNOWS WHICH CHAIR YOU ARE IN. Every tab used to show for everybody,
+ * and three of them refuse a player outright -- the running order is the plot
+ * of what they have not reached, the cast names NPCs they have never met, and
+ * Setup is the DM's own controls. Five tabs where three are locked doors is
+ * worse than two that work: it reads as broken rather than as gated.
+ *
+ * THE ROLE IS ASKED FOR, NOT PASSED IN. Every screen would otherwise have to
+ * fetch it and hand it down, and the one that forgot would quietly show a
+ * player the DM's nav.
+ *
+ * AND THE TOKEN IS LOADED HERE, which is the only place every product screen
+ * passes through. `auth.load()` was called on the home page alone, so on a
+ * gated deployment every OTHER page ran unauthenticated: a person opening a
+ * bookmarked scene got a wall of failed requests and a page that looked empty
+ * rather than locked. An empty screen and a locked one are the two states a
+ * reader must never confuse, because only one of them is worth waiting for.
  */
 export function Shell({
   campaign,
@@ -23,10 +43,45 @@ export function Shell({
   aside,
 }: {
   campaign?: string
-  section?: 'prep' | 'library' | 'play' | 'party' | 'settings'
+  section?: 'prep' | 'library' | 'play' | 'party' | 'settings' | 'log'
   children: ReactNode
   aside?: ReactNode
 }) {
+  const [role, setRole] = useState<string | null>(null)
+  const [locked, setLocked] = useState(false)
+
+  useEffect(() => {
+    auth.onRefused(() => setLocked(true))
+    auth.load()
+  }, [])
+
+  useEffect(() => {
+    if (!campaign || locked) return
+    tableAPI
+      .whoami(campaign)
+      // AN UNIDENTIFIED READER RUNS THE TABLE, the same ruling the backend
+      // makes: `ACCESS_TOKENS` unset is one person at their own machine. A
+      // failed call falls the other way, so a broken gate closes doors rather
+      // than opening them.
+      .then((who) => setRole(who.identified ? who.role || 'player' : 'dm'))
+      .catch(() => setRole('player'))
+  }, [campaign, locked])
+
+  const runs = role === 'dm'
+
+  // A REFUSAL IS A DOOR, NOT A BLANK PAGE. Rendered before the frame so a
+  // locked reader is asked for a token rather than shown an outline of a
+  // product they cannot see.
+  //
+  // AND OPENING IT RELOADS. Every screen fetches what it needs in an effect
+  // keyed on the campaign, so the requests that failed while locked are not
+  // retried when the token arrives -- clearing the flag alone leaves a person
+  // looking at the empty page their refusals produced. One reload, once, puts
+  // every loader back in a good state.
+  if (locked) {
+    return <Door onOpened={() => window.location.reload()} />
+  }
+
   return (
     <div className="flex h-full flex-col bg-neutral-950 text-neutral-200">
       <header className="flex shrink-0 items-center gap-1 border-b border-neutral-800 px-4 py-2">
@@ -37,24 +92,34 @@ export function Shell({
           Table
         </Link>
 
-        {campaign && (
+        {campaign && role !== null && (
           <>
             <span className="mr-3 truncate text-xs text-neutral-500">{campaign}</span>
             <Tab href={`/c/${campaign}`} on={section === 'prep'}>
-              Prep
+              {runs ? 'Prep' : 'Your table'}
             </Tab>
-            <Tab href={`/c/${campaign}/library`} on={section === 'library'}>
-              Library
-            </Tab>
-            <Tab href={`/c/${campaign}/play`} on={section === 'play'}>
-              Play
+            <Tab href={`/c/${campaign}/log`} on={section === 'log'}>
+              Log
             </Tab>
             <Tab href={`/c/${campaign}/party`} on={section === 'party'}>
               Party
             </Tab>
-            <Tab href={`/c/${campaign}/settings`} on={section === 'settings'}>
-              Setup
-            </Tab>
+            {runs && (
+              <>
+                <Tab href={`/c/${campaign}/library`} on={section === 'library'}>
+                  Library
+                </Tab>
+                <Tab href={`/c/${campaign}/play`} on={section === 'play'}>
+                  Play
+                </Tab>
+                <Tab href={`/c/${campaign}/told`} on={section === 'settings'}>
+                  Told
+                </Tab>
+                <Tab href={`/c/${campaign}/settings`} on={section === 'settings'}>
+                  Setup
+                </Tab>
+              </>
+            )}
           </>
         )}
 
@@ -64,13 +129,19 @@ export function Shell({
               the retrieval report and the subgraph ledger are how a DM audits
               an answer that smells wrong -- that is a trust feature, not
               clutter, and burying it would delete it. */}
-          <Link
-            href="/lab"
-            className="text-xs text-neutral-600 hover:text-neutral-400"
-            title="The research instrument: retrieval, subgraph, cost"
-          >
-            Lab
-          </Link>
+          {/* THE LAB IS THE DM'S INSTRUMENT and its chat reads the whole
+              book, so the link is not offered to a player -- the endpoint
+              refuses them anyway, and a link that always fails is a worse
+              answer than no link. */}
+          {runs && (
+            <Link
+              href="/lab"
+              className="text-xs text-neutral-600 hover:text-neutral-400"
+              title="The research instrument: retrieval, subgraph, cost"
+            >
+              Lab
+            </Link>
+          )}
         </div>
       </header>
 

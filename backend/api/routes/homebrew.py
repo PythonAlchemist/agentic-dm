@@ -139,7 +139,9 @@ def running_order(http: Request, campaign: str) -> dict:
     # THE DM'S. A running order is every scene the book holds and every scene
     # they wrote, in the order they mean to run them -- which is the plot of
     # everything the table has not reached yet, listed.
-    dm_only(http, campaign)
+    dm_only(http, campaign,
+            "the running order is what your DM means to run, which is most of "
+            "what has not happened yet.")
     with read_only_session() as session:
         links, start = store.read_chain(session, campaign)
         order = list(walk(links, start, bound=len(links) + 2).order)
@@ -322,7 +324,20 @@ def guard(http: Request, campaign: str) -> str:
     return owner
 
 
-def dm_only(http: Request, campaign: str) -> None:
+#: What a player is told when a DM-only surface refuses them.
+#:
+#: THE REASON HAS TO TRAVEL, because one gate now guards three different
+#: things. A player clicking Library was told "the assistant answers the DM
+#: only", which is not what they clicked and not why they were refused -- a
+#: message that explains the wrong thing reads as a broken product rather than
+#: as a closed door.
+WHY_DM_ONLY = (
+    "that is your DM's to see. What your table has been shown is on the log "
+    "and on the entity and scene pages."
+)
+
+
+def dm_only(http: Request, campaign: str, why: str = WHY_DM_ONLY) -> None:
     """Refuse a surface that has not been taught to keep a secret.
 
     THE ASSISTANT READS THE WHOLE BOOK. Retrieval seeds itself from canon and
@@ -346,12 +361,7 @@ def dm_only(http: Request, campaign: str) -> None:
     reader = auth.reader_of(http)
     with read_only_session() as session:
         if player.audience(session, slug=campaign, reader=reader) != player.DM:
-            raise HTTPException(
-                status_code=403,
-                detail="the assistant reads the whole book, so it answers the "
-                       "DM only. What your table has been shown is on the "
-                       "entity and scene screens.",
-            )
+            raise HTTPException(status_code=403, detail=why)
 
 
 @router.post("/plan-cluster")
@@ -569,7 +579,9 @@ def elements(http: Request, campaign: str, unwritten: bool = False) -> dict:
     """
     # THE DM'S, for the same reason: it names every NPC, place and quest this
     # table has invented, including the ones nobody has met.
-    dm_only(http, campaign)
+    dm_only(http, campaign,
+            "that list names everyone your DM has written, including people "
+            "you have not met.")
     with read_only_session() as session:
         rows = [
             dict(r)

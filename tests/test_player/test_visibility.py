@@ -199,3 +199,23 @@ class TestWhatAModelMayBeGiven:
         assert not visibility.may_see(
             graph, slug=SLUG, reader="ana", target=SECRET)
         assert visibility.may_see(graph, slug=SLUG, reader="", target=SECRET)
+
+
+class TestTheDMsNotesStayTheDMs:
+    def test_a_player_is_not_told_which_parts_were_invented(self, graph):
+        """`invented` lists what a model supplied. A player reading it learns
+        which bits of their world were made up on the spot -- a fact about the
+        authorship, useful to the writer and corrosive to the played."""
+        graph.run("MATCH (e:Entity {id:$id}) SET e.invented = '[\"his name\"]'",
+                  {"id": STRAHD}).consume()
+        _reveal(graph, STRAHD)
+        assert _card(graph, "ana")["invented"] is None
+
+    def test_the_dm_still_sees_it(self, graph):
+        graph.run("MATCH (e:Entity {id:$id}) SET e.invented = '[\"his name\"]'",
+                  {"id": STRAHD}).consume()
+        found = graph.execute_read(lambda tx: visibility.entity_for(
+            tx, slug=SLUG, reader="", entity_id=STRAHD,
+            dm_query="MATCH (e:Entity {id:$id}) RETURN e.invented AS invented",
+            dm_params={"id": STRAHD}))
+        assert found["invented"] == '["his name"]'
