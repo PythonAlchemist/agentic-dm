@@ -319,3 +319,53 @@ class TestTranscripts:
             "MATCH (:Session {id:$s})-[r:COVERED]->() RETURN count(r) AS n",
             {"s": session}).single()["n"]
         assert covered == 0
+
+
+class TestInventory:
+    ITEM = f"{PREFIX}:tome"
+
+    def _item(self, table):
+        table.run("MERGE (:Entity:ITEM {id:$i, plane:'canon', name:'Tome'})",
+                  {"i": self.ITEM}).consume()
+
+    def test_giving_and_reading_back(self, table):
+        self._item(table)
+        given = client.post("/api/table/inventory/give", json={
+            "campaign": SLUG, "item": self.ITEM, "holder": NPC,
+            "at_session": "1"})
+        assert given.status_code == 200
+        held = client.get("/api/table/inventory", params={
+            "campaign": SLUG, "holder": NPC}).json()["held"]
+        assert [h["name"] for h in held] == ["Tome"]
+
+    def test_the_ledger_reads_by_holder(self, table):
+        self._item(table)
+        client.post("/api/table/inventory/give", json={
+            "campaign": SLUG, "item": self.ITEM, "holder": NPC})
+        found = client.get("/api/table/inventory",
+                           params={"campaign": SLUG}).json()["held"]
+        assert [(f["holder"], f["name"]) for f in found] == [("Strahd", "Tome")]
+
+    def test_handing_over_leaves_one_open_holder(self, table):
+        self._item(table)
+        for holder in (NPC, PLACE):
+            client.post("/api/table/inventory/give", json={
+                "campaign": SLUG, "item": self.ITEM, "holder": holder})
+        found = client.get("/api/table/inventory",
+                           params={"campaign": SLUG}).json()["held"]
+        assert len(found) == 1
+
+    def test_the_history_survives_the_handover(self, table):
+        self._item(table)
+        for holder, at in ((NPC, "1"), (PLACE, "3")):
+            client.post("/api/table/inventory/give", json={
+                "campaign": SLUG, "item": self.ITEM, "holder": holder,
+                "at_session": at})
+        found = client.get("/api/table/inventory/provenance", params={
+            "campaign": SLUG, "item": self.ITEM}).json()["held_by"]
+        assert [f["holder"] for f in found] == ["Strahd", "Barovia"]
+
+    def test_an_item_nobody_has_is_a_404(self, table):
+        got = client.post("/api/table/inventory/give", json={
+            "campaign": SLUG, "item": f"{PREFIX}:missing", "holder": NPC})
+        assert got.status_code == 404

@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from backend.api import auth
 from backend.api.routes.homebrew import guard
-from backend.campaign import assets, maps, roles, sessions
+from backend.campaign import assets, inventory, maps, roles, sessions
 from backend.core.config import settings
 from backend.core.database import neo4j_session, read_only_session
 
@@ -427,6 +427,65 @@ def reveal_pin(http: Request, request: RevealRequest) -> dict:
                 as_name=request.as_name, at_session=request.at_session))}
     except ValueError as bad:
         raise HTTPException(status_code=404, detail=str(bad)) from bad
+
+
+# ------------------------------------------------------------ inventory
+
+
+class GiveRequest(BaseModel):
+    campaign: str
+    item: str
+    holder: str
+    at_session: str = ""
+    note: str = ""
+
+
+@router.get("/inventory")
+def read_inventory(campaign: str, holder: str = "") -> dict:
+    """What this table is carrying, or what one holder is.
+
+    THE PARTY IS JUST A HOLDER. `hb:<slug>:the-party` is an entity like any
+    other, so there is no separate party-inventory route and no second shape
+    for a caller to get wrong.
+    """
+    with read_only_session() as session:
+        if holder:
+            return {"held": inventory.held_by(session, slug=campaign,
+                                              holder=holder)}
+        return {"held": inventory.ledger(session, slug=campaign)}
+
+
+@router.get("/inventory/provenance")
+def read_provenance(campaign: str, item: str) -> dict:
+    """Every hand this item has passed through. The reason time is a property
+    rather than a second graph."""
+    with read_only_session() as session:
+        return {"held_by": inventory.provenance(session, slug=campaign,
+                                                item=item)}
+
+
+@router.post("/inventory/give")
+def give_item(http: Request, request: GiveRequest) -> dict:
+    guard(http, request.campaign)
+    try:
+        with neo4j_session() as session:
+            return session.execute_write(lambda tx: inventory.give(
+                tx, slug=request.campaign, item=request.item,
+                holder=request.holder, at_session=request.at_session,
+                note=request.note))
+    except ValueError as bad:
+        raise HTTPException(status_code=404, detail=str(bad)) from bad
+
+
+@router.post("/inventory/drop")
+def drop_item(http: Request, request: GiveRequest) -> dict:
+    """Put it down. The holding CLOSES; it is not deleted -- that the party
+    carried the Sunsword for six sessions stays true."""
+    guard(http, request.campaign)
+    with neo4j_session() as session:
+        return {"dropped": session.execute_write(lambda tx: inventory.drop(
+            tx, slug=request.campaign, item=request.item,
+            holder=request.holder, at_session=request.at_session))}
 
 
 # --------------------------------------------------------------- images

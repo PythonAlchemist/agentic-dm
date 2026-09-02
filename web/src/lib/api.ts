@@ -797,7 +797,53 @@ export interface Found {
   named_by_book: boolean
 }
 
+export interface Held {
+  item_id: string
+  name: string
+  plane: string
+  since_session: string | null
+  note: string
+  /** Present on the whole-table ledger, absent when asking about one holder. */
+  holder?: string
+  holder_id?: string
+}
+
+export interface HeldBefore {
+  holder_id: string
+  holder: string
+  since_session: string | null
+  /** `null` while they still have it; `""` when it ended and nobody wrote
+   *  down when. */
+  until_session: string | null
+}
+
 export const tableAPI = {
+  /** `hb:<campaign>:the-party` -- an entity like any other, which is why
+   *  there is no separate party-inventory call. */
+  partyId(campaign: string): string {
+    return `hb:${campaign}:the-party`
+  },
+
+  inventory(campaign: string, holder = ''): Promise<{ held: Held[] }> {
+    return getJSON(`/table/inventory?${query({ campaign, holder })}`)
+  },
+
+  provenance(campaign: string, item: string): Promise<{ held_by: HeldBefore[] }> {
+    return getJSON(`/table/inventory/provenance?${query({ campaign, item })}`)
+  },
+
+  give(campaign: string, item: string, holder: string, atSession = '') {
+    return postTo<{ holder: string; item: string }>('/table/inventory/give', {
+      campaign, item, holder, at_session: atSession,
+    })
+  },
+
+  drop(campaign: string, item: string, holder: string, atSession = '') {
+    return postTo<{ dropped: number }>('/table/inventory/drop', {
+      campaign, item, holder, at_session: atSession,
+    })
+  },
+
   /** Something to pin, portray, or open. Scoped to the books this table drew
    *  on plus what it wrote -- a name belongs to the adventure that says it. */
   search(campaign: string, q: string, label = ''): Promise<{ found: Found[] }> {

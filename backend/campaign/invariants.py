@@ -270,6 +270,26 @@ RETURN e.id AS id, m.id AS map, p.x AS x, p.y AS y,
 LIMIT 50
 """
 
+#: An item two people are both currently carrying.
+#:
+#: THE GRAPH WOULD JUST ANSWER TWICE. Unlike most defects this file catches,
+#: two open holdings do not look broken from any single read -- "who has the
+#: Sunsword" returns two rows and both look like facts. There is no screen on
+#: which a DM would notice, which is exactly the shape that earns a check.
+#:
+#: `inventory.give` CLOSES BEFORE IT OPENS, in one transaction, so this cannot
+#: arise through the module. It can arise through a hand-written Cypher or an
+#: import, and those are the two ways every other defect in this file arrived.
+DOUBLE_HELD = """
+MATCH (holder:Entity)-[h:HOLDS]->(item:Entity)
+WHERE h.until_session IS NULL
+WITH item, h.campaign AS campaign, collect(holder.name) AS holders
+WHERE size(holders) > 1
+RETURN item.id AS id, campaign, holders,
+       'two people are both currently carrying this' AS why
+LIMIT 50
+"""
+
 ROW_LIMIT = 50
 
 
@@ -309,6 +329,10 @@ CHECKS: tuple[Check, ...] = (
     Check("a canon claim carries its evidence", UNSOURCED_CANON_CLAIMS,
           "delete them -- a canon edge citing no sentence was not written by "
           "the canon writer, and reads to a DM exactly like one that was"),
+    Check("an item has one holder at a time", DOUBLE_HELD,
+          "close the older holding -- `give` does this in one transaction, and "
+          "an item with two open holders reads as two facts rather than as a "
+          "defect"),
     Check("a pin is a fraction of its image", STRAY_PINS,
           "re-pin it through `maps.pin`, which divides by the image dimensions; "
           "a pin off the edge cannot be clicked, so it cannot be removed by "
