@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { Sittings } from '@/components/product/Sittings'
+import { WhatWeKnow } from '@/components/product/WhatWeKnow'
 import {
   labAPI,
   tableAPI,
@@ -38,10 +39,19 @@ export default function CampaignHome() {
 
   const yours = order.filter((row) => row.origin === 'campaign')
   const next = order.filter((row) => !row.skipped).slice(0, 8)
+  // A PLAYER GETS NO PREP COLUMN AT ALL. Both of its sources are refused to
+  // them, so the honest rendering is to leave it out rather than to draw an
+  // empty list that reads as "your DM has planned nothing".
+  const runs = who === null || who.role === 'dm' || !who.identified
 
   return (
     <Shell campaign={campaign} section="prep">
-      <div className="mx-auto grid max-w-5xl gap-10 px-6 py-10 md:grid-cols-[1fr_18rem]">
+      <div
+        className={`mx-auto grid max-w-5xl gap-10 px-6 py-10 ${
+          runs ? 'md:grid-cols-[1fr_18rem]' : ''
+        }`}
+      >
+        {runs && (
         <div>
           <h1 className="text-xl font-medium text-neutral-100">What&rsquo;s next</h1>
           <p className="mt-1 text-sm text-neutral-500">
@@ -75,8 +85,11 @@ export default function CampaignHome() {
             )}
           </ol>
         </div>
+        )}
 
         <aside>
+          {runs && (
+          <>
           <h2 className="text-[11px] uppercase tracking-widest text-neutral-600">
             Your cast
           </h2>
@@ -103,9 +116,20 @@ export default function CampaignHome() {
           <p className="mt-4 text-[11px] text-neutral-700">
             {yours.length} of {order.length} scenes are yours
           </p>
+          </>
+          )}
 
           <div className="mt-8">
             <Sittings campaign={campaign} who={who} />
+          </div>
+
+          {/* FOR EVERYONE, and for a player it is the ONLY part of this page
+              that answers. The running order and the cast are refused to them
+              outright -- a running order is the plot of everything they have
+              not reached, listed in order -- so those panels come back empty
+              and this is what is theirs. */}
+          <div className="mt-8">
+            <WhatWeKnow campaign={campaign} />
           </div>
         </aside>
       </div>

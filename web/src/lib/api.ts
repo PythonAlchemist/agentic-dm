@@ -857,7 +857,20 @@ export interface Grant {
   at_session: string
 }
 
+export interface Known {
+  question: string
+  anchors: { entity_id: string; name: string; labels: string[] }[]
+  passages: { section_id: string; heading: string; text: string; origin: string }[]
+  why: string
+}
+
 export const tableAPI = {
+  /** What this table has been told, quoted back. No model in the loop: these
+   *  are the passages they were actually shown. */
+  ask(campaign: string, q: string): Promise<Known> {
+    return getJSON(`/table/ask?${query({ campaign, q })}`)
+  },
+
   /** Everything this table has been shown. The DM's audit of their own game --
    *  readable in one screen, which a list of what they do NOT know would
    *  never be.

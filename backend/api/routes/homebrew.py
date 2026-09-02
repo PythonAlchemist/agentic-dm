@@ -129,13 +129,17 @@ def campaigns() -> dict:
 
 
 @router.get("/running-order")
-def running_order(campaign: str) -> dict:
+def running_order(http: Request, campaign: str) -> dict:
     """What this table plays, in order, with each section's origin.
 
     SKIPPED SECTIONS ARE RETURNED IN PLACE, marked. A section the DM cut that
     simply vanished from the list would read as one that never existed, and the
     DM would have no way to put it back.
     """
+    # THE DM'S. A running order is every scene the book holds and every scene
+    # they wrote, in the order they mean to run them -- which is the plot of
+    # everything the table has not reached yet, listed.
+    dm_only(http, campaign)
     with read_only_session() as session:
         links, start = store.read_chain(session, campaign)
         order = list(walk(links, start, bound=len(links) + 2).order)
@@ -554,7 +558,7 @@ class ExpandRequest(StoreRequest):
 
 
 @router.get("/elements")
-def elements(campaign: str, unwritten: bool = False) -> dict:
+def elements(http: Request, campaign: str, unwritten: bool = False) -> dict:
     """What this campaign has made, and which of it is still a stub.
 
     THE FRESH-SESSION ENTRY POINT. A conversation started tomorrow holds no
@@ -563,6 +567,9 @@ def elements(campaign: str, unwritten: bool = False) -> dict:
     own, which is the useful question after a cluster lands: a scene mints four
     stubs and the DM flesh them out one at a time over several sittings.
     """
+    # THE DM'S, for the same reason: it names every NPC, place and quest this
+    # table has invented, including the ones nobody has met.
+    dm_only(http, campaign)
     with read_only_session() as session:
         rows = [
             dict(r)

@@ -184,3 +184,54 @@ class TestTheQuieterLeaks:
         got = _as(PLAYER_TOKEN).get("/api/table/session/touched", params={
             "campaign": SLUG, "session_id": f"hb:{SLUG}:session-1"})
         assert got.status_code == 403
+
+
+class TestWhatWeKnow:
+    """The players' shared memory, which is the thing six people actually lose
+    between sessions."""
+
+    def test_an_untold_table_is_told_so(self, table):
+        got = _as(PLAYER_TOKEN).get("/api/table/ask", params={
+            "campaign": SLUG, "q": "who is Strahd?"}).json()
+        assert got["passages"] == [] and "told about" in got["why"]
+
+    def test_the_prose_is_not_in_the_answer_either(self, table):
+        got = _as(PLAYER_TOKEN).get("/api/table/ask", params={
+            "campaign": SLUG, "q": "tell me about the bride"})
+        assert "lost bride" not in got.text
+
+    def test_a_revealed_scene_is_quoted_back(self, table):
+        for target in (STRAHD, SECRET):
+            _as(DM_TOKEN).post("/api/table/reveal",
+                               json={"campaign": SLUG, "target": target})
+        got = _as(PLAYER_TOKEN).get("/api/table/ask", params={
+            "campaign": SLUG, "q": "what about the twist?"}).json()
+        assert [p["heading"] for p in got["passages"]] == ["The Twist"]
+
+    def test_an_empty_question_asks_nothing(self, table):
+        got = _as(PLAYER_TOKEN).get("/api/table/ask", params={
+            "campaign": SLUG, "q": "  "}).json()
+        assert got["passages"] == []
+
+
+class TestTheScreensThatAreTheDMsWhole:
+    """Not a narrowed view -- no view. A running order is the plot of
+    everything the table has not reached, listed in order."""
+
+    def test_the_running_order_is_refused(self, table):
+        got = _as(PLAYER_TOKEN).get("/api/homebrew/running-order",
+                                    params={"campaign": SLUG})
+        assert got.status_code == 403
+
+    def test_the_cast_is_refused(self, table):
+        """It names every NPC, place and quest this table invented, including
+        the ones nobody has met."""
+        got = _as(PLAYER_TOKEN).get("/api/homebrew/elements",
+                                    params={"campaign": SLUG})
+        assert got.status_code == 403
+
+    def test_the_dm_still_reads_both(self, table):
+        for path in ("running-order", "elements"):
+            got = _as(DM_TOKEN).get(f"/api/homebrew/{path}",
+                                    params={"campaign": SLUG})
+            assert got.status_code == 200, path

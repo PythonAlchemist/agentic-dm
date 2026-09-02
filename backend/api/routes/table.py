@@ -101,6 +101,57 @@ def _for_player(http: Request, campaign: str, preview: bool = False) -> bool:
 # ------------------------------------------------------------ what they know
 
 
+@router.get("/ask")
+def ask_what_we_know(http: Request, campaign: str, q: str) -> dict:
+    """Search what this table has been told, and quote it back.
+
+    SEEDED, AND WITH NO MODEL IN THE LOOP AT ALL. `player/retrieval.py` can
+    only return revealed rows, so this is the safe half of a player-facing
+    assistant: the passages they have actually been shown, quoted exactly,
+    with nothing generated between the graph and the reader.
+
+    THE GENERATIVE HALF IS NOT HERE, and not by oversight. `DMAgent` carries a
+    DM's system prompt and `DMTools` -- graph writes and homebrew writes
+    included -- so pointing it at this retriever would seed the context
+    correctly and still hand a player a tool that writes to the campaign. That
+    needs a purpose-built agent with no tools and its own prompt, and half of
+    it is worse than none.
+
+    IT IS USEFUL WITHOUT ONE. "What do we know about the burgomaster" answered
+    out of the passages the table has been shown is the players' shared memory,
+    which is the thing six people actually lose between sessions.
+    """
+    from backend.player.retrieval import PlayerRetriever
+
+    if not q.strip():
+        return {"question": q, "anchors": [], "passages": [], "why": ""}
+
+    # THE DM GETS THE SAME NARROW ANSWER HERE, deliberately: this endpoint is
+    # "what has the table been told", and a DM asking it is asking exactly
+    # that. Their own instrument is the lab.
+    found = PlayerRetriever(campaign=campaign, book=_book_of(campaign),
+                            limit=8).retrieve(q.strip())
+    return {
+        "question": found.question,
+        "anchors": [{"entity_id": a.entity_id, "name": a.name,
+                     "labels": list(a.labels)} for a in found.anchors],
+        "passages": [{"section_id": p.section_id, "heading": p.section,
+                      "text": p.text, "origin": p.origin}
+                     for p in found.passages],
+        "why": found.miss_reason,
+    }
+
+
+def _book_of(campaign: str) -> str:
+    """The first book this table draws on, for the retriever's one-book rule."""
+    with read_only_session() as session:
+        row = session.run(
+            "MATCH (:Campaign {slug:$slug})-[:DRAWS_ON]->(b:Book) "
+            "RETURN b.slug AS slug ORDER BY b.slug LIMIT 1",
+            {"slug": campaign}).single()
+    return row["slug"] if row else ""
+
+
 class RevealRequest2(BaseModel):
     campaign: str
     target: str
