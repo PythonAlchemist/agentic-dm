@@ -237,7 +237,6 @@ def _plan_for(request: ClusterRequest):
     so the collision scan, the id minting and every drop are recomputed here
     rather than trusted.
     """
-    from backend.campaign import cluster as cluster_module
     from backend.campaign.cluster import plan_cluster
     from backend.campaign.homebrew import LABELS
 
@@ -262,8 +261,14 @@ def _plan_for(request: ClusterRequest):
     # WHAT THE CAMPAIGN ALREADY HOLDS, AND WHAT EACH OF THEM IS. `plan_cluster`
     # stays pure; the types it needs for a reused endpoint are read here and
     # handed over, the same way `canon_aliases` and `existing_ids` are.
-    cluster_module._REUSED_KINDS.update(existing_kinds)
+    #
+    # AS A PARAMETER, WHICH IT WAS NOT. This updated a module-global dict in
+    # `cluster` once per request and never cleared it: it grew for the life of
+    # the process, two concurrent plans raced on it, and an element deleted and
+    # re-minted left a stale kind for the next plan to read. The comment above
+    # said "stays pure" while the line below it was the impurity.
     return plan_cluster(
+        reused_kinds=existing_kinds,
         campaign=request.campaign,
         elements=request.elements,
         edges=request.edges,

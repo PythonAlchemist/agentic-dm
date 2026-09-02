@@ -7,6 +7,7 @@ the thing that has to be right.
 
 import pytest
 
+from backend.campaign import cluster
 from backend.campaign.cluster import edge_key, plan_cluster
 
 CAMPAIGN = "p13-home"
@@ -404,3 +405,37 @@ class TestAClusterMayContainAJob:
         assert plan.dropped == {
             "this is the generation itself, not something it contains": 1
         }
+
+
+class TestReusedKindsTravelAsAParameter:
+    """This module's claim is that `plan_cluster` is pure, and the route used
+    to smuggle these types past the parameter list by updating a module-global
+    dict once per request. It grew for the life of the process, two concurrent
+    plans raced on it, and an element deleted and re-minted left a stale kind
+    behind for the next plan to read."""
+
+    def test_a_reused_endpoint_takes_the_kind_it_is_given(self):
+        assert cluster._kind_of("hb:x:a-place", {"hb:x:a-place": "LOCATION"}) == "LOCATION"
+
+    def test_an_unknown_id_assumes_npc(self):
+        """What a person naming somebody usually means, and the safest guess
+        for a domain check about to reject the edge anyway if it is wrong."""
+        assert cluster._kind_of("hb:x:nobody", {"hb:x:other": "ITEM"}) == "NPC"
+
+    def test_no_map_at_all_assumes_npc(self):
+        assert cluster._kind_of("hb:x:a", None) == "NPC"
+
+    def test_two_plans_cannot_see_each_others_kinds(self):
+        """The race the global had: one request's types were visible to every
+        later one, in a process that never cleared them."""
+        first = {"hb:a:one": "LOCATION"}
+        second = {"hb:b:two": "ITEM"}
+        assert cluster._kind_of("hb:a:one", second) == "NPC"
+        assert cluster._kind_of("hb:b:two", first) == "NPC"
+
+    def test_plan_cluster_accepts_it_without_touching_a_global(self):
+        plan = cluster.plan_cluster(
+            campaign="pytest-kinds", elements=[], edges=[],
+            reused_kinds={"hb:pytest-kinds:x": "LOCATION"},
+        )
+        assert plan.campaign == "pytest-kinds"

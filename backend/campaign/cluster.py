@@ -39,6 +39,8 @@ so they are dropped and counted rather than written somewhere nobody looks.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from dataclasses import dataclass, field
 
 #: A generated name that slugifies to nothing has no id to be given.
@@ -191,6 +193,9 @@ def plan_cluster(
     approved: frozenset[str] | None = None,
     existing_ids: frozenset[str] = frozenset(),
     resolutions: dict[str, str] | None = None,
+    #: What the campaign already holds, by id -- read by the caller, since this
+    #: function touches no database. See `_kind_of`.
+    reused_kinds: "Mapping[str, str] | None" = None,
 ) -> ClusterPlan:
     """Turn a declared manifest into the exact write it implies.
 
@@ -299,7 +304,8 @@ def plan_cluster(
         )
 
     kept_edges, edges_dropped, reversible = _plan_edges(
-        edges, planned, root_name, root_kind, accept_reversed, reused
+        edges, planned, root_name, root_kind, accept_reversed, reused,
+        reused_kinds,
     )
     return ClusterPlan(
         campaign=campaign,
@@ -314,15 +320,21 @@ def plan_cluster(
     )
 
 
-#: Filled by `plan_cluster` from what the caller read out of the graph, so the
-#: pure planner still touches no database. Empty means "assume NPC", which is
-#: what a person naming somebody usually means and is the safest guess for a
-#: domain check that is about to reject the edge anyway if it is wrong.
-_REUSED_KINDS: dict[str, str] = {}
+def _kind_of(entity_id: str, kinds: "Mapping[str, str] | None") -> str:
+    """What a reused endpoint IS, from what the caller read out of the graph.
 
+    A PARAMETER, WHICH IT WAS NOT. This module's whole claim is that
+    `plan_cluster` is pure, and the route smuggled the types past the parameter
+    list by updating a module-global dict -- `cluster._REUSED_KINDS.update(...)`
+    -- once per request, never cleared. It grew for the life of the process,
+    two concurrent plans raced on it, and an element deleted and re-minted left
+    a stale kind behind that the next plan would read.
 
-def _kind_of(entity_id: str) -> str:
-    return _REUSED_KINDS.get(entity_id, "NPC")
+    Absent means "assume NPC", which is what a person naming somebody usually
+    means and is the safest guess for a domain check that is about to reject
+    the edge anyway if it is wrong.
+    """
+    return (kinds or {}).get(entity_id, "NPC")
 
 
 def edge_key(source: str, target: str, rel_type: str) -> str:
@@ -338,6 +350,7 @@ def _plan_edges(
     root_kind: str,
     accept_reversed: frozenset[str] = frozenset(),
     reused: list[tuple[str, str]] | None = None,
+    reused_kinds: "Mapping[str, str] | None" = None,
 ) -> tuple[tuple[tuple[str, str, str], ...], dict, tuple[tuple[str, str, str], ...]]:
     """Which declared relationships are writable. `(kept, dropped_by_reason)`.
 
@@ -379,7 +392,7 @@ def _plan_edges(
     # something that exists, and what it IS was settled when it was made.
     for name, entity_id in reused or ():
         nodes.append(
-            CandidateNode(name=name, entity_type=_kind_of(entity_id))
+            CandidateNode(name=name, entity_type=_kind_of(entity_id, reused_kinds))
         )
     if root_name:
         nodes.append(
