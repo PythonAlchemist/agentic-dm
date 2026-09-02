@@ -9,6 +9,8 @@ carry the answer beside each check so a reader can do it.
 from pathlib import Path
 
 import pytest
+
+from backend.scripts import eval_answers
 import yaml
 
 from backend.scripts.eval_answers import check, render, spend_of, verdict
@@ -274,3 +276,39 @@ class TestComparingTwoRuns:
         assert moved and "<-" in moved[0]
         unmoved = [ln for ln in out.splitlines() if ln.strip().startswith("a1")]
         assert unmoved and "<-" not in unmoved[0]
+
+
+class TestACitationMustNameSomethingShown:
+    """`cites: true` was satisfied by a `[` appearing anywhere, which measures
+    the SHAPE of citing rather than whether the citation refers to anything.
+    An answer citing `[7]` of six shown passages scored as cited, and so did
+    one citing a passage never retrieved. Mechanical -- no judge, no model."""
+
+    def test_a_citation_within_range_is_fine(self):
+        assert eval_answers.dangling_citations("as [1] and [3] say", 3) == []
+
+    def test_a_number_past_what_was_shown_is_caught(self):
+        assert eval_answers.dangling_citations("as [7] says", 6) == [7]
+
+    def test_citing_anything_when_nothing_was_shown_is_caught(self):
+        assert eval_answers.dangling_citations("as [1] says", 0) == [1]
+
+    def test_an_uncounted_run_says_nothing(self):
+        """The harness scored answers for a long time without the passage count
+        to hand; inventing a verdict from its absence would be worse than the
+        gap it closes."""
+        assert eval_answers.dangling_citations("as [7] says", None) == []
+
+    def test_prose_that_merely_contains_brackets_is_not_a_citation(self):
+        assert eval_answers.dangling_citations("a [note] in passing", 2) == []
+
+    def test_it_fails_the_verdict(self):
+        row = eval_answers.check({"id": "x", "cites": True}, "as [9] says", 2)
+        assert eval_answers.verdict(row) == "FAIL"
+        assert "of nothing shown" in eval_answers.why(row)
+
+    def test_a_clean_answer_still_passes(self):
+        row = eval_answers.check(
+            {"id": "x", "cites": True, "must": ["Strahd"]},
+            "Strahd lives there [1].", 2)
+        assert eval_answers.verdict(row) == "pass"

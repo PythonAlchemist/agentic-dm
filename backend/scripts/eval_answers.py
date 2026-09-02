@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import math
 from pathlib import Path
 
@@ -63,8 +64,30 @@ _REFUSAL_MARKERS = (
 #: A citation as `canon_context` asks the model to write one.
 _CITATION = "["
 
+#: THE NUMBER INSIDE ONE, so a citation can be checked and not merely counted.
+#: `cites: true` used to be satisfied by a `[` appearing anywhere in the answer,
+#: which measures the SHAPE of citing rather than whether the citation refers to
+#: anything: an answer citing `[7]` of six shown passages scored as cited, and
+#: so did one that cited a passage never retrieved. The check is mechanical --
+#: no judge, no model -- and it is the last gap between "cited" and "checkable".
+_CITATION_NUMBER = re.compile(r"\[(\d+)\]")
 
-def check(question: dict, answer: str) -> dict:
+
+def dangling_citations(answer: str, shown: int | None) -> list[int]:
+    """Citation numbers the answer used that name no passage it was shown.
+
+    `shown` of `None` means nobody counted, and then this says nothing rather
+    than guessing -- the harness scored answers for a long time without the
+    passage count to hand, and a check that invented a verdict from its absence
+    would be worse than the gap it closes.
+    """
+    if shown is None:
+        return []
+    used = {int(n) for n in _CITATION_NUMBER.findall(answer)}
+    return sorted(n for n in used if n < 1 or n > shown)
+
+
+def check(question: dict, answer: str, shown: int | None = None) -> dict:
     """What the hand-authored expectations say about one answer.
 
     Pure: no model, no database, no I/O. The whole scoring rule is here so it
@@ -75,12 +98,16 @@ def check(question: dict, answer: str) -> dict:
     tripped = [s for s in question.get("must_not", ()) if s.lower() in lowered]
     wants_citation = bool(question.get("cites"))
     cited = _CITATION in answer
+    dangling = dangling_citations(answer, shown)
 
     return {
         "id": question["id"],
         "missing": missing,
         "tripped": tripped,
         "uncited": wants_citation and not cited,
+        # A citation naming a passage that was never shown is worse than none:
+        # it reads to a DM as checkable and is not.
+        "dangling": dangling,
         # Reported, never scored. See `_REFUSAL_MARKERS`.
         "refusal_expected": bool(question.get("refuses")),
         "refusal_looks_present": any(m in lowered for m in _REFUSAL_MARKERS),
@@ -91,7 +118,7 @@ def verdict(row: dict) -> str:
     """`pass`, `FAIL`, or `read it` for anything a human has to judge."""
     if row["refusal_expected"]:
         return "read it"
-    if row["missing"] or row["tripped"] or row["uncited"]:
+    if row["missing"] or row["tripped"] or row["uncited"] or row.get("dangling"):
         return "FAIL"
     return "pass"
 
@@ -104,6 +131,8 @@ def why(row: dict) -> str:
         reasons.append(f"tripwire {row['tripped']}")
     if row["uncited"]:
         reasons.append("no citation")
+    if row.get("dangling"):
+        reasons.append(f"cites {row['dangling']} of nothing shown")
     if row["refusal_expected"]:
         reasons.append(
             "declined (looks like it)"
@@ -348,7 +377,9 @@ async def _answer(
     response = await agent.process_message(
         user_input=question, use_canon=True
     )
-    return response.message, response.cost
+    # THE PASSAGE COUNT TRAVELS with the answer, so a citation can be checked
+    # against what the model was actually shown rather than merely counted.
+    return response.message, response.cost, len(response.sources or ())
 
 
 def spend_of(cost: dict | None) -> float | None:
@@ -388,11 +419,11 @@ async def run(
     async def one(question: dict, attempt: int) -> dict:
         nonlocal done
         async with semaphore:
-            answer, cost = await _answer(
+            answer, cost, shown = await _answer(
                 question["question"], model, attempt, only_supported,
                 question.get("book", "cos"),
             )
-        row = check(question, answer)
+        row = check(question, answer, shown)
         row["answer"] = answer
         row["attempt"] = attempt
         row["book"] = question.get("book", "cos")
