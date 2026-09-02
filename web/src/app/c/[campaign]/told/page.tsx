@@ -90,7 +90,7 @@ export default function ToldPage() {
                       {SOURCE_GLYPH.yours}
                     </span>
                   )}
-                  <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
+                  <span className="ml-auto label text-ink-faint">
                     tell them
                   </span>
                 </button>
@@ -146,7 +146,7 @@ export default function ToldPage() {
           </p>
         )}
 
-        <p className="mt-8 text-label leading-relaxed text-ink-faint">
+        <p className="mt-8 text-meta leading-relaxed text-ink-faint">
           Taking something back hides it from here on. It does not unsay it
           &mdash; which is why nothing is shown to your table until you show it.
         </p>

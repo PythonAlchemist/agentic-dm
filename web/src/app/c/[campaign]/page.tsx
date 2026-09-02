@@ -77,7 +77,7 @@ export default function CampaignHome() {
 
             {recent.slice(0, 2).map((night) => (
               <section key={night.number} className="mt-6">
-                <h2 className="text-label uppercase tracking-widest text-ink-faint">
+                <h2 className="label text-ink-faint">
                   {night.number === 0
                     ? 'Before the first session'
                     : `Session ${night.number}`}
@@ -144,7 +144,7 @@ export default function CampaignHome() {
                       {SOURCE_GLYPH.yours}
                     </span>
                   )}
-                  <span className="ml-auto shrink-0 text-label text-ink-faint">
+                  <span className="ml-auto shrink-0 label text-ink-faint">
                     {row.chapter}
                   </span>
                 </Link>
@@ -168,7 +168,7 @@ export default function CampaignHome() {
               hue earns its place by distinguishing; where there is nothing to
               distinguish it is decoration, which is the one thing the rule
               forbids it from being. */}
-          <h2 className={`text-label uppercase tracking-widest ${SOURCE.yours}`}>
+          <h2 className={`label ${SOURCE.yours}`}>
             {SOURCE_GLYPH.yours} your cast
           </h2>
           <ul className="mt-3 flex flex-col gap-1">

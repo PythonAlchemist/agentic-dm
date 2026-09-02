@@ -243,7 +243,7 @@ export function Portraits({
               />
               {/* NOTHING HAS BEEN STORED YET, and the words say so. A DM who
                   walks away here leaves the graph exactly as they found it. */}
-              <p className={`text-label uppercase tracking-widest ${SOURCE.invented}`}>
+              <p className={`label ${SOURCE.invented}`}>
                 {SOURCE_GLYPH.invented} imagined — not kept yet
               </p>
               <div className="flex gap-2">

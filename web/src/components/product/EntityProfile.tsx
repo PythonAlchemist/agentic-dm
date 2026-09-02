@@ -80,7 +80,7 @@ export function EntityProfile({
           {/* THE GLYPH IS MANDATORY. A hue with no second channel is a bug,
               not a style choice -- it is the whole of the promise for a reader
               who cannot use colour. */}
-          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 text-label uppercase tracking-widest">
+          <p className="mt-1 flex flex-wrap items-baseline gap-x-2 label">
             {yours ? (
               <>
                 <span className={SOURCE.yours}>
@@ -140,7 +140,7 @@ export function EntityProfile({
           "invented" looks like. */}
       {unnamed && !compact && (
         <div className={`mt-4 pl-4 ${SOURCE_EDGE.invented}`}>
-          <p className={`text-label uppercase tracking-widest ${SOURCE.invented}`}>
+          <p className={`label ${SOURCE.invented}`}>
             {SOURCE_GLYPH.invented} {SOURCE_WORD.invented}
           </p>
           <p className="mt-1 text-body text-ink-dim">
@@ -156,7 +156,7 @@ export function EntityProfile({
           settled wants the published word before their own. */}
       {shown.length > 0 && (
         <section className="mt-6">
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
+          <h2 className="label text-ink-faint">
             Established
           </h2>
           <ul className="mt-2 flex flex-col gap-3">
@@ -167,7 +167,7 @@ export function EntityProfile({
                   disabled={!onOpenSection}
                   className="block w-full text-left disabled:cursor-default"
                 >
-                  <span className="text-label uppercase tracking-widest">
+                  <span className="label">
                     <span
                       className={
                         where.plane === 'campaign' ? SOURCE.yours : SOURCE.book
@@ -210,7 +210,7 @@ export function EntityProfile({
           all -- this is the second lock on the same door. */}
       {entity.invented.length > 0 && !compact && runs === true && (
         <section className="mt-6">
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
+          <h2 className="label text-ink-faint">
             Invented for this campaign
           </h2>
           <ul className={`mt-2 flex flex-col gap-1 pl-4 ${SOURCE_EDGE.invented}`}>
@@ -233,7 +233,7 @@ export function EntityProfile({
 
       {connections.length > 0 && (
         <section className="mt-6">
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
+          <h2 className="label text-ink-faint">
             Connections
           </h2>
           <ul className="mt-2 flex flex-col gap-1">

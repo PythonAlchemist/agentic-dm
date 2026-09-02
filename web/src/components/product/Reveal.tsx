@@ -82,7 +82,7 @@ export function Reveal({
         {grant ? (
           <button
             onClick={() => act(tableAPI.conceal(campaign, target))}
-            className="text-label uppercase tracking-widest text-ink-dim hover:text-ink"
+            className="label text-ink-dim hover:text-ink"
           >
             take it back
           </button>
@@ -90,7 +90,10 @@ export function Reveal({
           <div className="flex flex-col items-start gap-1">
             <button
               onClick={() => act(tableAPI.tellTable(campaign, target))}
-              className={`rounded-md px-2 py-1 text-label uppercase tracking-widest ${CHROME.selected}`}
+              // AN ACTION, NOT A SELECTION. `CHROME.selected` is the grammar
+              // for the row you are on; on an unpressed button it reads as a
+              // toggle that is already on.
+              className={`rounded-md px-2 py-1 label ${CHROME.primary}`}
             >
               tell them
             </button>
@@ -130,7 +133,7 @@ export function Reveal({
       )}
 
       {grant && (
-        <p className="text-label leading-tight text-ink-faint">
+        <p className="text-meta leading-tight text-ink-faint">
           Taking it back hides it from here on. It does not unsay it.
         </p>
       )}

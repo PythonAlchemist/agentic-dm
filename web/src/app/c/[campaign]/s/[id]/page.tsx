@@ -84,7 +84,7 @@ export default function SectionPage() {
         <article>
           {/* WHOSE WORDS THESE ARE, before the words -- in all three channels
               the grammar requires: the glyph, the word, and the hue. */}
-          <p className="text-label uppercase tracking-widest">
+          <p className="label">
             {yours ? (
               <>
                 <span className={SOURCE.yours}>
@@ -120,7 +120,7 @@ export default function SectionPage() {
                     className="max-w-full rounded-md"
                   />
                   <figcaption
-                    className={`text-label uppercase tracking-widest ${SOURCE.book}`}
+                    className={`label ${SOURCE.book}`}
                   >
                     {SOURCE_GLYPH.book} the book&rsquo;s art
                   </figcaption>
@@ -152,7 +152,10 @@ export default function SectionPage() {
             IT IS THE OTHER HALF OF THE GRANT, and the half the whole design
             rests on: telling the table an NPC exists is not letting them read
             what the book says about him. */}
-        <aside className="hidden lg:block">
+        {/* NOT `hidden lg:block`: on a laptop-half-width window that removed
+            the DM's only way to show the scene to the table. Below `lg` the
+            grid collapses and the rail simply follows the prose. */}
+        <aside>
           <Reveal
             campaign={campaign}
             target={section.section_id}

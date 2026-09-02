@@ -86,7 +86,7 @@ export default function PartyPage() {
 
         {[...byHolder.entries()].map(([holder, items]) => (
           <section key={holder} className="mt-7">
-            <h2 className="text-label uppercase tracking-widest text-ink-faint">
+            <h2 className="label text-ink-faint">
               {holder}
             </h2>
             <ul className="mt-2 flex flex-col">
@@ -182,7 +182,7 @@ export default function PartyPage() {
 
         {past && (
           <section className="mt-8 rounded-md border border-line bg-surface/40 p-3">
-            <h2 className="text-label uppercase tracking-widest text-ink-faint">
+            <h2 className="label text-ink-faint">
               {past.item} — every hand it passed through
             </h2>
             <ul className="mt-2 flex flex-col gap-1">
@@ -267,7 +267,7 @@ function Picker({
                   {SOURCE_GLYPH.yours}
                 </span>
               )}
-              <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
+              <span className="ml-auto label text-ink-faint">
                 {entity.labels.join(' ').toLowerCase()}
               </span>
             </button>

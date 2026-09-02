@@ -88,7 +88,7 @@ export default function LibraryPage() {
                       the label appears on the first row and then stops, so a
                       long chapter reads as a block rather than as 40 copies of
                       its own name. */}
-                  <span className="ml-auto shrink-0 text-label text-ink-faint">
+                  <span className="ml-auto shrink-0 label text-ink-faint">
                     {row.skipped
                       ? 'skipped'
                       : row.chapter && row.chapter !== order[i - 1]?.chapter
@@ -106,7 +106,7 @@ export default function LibraryPage() {
 
         <section className="mt-12 border-t border-line pt-6">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-label uppercase tracking-widest text-ink-faint">
+            <h2 className="label text-ink-faint">
               Maps
             </h2>
             <button

@@ -42,7 +42,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
 
   return (
     <section>
-      <h2 className="text-label uppercase tracking-widest text-ink-faint">
+      <h2 className="label text-ink-faint">
         What we know
       </h2>
 
@@ -86,7 +86,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
                   13px line of app-face text, which made the book's own
                   sentences and the DM's writing typographically identical --
                   on the one screen whose entire job is telling them apart. */}
-              <p className="text-label uppercase tracking-widest">
+              <p className="label">
                 <span
                   className={p.origin === 'campaign' ? SOURCE.yours : SOURCE.book}
                 >

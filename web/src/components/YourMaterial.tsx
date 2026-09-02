@@ -106,7 +106,7 @@ export function YourMaterial({
           />
         ))}
         {written.length > 0 && (
-          <p className="mt-2 border-t border-line px-2 pt-2 text-label uppercase tracking-wide text-ink-faint">
+          <p className="mt-2 border-t border-line px-2 pt-2 label text-ink-faint">
             written up
           </p>
         )}
@@ -195,7 +195,7 @@ function Row({
         )}
       </button>
       )}
-      <span className="shrink-0 text-label uppercase tracking-wide text-ink-faint">
+      <span className="shrink-0 label text-ink-faint">
         {element.kind}
       </span>
       {draft === null && (

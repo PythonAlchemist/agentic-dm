@@ -84,7 +84,7 @@ export default function SettingsPage() {
               rename
             </button>
           </div>
-          <p className="mt-2 text-label text-ink-faint">
+          <p className="mt-2 text-meta text-ink-faint">
             Keyed as <span className="text-ink-dim">{campaign}</span>, which
             cannot change &mdash; every scene, entity and mention this table has
             ever written carries it.
@@ -93,10 +93,10 @@ export default function SettingsPage() {
         </section>
 
         <section>
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
+          <h2 className="label text-ink-faint">
             What this campaign is
           </h2>
-          <p className="mt-1 text-label text-ink-faint">
+          <p className="mt-1 text-meta text-ink-faint">
             Written down, and read like any other scene &mdash; names you use
             here connect to the book on their own.
           </p>
@@ -116,7 +116,7 @@ export default function SettingsPage() {
         </section>
 
         <section>
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
+          <h2 className="label text-ink-faint">
             Books it draws on
           </h2>
           <ul className="mt-2 flex flex-col gap-1">
@@ -147,21 +147,21 @@ export default function SettingsPage() {
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-label text-ink-faint">
+          <p className="mt-2 text-meta text-ink-faint">
             Stopping does not delete anything. New scans stop looking in that
             book; what you wrote about it stays.
           </p>
         </section>
 
         <section>
-          <h2 className="text-label uppercase tracking-widest text-ink-faint">
+          <h2 className="label text-ink-faint">
             Who sits here
           </h2>
           <ul className="mt-2 flex flex-col gap-1">
             {seats.map((seat) => (
               <li key={seat.reader} className="flex items-baseline gap-3 text-ui">
                 <span className="text-ink">{seat.reader}</span>
-                <span className="text-label uppercase tracking-wide text-ink-faint">
+                <span className="label text-ink-faint">
                   {seat.role}
                 </span>
                 <button

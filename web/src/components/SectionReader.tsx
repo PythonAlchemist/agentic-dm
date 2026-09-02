@@ -578,7 +578,7 @@ function EntityCard({
         >
           {entity.name}
           {entity.kind && (
-            <span className="ml-2 text-label uppercase tracking-wide text-ink-faint">
+            <span className="ml-2 label text-ink-faint">
               {entity.kind}
             </span>
           )}
@@ -655,7 +655,7 @@ function EntityCard({
               <div key={where.section_id}>
                 <button
                   onClick={() => onRead(where.section_id)}
-                  className={`text-label uppercase tracking-wide hover:underline ${
+                  className={`label hover:underline ${
                     where.plane === 'campaign'
                       ? 'text-yours/70'
                       : 'text-book'

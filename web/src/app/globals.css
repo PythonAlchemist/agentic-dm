@@ -78,6 +78,20 @@ body {
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+/* THE LABEL STEP, whole. DESIGN.md §4 defines it as Geist Mono 500, uppercase,
+   tracked -- and only the SIZE had been implemented, so every label was sans
+   400 and the mono channel of the type system did not exist. It does real work
+   beyond looking deliberate: an identifier like `the-murkmire-malevolence`
+   reads as an identifier in mono and as a botched title in a text face. */
+@utility label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: var(--text-label);
+  line-height: var(--text-label--line-height);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* A SURFACE CATCHES THE LIGHT ON ITS TOP EDGE. This replaces `box-shadow`,
    which is banned product-wide. */
 @utility lit {

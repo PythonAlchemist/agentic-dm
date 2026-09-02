@@ -138,7 +138,7 @@ export function ClusterReview({
                     out ? 'text-ink-faint line-through' : 'text-ink'
                   }`}
                 />
-                <span className="shrink-0 text-label uppercase tracking-wide text-ink-faint">
+                <span className="shrink-0 label text-ink-faint">
                   {element.kind}
                 </span>
               </div>

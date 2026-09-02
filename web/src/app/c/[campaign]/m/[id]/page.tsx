@@ -310,7 +310,7 @@ function PinPicker({
               >
                 {entity.name}
               </span>
-              <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
+              <span className="ml-auto label text-ink-faint">
                 {entity.labels.join(' ').toLowerCase()}
               </span>
             </button>

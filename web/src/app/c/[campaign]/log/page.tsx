@@ -85,7 +85,7 @@ export default function LogPage() {
                         was marked as something said at the table. The hue names
                         where a thing CAME FROM; what the party did with it is
                         chrome. */}
-                    <span className="text-label uppercase tracking-widest text-ink-faint">
+                    <span className="label text-ink-faint">
                       {one.kind === 'scene' ? 'read' : 'met'}
                     </span>
                   </li>

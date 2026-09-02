@@ -205,7 +205,7 @@ export function RunningOrder({
                     return next
                   })
                 }
-                className="flex w-full items-baseline gap-1 rounded-md px-2 py-1 text-left text-label uppercase tracking-wide text-ink-dim hover:bg-overlay/40"
+                className="flex w-full items-baseline gap-1 rounded-md px-2 py-1 text-left label text-ink-dim hover:bg-overlay/40"
               >
                 <span className="text-ink-faint">
                   {isOpen(group.chapter) ? '▾' : '▸'}
@@ -288,7 +288,7 @@ export function RunningOrder({
               {row.heading}
             </button>
             {row.origin === 'campaign' && (
-              <span className="shrink-0 text-label uppercase tracking-wide text-yours/80">
+              <span className="shrink-0 label text-yours/80">
                 yours
               </span>
             )}

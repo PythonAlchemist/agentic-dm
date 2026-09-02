@@ -121,12 +121,12 @@ export default function PlayPage() {
       <div className="mx-auto grid max-w-6xl gap-10 px-6 py-10 md:grid-cols-[15rem_minmax(0,1fr)]">
         <aside>
           <div className="flex items-baseline justify-between">
-            <h2 className="text-label uppercase tracking-widest text-ink-faint">
+            <h2 className="label text-ink-faint">
               Sessions
             </h2>
             <button
               onClick={start}
-              className="text-label uppercase tracking-widest text-ink-dim hover:text-ink"
+              className="label text-ink-dim hover:text-ink"
             >
               new
             </button>
@@ -212,7 +212,7 @@ export default function PlayPage() {
 
               {touched.length > 0 && (
                 <div className="mt-4 rounded-md border border-line bg-surface/40 p-3">
-                  <h2 className="text-label uppercase tracking-widest text-ink-faint">
+                  <h2 className="label text-ink-faint">
                     The recording names these
                   </h2>
                   <p className="mt-1 text-label text-ink-faint">
@@ -338,7 +338,7 @@ function Column({
 }) {
   return (
     <section>
-      <h2 className="text-label uppercase tracking-widest text-ink-faint">{title}</h2>
+      <h2 className="label text-ink-faint">{title}</h2>
       <ul className="mt-2 flex flex-col gap-1">
         {scenes.map((s) => (
           <li key={s.id}>
