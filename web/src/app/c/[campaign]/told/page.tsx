@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type Found, type Grant } from '@/lib/api'
-import { SOURCE } from '@/lib/palette'
+import { SOURCE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * Everything the table knows, in one place, with the switch beside it.
@@ -84,13 +84,12 @@ export default function ToldPage() {
                   onClick={() => act(tableAPI.tellTable(campaign, one.entity_id))}
                   className="flex w-full items-baseline gap-2 px-2 py-1.5 text-left text-ui hover:bg-overlay"
                 >
-                  <span
-                    className={
-                      one.plane === 'campaign' ? SOURCE.yours : 'text-ink'
-                    }
-                  >
-                    {one.name}
-                  </span>
+                  <span className="text-ink">{one.name}</span>
+                  {one.plane === 'campaign' && (
+                    <span className={`text-label ${SOURCE.yours}`}>
+                      {SOURCE_GLYPH.yours}
+                    </span>
+                  )}
                   <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
                     tell them
                   </span>

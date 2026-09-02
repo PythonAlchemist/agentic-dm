@@ -88,10 +88,14 @@ export default function Home() {
           what you wrote are kept apart everywhere in here.
         </p>
 
+        {/* CAUTION IS NOT A SOURCE. This wore the "written for this campaign"
+            hue, so amber meant "your material" everywhere and "something is
+            wrong" here. Reliability is a glyph and muted text on its own axis,
+            which is what `palette.ts` has said all along. */}
         {!reachable && (
-          <p className="mt-8 rounded-md border border-amber-900/60 bg-amber-950/20 p-3 text-ui text-yours">
-            Could not reach the API. This is not &ldquo;you have no
-            campaigns&rdquo; &mdash; it may be starting up.
+          <p className="mt-8 text-ui text-ink-dim">
+            ⚠ Could not reach the API. This is not &ldquo;you have no
+            tables&rdquo; &mdash; it may be starting up.
           </p>
         )}
 

@@ -75,13 +75,10 @@ export default function LibraryPage() {
                     row.skipped ? 'opacity-40' : ''
                   } ${row.origin === 'campaign' ? SOURCE_EDGE.yours : ''}`}
                 >
-                  <span
-                    className={`truncate text-ui ${
-                      row.origin === 'campaign' ? SOURCE.yours : 'text-ink'
-                    }`}
-                  >
-                    {row.heading}
-                  </span>
+                  {/* ROW TEXT STAYS INK. The edge carries the hue and the
+                      label carries the glyph; tinting the sentence as well is
+                      the same claim a third time. */}
+                  <span className="truncate text-ui text-ink">{row.heading}</span>
                   {row.origin === 'campaign' && (
                     <span className={`shrink-0 text-label ${SOURCE.yours}`}>
                       {SOURCE_GLYPH.yours} {SOURCE_WORD.yours}

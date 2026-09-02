@@ -141,7 +141,7 @@ export default function Lab() {
     return (
       <div className="p-8">
         <h1 className="mb-2 text-title">Agent Lab</h1>
-        <p className="text-ui text-red-400">Could not reach the API: {failed}</p>
+        <p className="text-ui text-ink-dim">⚠ Could not reach the API: {failed}</p>
         <p className="mt-2 text-ui text-ink-dim">
           Start the backend with{' '}
           <code className="text-ink-dim">

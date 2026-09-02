@@ -36,11 +36,21 @@ const ORIGIN_HUE: Record<string, string> = {
   generated: SOURCE.invented,
 }
 
+/** The same four marks the rest of the product uses. An image's provenance is
+ *  the same claim as a sentence's and gets the same grammar. */
+const ORIGIN_GLYPH: Record<string, string> = {
+  book: SOURCE_GLYPH.book,
+  uploaded: SOURCE_GLYPH.yours,
+  generated: SOURCE_GLYPH.invented,
+}
+
 /** A kind mark for an entity nobody has pictured. */
 export function kindMark(labels: string[]): string {
   if (labels.includes('NPC')) return '☙'
   if (labels.includes('LOCATION')) return '⌂'
-  if (labels.includes('ITEM')) return '◇'
+  // NOT `◇`: that glyph means "a model invented this" everywhere else in the
+  // product, and an item with no picture is not an invention.
+  if (labels.includes('ITEM')) return '⬡'
   if (labels.includes('MONSTER')) return '✦'
   return '·'
 }
@@ -156,15 +166,16 @@ export function Portraits({
         )}
 
         {primary && (
-          // THE MARK IS ON THE PICTURE. Not beside it, not on hover: a
-          // provenance signal a reader can miss is one that will be missed
-          // exactly when it matters.
+          // THE MARK IS ON THE PICTURE, in hue AND glyph. Not beside it, not
+          // on hover: a provenance signal a reader can miss is one that will
+          // be missed exactly when it matters -- and colour alone is nothing
+          // at all to a reader who cannot see the difference.
           <span
             className={`absolute inset-x-0 bottom-0 bg-ground/80 px-1 py-0.5 text-center text-label leading-tight ${
               ORIGIN_HUE[primary.origin] ?? 'text-ink-dim'
             }`}
           >
-            {primary.caption}
+            {ORIGIN_GLYPH[primary.origin] ?? ''} {primary.caption}
           </span>
         )}
       </div>

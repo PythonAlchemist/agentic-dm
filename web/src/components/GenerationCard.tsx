@@ -203,8 +203,8 @@ export function GenerationCard({
 
   if (card.error) {
     return (
-      <div className="rounded-md border border-red-900/60 bg-red-950/20 p-3 text-ui">
-        <p className="text-red-400">
+      <div className="rounded-md border border-line bg-surface p-3 text-ui">
+        <p className="text-ink-dim">
           The {card.kind} draft failed: {card.error}
         </p>
       </div>
@@ -212,9 +212,9 @@ export function GenerationCard({
   }
 
   return (
-    <div className="rounded-md border border-amber-900/50 bg-amber-500/[0.03] p-3">
+    <div className="rounded-md border border-line bg-surface/[0.03] p-3">
       <div className="mb-2 flex items-baseline justify-between gap-3">
-        <h3 className="text-ui font-medium text-amber-200">{card.title}</h3>
+        <h3 className="text-ui font-medium text-yours">{card.title}</h3>
         <span className="shrink-0 text-meta uppercase tracking-wide text-ink-faint">
           draft {card.kind}
         </span>
@@ -247,7 +247,7 @@ export function GenerationCard({
               setNote('')
             }}
             disabled={!note.trim() || revising}
-            className="shrink-0 rounded-md border border-line px-2 py-1 text-meta text-ink-dim hover:text-amber-300 disabled:opacity-40"
+            className="shrink-0 rounded-md border border-line px-2 py-1 text-meta text-ink-dim hover:text-yours disabled:opacity-40"
           >
             {revising ? 'writing…' : 'again'}
           </button>
@@ -328,7 +328,7 @@ export function GenerationCard({
               citations and everything pointing at it.
             </span>
           </div>
-          {failed && <p className="mt-2 text-meta text-red-400">{failed}</p>}
+          {failed && <p className="mt-2 text-meta text-ink-dim">{failed}</p>}
         </div>
       )}
 
@@ -457,13 +457,13 @@ export function GenerationCard({
             {!stored && onDiscard && (
               <button
                 onClick={onDiscard}
-                className="ml-auto text-meta text-ink-faint transition-colors hover:text-rose-300"
+                className="ml-auto text-meta text-ink-faint transition-colors hover:text-invented"
               >
                 discard
               </button>
             )}
           </div>
-          {failed && <p className="mt-2 text-meta text-red-400">{failed}</p>}
+          {failed && <p className="mt-2 text-meta text-ink-dim">{failed}</p>}
         </div>
       ) : campaign ? null : (
         <p className="mt-3 border-t border-line pt-3 text-meta text-ink-dim">

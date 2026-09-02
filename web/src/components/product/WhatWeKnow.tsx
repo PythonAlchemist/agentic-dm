@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
 import { tableAPI, type Known } from '@/lib/api'
-import { SOURCE } from '@/lib/palette'
+import { SOURCE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
 
 /**
  * What the table has been told, searched and quoted back.
@@ -63,7 +63,7 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
       </div>
 
       {found && found.anchors.length > 0 && (
-        <ul className="mt-3 flex flex-wrap gap-2">
+        <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
           {found.anchors.map((a) => (
             <li key={a.entity_id}>
               <Link
@@ -81,17 +81,36 @@ export function WhatWeKnow({ campaign }: { campaign: string }) {
         <ul className="mt-3 flex flex-col gap-4">
           {found.passages.map((p) => (
             <li key={p.section_id}>
-              <Link
-                href={`/c/${campaign}/s/${encodeURIComponent(p.section_id)}`}
-                className={`text-label hover:underline ${
-                  p.origin === 'campaign' ? SOURCE.yours : SOURCE.book
+              {/* THE FULL GRAMMAR, because this is the screen where the
+                  promise faces a player. It was a colour-only label above a
+                  13px line of app-face text, which made the book's own
+                  sentences and the DM's writing typographically identical --
+                  on the one screen whose entire job is telling them apart. */}
+              <p className="text-label uppercase tracking-widest">
+                <span
+                  className={p.origin === 'campaign' ? SOURCE.yours : SOURCE.book}
+                >
+                  {p.origin === 'campaign'
+                    ? `${SOURCE_GLYPH.yours} ${SOURCE_WORD.yours}`
+                    : `${SOURCE_GLYPH.book} ${SOURCE_WORD.book}`}
+                </span>{' '}
+                <Link
+                  href={`/c/${campaign}/s/${encodeURIComponent(p.section_id)}`}
+                  className="text-ink-faint hover:text-ink-dim"
+                >
+                  {p.heading}
+                </Link>
+              </p>
+              {/* QUOTED, NEVER SUMMARISED -- and in the book's own face when
+                  they are the book's words. Trimmed for length only; the link
+                  above goes to the whole of it. */}
+              <p
+                className={`mt-1 line-clamp-4 ${
+                  p.origin === 'campaign'
+                    ? 'text-body text-ink-dim'
+                    : 'font-serif text-canon text-ink'
                 }`}
               >
-                {p.heading}
-              </Link>
-              {/* QUOTED, NEVER SUMMARISED. Trimmed for length only, and the
-                  link goes to the whole of it. */}
-              <p className="mt-0.5 line-clamp-4 text-ui leading-relaxed text-ink-dim">
                 {p.text}
               </p>
             </li>

@@ -6,7 +6,12 @@ import type { EntityRead } from '@/lib/api'
 import { Portraits } from '@/components/product/Portraits'
 import { Reveal } from '@/components/product/Reveal'
 import { useRuns } from '@/lib/role'
-import { SOURCE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
+import {
+  SOURCE,
+  SOURCE_EDGE,
+  SOURCE_GLYPH,
+  SOURCE_WORD,
+} from '@/lib/palette'
 
 /**
  * An entity, as a DM reads it.
@@ -128,12 +133,22 @@ export function EntityProfile({
         </div>
       </header>
 
+      {/* THE INVENTED BLOCK, in the grammar it exists to demonstrate: a dashed
+          left edge, the glyph and the word above it, body text in ink rather
+          than tinted. It was a filled box of part-transparent rose -- off-token
+          and off-grammar, on the one screen where a reader learns what
+          "invented" looks like. */}
       {unnamed && !compact && (
-        <p className="mt-4 rounded-md border border-rose-900/60 bg-rose-950/30 p-3 text-meta leading-relaxed text-rose-200/70">
-          No section of the book says this name. It came from the extraction, so
-          what it connects to may well be right &mdash; but do not quote it as
-          the book&rsquo;s wording at the table.
-        </p>
+        <div className={`mt-4 pl-4 ${SOURCE_EDGE.invented}`}>
+          <p className={`text-label uppercase tracking-widest ${SOURCE.invented}`}>
+            {SOURCE_GLYPH.invented} {SOURCE_WORD.invented}
+          </p>
+          <p className="mt-1 text-body text-ink-dim">
+            No section of the book says this name. It came from the extraction,
+            so what it connects to may well be right &mdash; but do not quote it
+            as the book&rsquo;s wording at the table.
+          </p>
+        </div>
       )}
 
       {/* WHAT IS ESTABLISHED, quoted exactly. The book's sections first: the
@@ -152,12 +167,19 @@ export function EntityProfile({
                   disabled={!onOpenSection}
                   className="block w-full text-left disabled:cursor-default"
                 >
-                  <span
-                    className={`text-label ${
-                      where.plane === 'campaign' ? SOURCE.yours : 'text-ink-dim'
-                    }`}
-                  >
-                    {where.heading || where.section_id}
+                  <span className="text-label uppercase tracking-widest">
+                    <span
+                      className={
+                        where.plane === 'campaign' ? SOURCE.yours : SOURCE.book
+                      }
+                    >
+                      {where.plane === 'campaign'
+                        ? SOURCE_GLYPH.yours
+                        : SOURCE_GLYPH.book}
+                    </span>{' '}
+                    <span className="text-ink-faint">
+                      {where.heading || where.section_id}
+                    </span>
                   </span>
                   {/* THE BOOK'S SENTENCE, IN THE BOOK'S FACE. This is the
                       one thing on the profile a DM reads aloud, and it was
@@ -191,11 +213,21 @@ export function EntityProfile({
           <h2 className="text-label uppercase tracking-widest text-ink-faint">
             Invented for this campaign
           </h2>
-          <ul className={`mt-2 flex flex-col gap-1 text-ui ${SOURCE.invented}`}>
+          <ul className={`mt-2 flex flex-col gap-1 pl-4 ${SOURCE_EDGE.invented}`}>
             {entity.invented.map((line, i) => (
-              <li key={i}>{line}</li>
+              <li key={i} className="text-body text-ink">
+                <span className={`mr-1.5 text-label ${SOURCE.invented}`}>
+                  {SOURCE_GLYPH.invented}
+                </span>
+                {line}
+              </li>
             ))}
           </ul>
+          {/* WHAT IT MEANS, said once at the end of the block rather than
+              trusted to the colour. */}
+          <p className="mt-2 text-meta text-ink-faint">
+            invented &mdash; nothing stands behind this.
+          </p>
         </section>
       )}
 
@@ -223,14 +255,17 @@ export function EntityProfile({
                 </span>
                 <Link
                   href={`/c/${campaign}/e/${encodeURIComponent(c.other_id)}`}
-                  className={
-                    c.other_plane === 'campaign'
-                      ? `${SOURCE.yours} hover:underline`
-                      : 'text-ink-dim hover:underline'
-                  }
+                  className="text-ink hover:underline"
                 >
                   {c.other}
                 </Link>
+                {/* THE GLYPH TRAVELS WITH THE HUE. A yellow name in a strip of
+                    grey ones was colour doing the whole job alone. */}
+                {c.other_plane === 'campaign' && (
+                  <span className={`text-label ${SOURCE.yours}`}>
+                    {SOURCE_GLYPH.yours}
+                  </span>
+                )}
                 {c.status !== 'accepted' && (
                   <span className="text-label text-ink-faint">guessed</span>
                 )}

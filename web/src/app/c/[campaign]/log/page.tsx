@@ -6,7 +6,6 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type LogNight } from '@/lib/api'
-import { SOURCE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * The adventure so far, by the night it happened.
@@ -80,18 +79,14 @@ export default function LogPage() {
                     >
                       {one.name}
                     </Link>
-                    {/* THE GLYPH IS THE SECOND CHANNEL. A scene the table has
-                        read is the book's words; a person they met is a thing
-                        they know exists -- different claims, and the grammar
-                        says so without relying on the colour. */}
-                    <span
-                      className={`text-label uppercase tracking-widest ${
-                        one.kind === 'scene' ? SOURCE.book : SOURCE.table
-                      }`}
-                    >
-                      {one.kind === 'scene'
-                        ? `${SOURCE_GLYPH.book} read`
-                        : `${SOURCE_GLYPH.table} met`}
+                    {/* READ AND MET ARE NOT SOURCES. This mapped the book hue
+                        onto "you read a scene" and the table hue onto "you met
+                        somebody", so an NPC the DM invented and the party met
+                        was marked as something said at the table. The hue names
+                        where a thing CAME FROM; what the party did with it is
+                        chrome. */}
+                    <span className="text-label uppercase tracking-widest text-ink-faint">
+                      {one.kind === 'scene' ? 'read' : 'met'}
                     </span>
                   </li>
                 ))}
@@ -106,7 +101,11 @@ export default function LogPage() {
           </p>
         )}
 
-        <p className={`mt-10 text-label ${SOURCE.book}`}>
+        {/* ASSURANCE COPY IS NOT A SOURCE CLAIM. This sentence is the app
+            speaking about itself; setting it in the book's hue made green mean
+            "trust us" on the one screen where it has to mean "the book said
+            this". */}
+        <p className="mt-10 text-meta text-ink-faint">
           Everything here is quoted from the book or written by your DM. None of
           it was made up by a machine.
         </p>

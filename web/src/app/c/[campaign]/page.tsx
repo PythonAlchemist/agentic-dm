@@ -15,7 +15,7 @@ import {
   type OrderRow,
   type Whoami,
 } from '@/lib/api'
-import { CHROME, SOURCE, SOURCE_GLYPH } from '@/lib/palette'
+import { CHROME, SOURCE, SOURCE_EDGE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * The table's own page: what is coming, and who is in it.
@@ -131,15 +131,19 @@ export default function CampaignHome() {
               <li key={row.section_id}>
                 <Link
                   href={`/c/${campaign}/s/${encodeURIComponent(row.section_id)}`}
-                  className={`flex h-9 items-center gap-3 rounded-md px-2 ${CHROME.row}`}
+                  className={`flex h-9 items-center gap-3 rounded-md px-2 ${CHROME.row} ${
+                    row.origin === 'campaign' ? SOURCE_EDGE.yours : ''
+                  }`}
                 >
-                  <span
-                    className={`text-ui ${
-                      row.origin === 'campaign' ? SOURCE.yours : 'text-ink'
-                    }`}
-                  >
-                    {row.heading}
-                  </span>
+                  {/* ROW TEXT STAYS INK; the edge carries the hue and this
+                      carries the glyph. A tinted sentence says the same thing
+                      a third time and turns a list into confetti. */}
+                  <span className="text-ui text-ink">{row.heading}</span>
+                  {row.origin === 'campaign' && (
+                    <span className={`shrink-0 text-label ${SOURCE.yours}`}>
+                      {SOURCE_GLYPH.yours}
+                    </span>
+                  )}
                   <span className="ml-auto shrink-0 text-label text-ink-faint">
                     {row.chapter}
                   </span>

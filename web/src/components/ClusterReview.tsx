@@ -196,7 +196,7 @@ export function ClusterReview({
             {plan.edges.map((edge) => (
               <li key={`${edge.source}-${edge.rel_type}-${edge.target}`}>
                 {edge.source}{' '}
-                <span className="text-amber-300/70">{edge.rel_type}</span>{' '}
+                <span className="text-yours/70">{edge.rel_type}</span>{' '}
                 {edge.target}
               </li>
             ))}
@@ -224,7 +224,7 @@ export function ClusterReview({
                     </span>
                     {' → '}
                     {edge.source}{' '}
-                    <span className="text-amber-300/70">{edge.rel_type}</span>{' '}
+                    <span className="text-yours/70">{edge.rel_type}</span>{' '}
                     {edge.target}
                   </span>
                   <button
@@ -261,7 +261,7 @@ export function ClusterReview({
             .join(' · ')}
         </p>
       )}
-      {failed && <p className="mt-2 text-label text-red-400">{failed}</p>}
+      {failed && <p className="mt-2 text-label text-ink-dim">{failed}</p>}
     </div>
   )
 }

@@ -189,7 +189,7 @@ export function ChatPane({
                 <p className="text-ui font-medium text-ink">{turn.question}</p>
 
                 {turn.error && (
-                  <p className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-ui text-red-400">
+                  <p className="rounded-md border border-line bg-surface px-3 py-2 text-ui text-ink-dim">
                     {turn.error}
                   </p>
                 )}

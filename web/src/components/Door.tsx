@@ -67,7 +67,7 @@ export function Door({ onOpened }: { onOpened: () => void }) {
           autoFocus
           autoComplete="current-password"
           spellCheck={false}
-          className="mt-5 w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-ui text-ink placeholder:text-ink-faint focus:border-line focus:outline-none"
+          className="mt-5 w-full rounded-md border border-line bg-surface px-3 py-2 font-mono text-ui text-ink placeholder:text-ink-faint focus:border-line "
         />
 
         <button
@@ -79,7 +79,7 @@ export function Door({ onOpened }: { onOpened: () => void }) {
         </button>
 
         {failed === 'refused' && (
-          <p className="mt-3 text-ui text-red-400">
+          <p className="mt-3 text-ui text-ink-dim">
             That token was refused. If it used to work, it may have been
             revoked &mdash; ask the DM for a new one.
           </p>
@@ -89,7 +89,7 @@ export function Door({ onOpened }: { onOpened: () => void }) {
             token that it was rejected is the one message that makes them stop
             trying. Their token is kept, so retrying costs them nothing. */}
         {failed === 'unreachable' && (
-          <p className="mt-3 text-ui text-amber-300">
+          <p className="mt-3 text-ui text-ink-dim">
             Could not reach the API to check. It may be starting up &mdash; your
             token has been kept, so try again in a moment.
           </p>

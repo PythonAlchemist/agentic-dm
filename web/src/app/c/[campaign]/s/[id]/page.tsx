@@ -168,7 +168,10 @@ export default function SectionPage() {
           onClick={() => setPopout(null)}
         >
           <div
-            className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-md border border-line bg-surface p-5 shadow-xl"
+            // A POPOVER IS THE OVERLAY STEP OF THE GROUND LADDER, lit from
+            // above. `` is invisible on a near-black ground, which is
+            // why elevation here is lightness and why shadows are banned.
+            className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-md bg-overlay p-5 lit"
             onClick={(e) => e.stopPropagation()}
           >
             <EntityProfile
@@ -239,8 +242,14 @@ function Named({
           <button
             key={i}
             onClick={() => onOpen(mention.entity_id)}
-            className={`underline decoration-dotted underline-offset-2 hover:decoration-solid ${
-              mention.plane === 'campaign' ? SOURCE.yours : 'text-ink'
+            // A GLYPH BEFORE EVERY NAME WOULD WRECK THE READING, so the
+            // second channel is the underline itself: the DM's own insertions
+            // are dashed, the book's own names dotted. Different in kind, and
+            // legible with the colour removed.
+            className={`underline underline-offset-2 hover:decoration-solid ${
+              mention.plane === 'campaign'
+                ? `decoration-dashed ${SOURCE.yours}`
+                : 'decoration-dotted text-ink'
             }`}
           >
             {piece}

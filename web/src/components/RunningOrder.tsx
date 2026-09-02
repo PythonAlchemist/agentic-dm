@@ -187,7 +187,7 @@ export function RunningOrder({
             : `${shown.length} found`}
         </span>
       </div>
-      {failed && <p className="px-3 py-2 text-meta text-red-400">{failed}</p>}
+      {failed && <p className="px-3 py-2 text-meta text-ink-dim">{failed}</p>}
       <ol className="max-h-[26rem] overflow-y-auto p-1">
         {groups.map((group) => (
           <li key={group.chapter}>
@@ -216,7 +216,7 @@ export function RunningOrder({
                 <span className="tabular-nums text-ink-faint">
                   {group.rows.length}
                   {group.mine > 0 && (
-                    <span className="text-amber-500/70"> ·{group.mine}</span>
+                    <span className="text-yours/70"> ·{group.mine}</span>
                   )}
                 </span>
               </button>
@@ -280,7 +280,7 @@ export function RunningOrder({
                 row.skipped
                   ? 'text-ink-faint line-through'
                   : row.origin === 'campaign'
-                    ? 'text-amber-300'
+                    ? 'text-yours'
                     : 'text-ink-dim'
               }`}
               title={row.section_id}
@@ -288,7 +288,7 @@ export function RunningOrder({
               {row.heading}
             </button>
             {row.origin === 'campaign' && (
-              <span className="shrink-0 text-label uppercase tracking-wide text-amber-600/80">
+              <span className="shrink-0 text-label uppercase tracking-wide text-yours/80">
                 yours
               </span>
             )}

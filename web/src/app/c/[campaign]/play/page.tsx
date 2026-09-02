@@ -12,7 +12,7 @@ import {
   type SessionDiff,
   type SessionRow,
 } from '@/lib/api'
-import { CHROME, SOURCE } from '@/lib/palette'
+import { CHROME, SOURCE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * A night of play: what you meant to run, and what you actually reached.
@@ -251,12 +251,15 @@ export default function PlayPage() {
                       >
                         <Link
                           href={`/c/${campaign}/s/${encodeURIComponent(row.section_id)}`}
-                          className={`truncate text-ui hover:underline ${
-                            row.origin === 'campaign' ? SOURCE.yours : 'text-ink'
-                          }`}
+                          className="truncate text-ui text-ink hover:underline"
                         >
                           {row.heading}
                         </Link>
+                        {row.origin === 'campaign' && (
+                          <span className={`shrink-0 text-label ${SOURCE.yours}`}>
+                            {SOURCE_GLYPH.yours}
+                          </span>
+                        )}
                         <span className="ml-auto flex shrink-0 items-center gap-2">
                           <Toggle
                             on={isPlanned}

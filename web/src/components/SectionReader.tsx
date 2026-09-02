@@ -198,7 +198,7 @@ export function SectionReader({
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <h2
           className={`mb-2 text-body font-medium ${
-            yours ? 'text-amber-200' : 'text-ink'
+            yours ? 'text-yours' : 'text-ink'
           }`}
         >
           {shown?.heading ?? 'Loading…'}
@@ -211,18 +211,18 @@ export function SectionReader({
         <p className="mb-4 text-meta text-ink-dim">
           {yours ? (
             <>
-              <span className="text-amber-400">Yours.</span> Written for this
+              <span className="text-yours">Yours.</span> Written for this
               campaign — the published book does not say this.
             </>
           ) : (
             <>
-              <span className="text-emerald-400/80">The book.</span>{' '}
+              <span className="text-book">The book.</span>{' '}
               {shown?.chapter}
             </>
           )}
         </p>
 
-        {failed && <p className="text-ui text-red-400">{failed}</p>}
+        {failed && <p className="text-ui text-ink-dim">{failed}</p>}
 
         {entity && (
           <EntityCard
@@ -348,7 +348,7 @@ export function SectionReader({
                         onClick={() => openEntity(named.entity_id)}
                         className={`hover:underline ${
                           named.plane === 'campaign'
-                            ? 'text-amber-200/90'
+                            ? 'text-yours/90'
                             : 'text-ink-dim'
                         }`}
                       >
@@ -381,7 +381,7 @@ export function SectionReader({
                           onClick={() => openEntity(edge.to_id)}
                           className={`hover:underline ${
                             edge.plane === 'campaign'
-                              ? 'text-amber-200/90'
+                              ? 'text-yours/90'
                               : 'text-ink'
                           }`}
                         >
@@ -400,7 +400,7 @@ export function SectionReader({
                           <button
                             onClick={() => reject(edge.from_id, edge.rel, edge.to_id)}
                             disabled={rejecting === edge.to_id + edge.rel}
-                            className="ml-1 text-label text-ink-faint opacity-0 transition-opacity group-hover/edge:opacity-100 hover:text-rose-300"
+                            className="ml-1 text-label text-ink-faint opacity-0 transition-opacity group-hover/edge:opacity-100 hover:text-invented"
                           >
                             {rejecting === edge.to_id + edge.rel ? '…' : 'no'}
                           </button>
@@ -503,7 +503,7 @@ function Named({
             onClick={() => onOpen(hit.entity_id)}
             title={`${hit.name}${hit.kind ? ` · ${hit.kind}` : ''}`}
             className={`underline decoration-dotted underline-offset-2 hover:decoration-solid ${
-              hit.plane === 'campaign' ? 'text-amber-200/90' : 'text-ink'
+              hit.plane === 'campaign' ? 'text-yours/90' : 'text-ink'
             }`}
           >
             {piece}
@@ -573,7 +573,7 @@ function EntityCard({
       <div className="mb-2 flex items-baseline justify-between gap-4">
         <h3
           className={`text-ui font-medium ${
-            yours ? 'text-amber-200' : 'text-ink'
+            yours ? 'text-yours' : 'text-ink'
           }`}
         >
           {entity.name}
@@ -594,7 +594,7 @@ function EntityCard({
       <p className="text-meta text-ink-dim">
         {yours ? (
           <>
-            <span className="text-amber-400">Yours.</span> Written for this
+            <span className="text-yours">Yours.</span> Written for this
             campaign.
           </>
         ) : unnamed ? (
@@ -608,7 +608,7 @@ function EntityCard({
           </>
         ) : (
           <>
-            <span className="text-emerald-400/80">The book.</span>{' '}
+            <span className="text-book">The book.</span>{' '}
             {entity.labels.join(' · ').toLowerCase() || 'named in the text'}
           </>
         )}
@@ -616,7 +616,7 @@ function EntityCard({
       </p>
 
       {unnamed && (
-        <p className="mt-2 rounded-md border border-rose-900/60 bg-rose-950/30 p-2 text-meta text-rose-200/70">
+        <p className="mt-2 rounded-md border border-line bg-surface p-2 text-meta text-invented">
           No section of the book says this name. It was derived when the book
           was read, so what it connects to may well be right — but do not quote
           it as the book&apos;s wording at the table.
@@ -657,8 +657,8 @@ function EntityCard({
                   onClick={() => onRead(where.section_id)}
                   className={`text-label uppercase tracking-wide hover:underline ${
                     where.plane === 'campaign'
-                      ? 'text-amber-300/70'
-                      : 'text-emerald-300/60'
+                      ? 'text-yours/70'
+                      : 'text-book'
                   }`}
                 >
                   {where.heading}

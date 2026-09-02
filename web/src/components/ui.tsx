@@ -74,7 +74,7 @@ export function Explain({ children, text }: { children: ReactNode; text: string 
           side="top"
           sideOffset={6}
           collisionPadding={12}
-          className="z-50 max-w-xs rounded-md border border-line bg-surface px-3 py-2 text-meta leading-relaxed text-ink-dim shadow-xl"
+          className="z-50 max-w-xs rounded-md border border-line bg-surface px-3 py-2 text-meta leading-relaxed text-ink-dim "
         >
           {text}
           <RadixTooltip.Arrow className="fill-neutral-700" />

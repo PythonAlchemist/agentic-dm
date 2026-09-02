@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation'
 
 import { Shell } from '@/components/product/Shell'
 import { tableAPI, type Found, type Held, type HeldBefore } from '@/lib/api'
-import { SOURCE } from '@/lib/palette'
+import { CHROME, SOURCE, SOURCE_EDGE, SOURCE_GLYPH } from '@/lib/palette'
 
 /**
  * What the table is carrying, and what it was carrying before.
@@ -93,16 +93,21 @@ export default function PartyPage() {
               {items.map((one) => (
                 <li
                   key={one.item_id}
-                  className="flex items-baseline gap-3 border-b border-line py-2"
+                  className={`flex h-11 items-center gap-3 rounded-md px-2 ${CHROME.row} ${
+                    one.plane === 'campaign' ? SOURCE_EDGE.yours : ''
+                  }`}
                 >
                   <Link
                     href={`/c/${campaign}/e/${encodeURIComponent(one.item_id)}`}
-                    className={`text-ui hover:underline ${
-                      one.plane === 'campaign' ? SOURCE.yours : 'text-ink'
-                    }`}
+                    className="text-ui text-ink hover:underline"
                   >
                     {one.name}
                   </Link>
+                  {one.plane === 'campaign' && (
+                    <span className={`shrink-0 text-label ${SOURCE.yours}`}>
+                      {SOURCE_GLYPH.yours}
+                    </span>
+                  )}
                   {one.since_session && (
                     <span className="text-label text-ink-faint">
                       since session {one.since_session}
@@ -256,13 +261,12 @@ function Picker({
               onClick={() => onPick(entity)}
               className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left text-ui hover:bg-overlay"
             >
-              <span
-                className={
-                  entity.plane === 'campaign' ? SOURCE.yours : 'text-ink'
-                }
-              >
-                {entity.name}
-              </span>
+              <span className="text-ink">{entity.name}</span>
+              {entity.plane === 'campaign' && (
+                <span className={`text-label ${SOURCE.yours}`}>
+                  {SOURCE_GLYPH.yours}
+                </span>
+              )}
               <span className="ml-auto text-label uppercase tracking-wide text-ink-faint">
                 {entity.labels.join(' ').toLowerCase()}
               </span>

@@ -90,7 +90,7 @@ export function YourMaterial({
       <p className="border-b border-line px-3 py-2 text-meta text-ink-dim">
         {elements.length} made · {stubs.length} still just a name
       </p>
-      {failed && <p className="px-3 py-2 text-meta text-red-400">{failed}</p>}
+      {failed && <p className="px-3 py-2 text-meta text-ink-dim">{failed}</p>}
       <div className="max-h-[22rem] overflow-y-auto p-1">
         {/* UNWRITTEN FIRST, because that is the work. A name with a role and
             no prose is a thing the DM meant to come back to. */}
@@ -185,7 +185,7 @@ function Row({
         className={`min-w-0 flex-1 truncate text-left text-meta ${
           readable
             ? 'text-ink-dim hover:underline'
-            : 'cursor-default text-amber-300'
+            : 'cursor-default text-yours'
         }`}
         title={element.role || element.entity_id}
       >
@@ -201,7 +201,7 @@ function Row({
       {draft === null && (
         <button
           onClick={() => setDraft(element.role || '')}
-          className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300"
+          className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-yours"
         >
           role
         </button>
@@ -210,7 +210,7 @@ function Row({
         <button
           onClick={onDraft}
           disabled={busy}
-          className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-amber-300 disabled:opacity-100"
+          className="shrink-0 text-label text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-yours disabled:opacity-100"
         >
           {busy ? 'drafting…' : 'flesh out'}
         </button>

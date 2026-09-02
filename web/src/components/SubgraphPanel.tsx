@@ -223,7 +223,7 @@ export function SubgraphPanel({ view }: { view: SubgraphView | null }) {
                           `sky`, which names THE TABLE -- something said in
                           conversation -- and these were never said by anyone. */}
                       <span
-                        className={`shrink-0 rounded-md border border-rose-900/70 px-1 text-label ${SOURCE.invented}`}
+                        className={`shrink-0 rounded-md border border-line px-1 text-label ${SOURCE.invented}`}
                       >
                         unnamed
                       </span>
