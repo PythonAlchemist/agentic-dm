@@ -227,6 +227,30 @@ RETURN a.id AS id, r.campaign AS campaign,
 LIMIT 50
 """
 
+#: AN ASSET SAYS WHERE IT CAME FROM. `origin` is `plane` for pixels: a portrait
+#: the book printed, one a DM uploaded and one a model imagined are three
+#: different things, and the moment they render alike the promise this project
+#: makes is broken in the most persuasive medium it has.
+#:
+#: SO IT IS PINNED AT ONE WRITER PER ORIGIN, and this is the check that says so
+#: rather than the discipline being remembered -- the same shape as
+#: `UNSOURCED_CANON_CLAIMS`, which exists because a forged edge read to a DM
+#: exactly like the book's own.
+#:
+#: A GENERATED ASSET MUST NAME ITS GENERATOR, for the reason a canon claim must
+#: cite its sentence. An image with no record of what produced it is a claim
+#: nobody can check.
+UNSOURCED_ASSETS = """
+MATCH (a:Asset)
+WHERE a.origin IS NULL
+   OR NOT a.origin IN ['book', 'uploaded', 'generated']
+   OR (a.origin = 'generated' AND coalesce(a.generator, '') = '')
+RETURN a.id AS id, a.campaign AS campaign,
+       'origin ' + coalesce(a.origin, 'unset') + ' does not say where it came from'
+       AS why
+LIMIT 50
+"""
+
 ROW_LIMIT = 50
 
 
@@ -257,6 +281,9 @@ CHECKS: tuple[Check, ...] = (
           "`delete_campaign` removes these; one run by hand leaves them"),
     Check("a mention's id spells its pair", MISFILED_MENTIONS,
           "rename them -- `merge_duplicates --mention-ids` does exactly this"),
+    Check("an asset says where it came from", UNSOURCED_ASSETS,
+          "delete it, or restore the origin its writer should have pinned; a "
+          "picture whose provenance is unknown reads as the book's"),
     Check("a mention joins one book", CROSS_BOOK_MENTIONS,
           "delete them; the scan that made them read every book's entities "
           "against one book's prose, and `_known_entities` now filters"),

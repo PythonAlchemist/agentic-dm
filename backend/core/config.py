@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     pdf_dir: Path = data_dir / "pdfs"
     transcript_dir: Path = data_dir / "transcripts"
     audio_dir: Path = data_dir / "audio"
+    #: Portraits and maps, keyed by content hash. Under , which is
+    #: gitignored -- an uploaded map of somebody's homebrew dungeon is theirs,
+    #: and the book's plates are the book's.
+    asset_dir: Path = data_dir / "assets"
     canon_dir: Path = data_dir / "canon"
     # The harvested D&D Beyond markdown cache. Gitignored like everything under
     # `data/`: the text is copyrighted and must never be committed.
