@@ -27,7 +27,20 @@ instead of boxes.
 
 **Overruled, and why:**
 
-- **All three designers on the source hues.** Each moved a hue "for colour blindness"
+- ~~**All three designers on the source hues.**~~ **CORRECTED — this ruling was
+  wrong.** The comparison was run against emerald-500 and amber-400 while the
+  product was painted in emerald-300 and amber-200, so it measured a palette the
+  app never had. Measured properly, what shipped had a worst pair of **dE 8.8**
+  (`yours` vs `invented` under deuteranopia — amber and rose collapsing, the two
+  the promise exists to keep apart). The designers were right that a problem
+  existed; C's diagnosis, that `invented` needed to move toward magenta so its
+  blue channel separates it, was the correct one. The hues are now searched
+  values with a worst pair of **dE 36.2**, every pair above 36, contrast
+  7.76–9.17 on surface, and `web/src/lib/__tests__/hues.test.ts` computes this
+  from `globals.css` on every run so a number in a comment can no longer be the
+  only thing holding it. Superseded text follows for the record:
+
+  Each moved a hue "for colour blindness"
   and each made it worse. Measured worst-pair separation under deuteranopia/protanopia
   (CIELab dE): current emerald/amber/sky/rose **29.9 / 35.0**; A's teal set 16.6 / 22.2;
   B's magenta set 24.2 / **10.2** (book and invented near-identical under protanopia —

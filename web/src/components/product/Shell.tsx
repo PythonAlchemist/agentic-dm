@@ -85,7 +85,7 @@ export function Shell({
 
   return (
     <div className="flex h-full flex-col bg-ground text-ink">
-      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-4">
+      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-surface px-4 lit">
         <Link
           href="/"
           className="mr-3 text-ui font-medium text-ink hover:text-chrome"

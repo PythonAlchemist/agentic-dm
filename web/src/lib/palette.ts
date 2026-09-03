@@ -20,12 +20,20 @@
  * unverified" is a claim about RELIABILITY, on a different axis from where a
  * sentence came from. It carries a ⚠ and muted text: the glyph is the signal.
  *
- * THE HUES SURVIVED A DESIGN REVIEW THAT TRIED TO CHANGE THEM. Three designers
- * independently moved one "for colour blindness"; simulation says all three
- * made it worse. Worst-pair separation (CIELab dE under deuteranopia and
- * protanopia): these four 29.9/35.0, a teal book 16.6/22.2, a magenta invented
- * 24.2/10.2 — that last pair being book-against-invented, the exact two the
- * promise exists to keep apart. The measured at-risk pair is BOOK vs TABLE.
+ * THE HUES WERE RETUNED, AFTER A MEASUREMENT ERROR WAS FOUND. Three designers
+ * independently moved one "for colour blindness" and all three were overruled
+ * on a simulation that had been run against the wrong colours — emerald-500 and
+ * amber-400, while the product was painted in emerald-300 and amber-200.
+ *
+ * Measured properly, what shipped had a worst pair of dE 8.8 under
+ * deuteranopia: YOURS against INVENTED. Amber and rose collapsed into each
+ * other — the DM's own material and a model's invention, which are the two
+ * this file exists to keep apart, and one shade apart in the same hue was
+ * exactly the defect its opening paragraph describes.
+ *
+ * The values now are searched, not picked: each source keeps its family, and
+ * lightness and chroma are tuned for the ground under both common colour
+ * blindnesses. Worst pair dE 36.2; every pair clears 36.
  *
  * WHICH IS WHY HUE NEVER WORKS ALONE. Every source is marked by hue AND a
  * redundant channel, and book and table differ in KIND: the book's words are

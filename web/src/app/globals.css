@@ -27,16 +27,28 @@
   --color-ink-faint: #8a8175;
   --color-chrome: #f4f0e8;
 
-  /* THE FOUR SOURCES, unchanged. Three designers each moved a hue "for
-     colour blindness" and each made it worse: measured worst-pair separation
-     under deuteranopia/protanopia is 29.9/35.0 for these against 16.6/22.4
-     and 24.2/10.2 for the proposed sets. The at-risk pair is book vs table,
-     not book vs invented -- which is why the redundant channel in DESIGN.md
-     §6 separates those two by KIND (serif face vs quotation glyph). */
-  --color-book: #6ee7b7;
-  --color-yours: #fde68a;
-  --color-table: #7dd3fc;
-  --color-invented: #fda4af;
+  /* THE FOUR SOURCES, RETUNED -- and the reason is a correction.
+  
+     Three designers each moved a hue for colour blindness and all three were
+     overruled on a measurement that turned out to be of the wrong colours: the
+     comparison used emerald-500 and amber-400 while the product was actually
+     painted in emerald-300 and amber-200. Measured properly, the palette that
+     shipped had a worst pair of dE 8.8 under deuteranopia -- `yours` against
+     `invented`, amber against rose, which are the two a DM must never confuse.
+     The designers were right that there was a problem; only their diagnosis of
+     WHICH pair differed, and one of them had it exactly.
+
+     These values were searched rather than picked: each source stays in its own
+     hue family so nothing has to be re-learned, and lightness and chroma were
+     tuned for this ground under both common colour blindnesses. Worst pair is
+     now dE 36.2 and every pair clears 36; contrast is 7.76-9.17 on surface.
+
+     The redundant channels in DESIGN.md §6 stay regardless. A palette that
+     measures well is not a reason to make colour carry a claim alone. */
+  --color-book: #64bd9e;      /* 8.35 ground / 7.76 surface */
+  --color-yours: #fdab16;     /* 9.87 / 9.17 */
+  --color-table: #56b5fe;     /* 8.46 / 7.86 */
+  --color-invented: #fe94c0;  /* 9.16 / 8.50 */
 
   --radius-md: 6px;
 
@@ -72,7 +84,7 @@ body {
      reader nothing: no animation, below all content, and every contrast
      ratio in DESIGN.md is computed against the wash's brightest point. */
   background:
-    radial-gradient(80rem 40rem at 50% -10rem, rgb(234 230 223 / 0.04), transparent 70%),
+    radial-gradient(64rem 32rem at 50% -6rem, rgb(255 238 210 / 0.09), transparent 72%),
     var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
@@ -95,7 +107,32 @@ body {
 /* A SURFACE CATCHES THE LIGHT ON ITS TOP EDGE. This replaces `box-shadow`,
    which is banned product-wide. */
 @utility lit {
-  border-top: 1px solid rgb(244 240 232 / 0.08);
+  border-top: 1px solid rgb(255 244 225 / 0.10);
+}
+
+/* A PANEL: the surface step, catching the light on its top edge. This is the
+   product's one piece of material, and it was defined and then used three
+   times in the whole app -- which is why the redesign read as a refactor. */
+@utility panel {
+  background-color: var(--color-surface);
+  border-top: 1px solid rgb(255 244 225 / 0.10);
+  border-radius: var(--radius-md);
+}
+
+/* The book's plates sink into the table instead of sitting in a box. */
+@utility plate {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+@utility plate-scrim {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 40%;
+  background: linear-gradient(transparent, rgb(19 17 16 / 0.85));
+  pointer-events: none;
 }
 
 /* THE CHROME LADDER. Hueless chrome reads as interactive through lightness

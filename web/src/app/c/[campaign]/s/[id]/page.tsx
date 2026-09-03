@@ -131,19 +131,21 @@ export default function SectionPage() {
                   </p>
                 </blockquote>
               ) : block.kind === 'illustration' ? (
-                <figure key={i} className="my-2 flex flex-col gap-2">
-                  {/* THE PLATE IS THE BOOK'S TOO, and says so in the same
-                      grammar as its sentences. No border: a frame around a
-                      printed illustration is a second frame. */}
+                <figure key={i} className="my-4 plate">
+                  {/* THE PLATE SINKS INTO THE TABLE rather than sitting in a
+                      box: it bleeds to the column, and its edge fades into the
+                      ground so the caption can sit on the image itself. A
+                      frame around a printed illustration is a second frame. */}
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={block.src}
                     alt={block.alt}
                     loading="lazy"
-                    className="max-w-full rounded-md"
+                    className="block w-full"
                   />
+                  <span className="plate-scrim" />
                   <figcaption
-                    className={`label ${SOURCE.book}`}
+                    className={`absolute bottom-0 left-0 px-3 py-2 label ${SOURCE.book}`}
                   >
                     {SOURCE_GLYPH.book} the book&rsquo;s art
                   </figcaption>
