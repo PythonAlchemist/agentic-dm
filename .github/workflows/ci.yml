@@ -1,0 +1,87 @@
+# What has to be true before main moves.
+#
+# THERE WAS NO CI. 2,800 backend tests, 56 frontend ones, twelve graph
+# invariants and a type checker, and the only thing that ran them was somebody
+# remembering to. A suite nobody runs is documentation.
+#
+# THE BACKEND SUITE NEEDS A REAL NEO4J and is not mocked, deliberately: the
+# defects this project keeps finding -- a NULL that removes a property instead
+# of setting it, an auto-commit that never commits, a constraint collision --
+# are all things a mock would have agreed with. So CI runs a throwaway instance
+# on the port the suite already expects.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A second push supersedes the first: the only run that matters is the tip.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: web — types, lint, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint src --max-warnings 0
+      - run: npx vitest run
+      # The build is a test: it type-checks the routes and catches a page that
+      # imports something it cannot reach at build time.
+      - run: npx next build
+
+  backend:
+    name: backend — 2,800 tests against a real graph
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword
+          NEO4J_PLUGINS: '["apoc"]'
+        ports:
+          # 7688 is what `tests/conftest.py` points at, so the suite needs no
+          # CI-specific configuration -- and configuration that differs between
+          # a laptop and CI is configuration that drifts.
+          - 7688:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --dev
+      - name: Apply the graph's constraints
+        # A fresh instance has none, and several tests exist to prove a
+        # collision is refused rather than silently doubling a node.
+        run: uv run python -m backend.scripts.apply_schema
+        env:
+          NEO4J_URI: bolt://localhost:7688
+      - run: uv run pytest -q
+        env:
+          NEO4J_URI: bolt://localhost:7688
+      - name: The twelve invariants
+        # These are the things that must be true of the graph itself. They pass
+        # trivially on an empty database, which is the point: if a test leaves
+        # debris behind, this is what says so.
+        run: uv run python -m backend.scripts.check_invariants
+        env:
+          NEO4J_URI: bolt://localhost:7688
