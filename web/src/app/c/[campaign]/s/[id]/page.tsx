@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { DraftCard } from '@/components/product/DraftCard'
@@ -62,7 +62,36 @@ export default function SectionPage() {
   const [drafting, setDrafting] = useState(false)
   const [draftFailed, setDraftFailed] = useState('')
 
+  // WHICH DRAFT REQUEST IS STILL WANTED. A request the DM has walked away from
+  // must not land on their screen: it would clear the action they just chose,
+  // show an error for something they abandoned, or drop a stale draft into the
+  // column. The counter is bumped whenever the intent changes, and a request
+  // whose id no longer matches simply stops.
+  const draftRequest = useRef(0)
+
+  // THE DM'S MATERIAL DOES NOT FOLLOW THEM TO ANOTHER SCENE. The entity popout
+  // pushes to a different section on this same route, so React reuses this
+  // component and every piece of state above survives the move. A stored block
+  // or a live draft rode along -- and storing that draft would anchor it to the
+  // NEW `section_id`, filing the DM's material under a scene they never wrote it
+  // for. This is React's documented "adjusting state when a prop changes": it
+  // re-renders before anything is painted, so the wrong section's material is
+  // never shown even for a frame.
+  const [shownSection, setShownSection] = useState(sectionId)
+  if (shownSection !== sectionId) {
+    setShownSection(sectionId)
+    setKept(null)
+    setDraft(null)
+    setDraftFailed('')
+    setMaterial(null)
+    setDrafting(false)
+  }
+
   useEffect(() => {
+    // A draft asked for on the section the DM just left is not wanted on the
+    // one they arrived at; the reset above cannot say so, because a ref must
+    // not be written during a render.
+    draftRequest.current += 1
     let cancelled = false
     labAPI
       .section(sectionId, campaign)
@@ -73,9 +102,23 @@ export default function SectionPage() {
     }
   }, [sectionId, campaign])
 
-  useEffect(() => {
-    if (material !== 'draft' || draft || drafting || !section) return
-    let cancelled = false
+  /**
+   * ASKING FOR A DRAFT IS A RESPONSE TO A CLICK, NOT SYNCHRONISATION WITH
+   * ANYTHING -- so it is not an effect, and used to be one.
+   *
+   * As an effect it needed a `drafting` guard that `drafting` itself could not
+   * be a dependency of (listing it re-fired the effect from its own first line,
+   * cancelling the request it had just started and then retrying it forever).
+   * That pair had a hole of its own: toggle draft off mid-flight and on again
+   * and the guard was still set, so no request went out and no dependency
+   * changed afterwards to fire one -- leaving the DM with the action selected
+   * and no spinner, no draft and no error until they double-toggled. Moving the
+   * request to the event removes the lint error at its cause instead of
+   * suppressing it, and dissolves the stranded state: there is no guard left to
+   * be stranded behind.
+   */
+  const startDraft = (forSection: SectionRead) => {
+    const id = (draftRequest.current += 1)
     setDrafting(true)
     setDraftFailed('')
     labAPI
@@ -84,18 +127,21 @@ export default function SectionPage() {
         // The book this section belongs to, matched rather than assumed: the
         // section id carries a prefix and the config carries the list, and the
         // two spellings have disagreed before.
-        const prefix = section.section_id.split(':')[0]
+        const prefix = forSection.section_id.split(':')[0]
         const book = config.books.find((b) => b.slug.endsWith(prefix))?.slug ?? prefix
         return labAPI.generate(
           'scene',
-          section.heading,
+          forSection.heading,
           config.default_model,
           config.defaults,
           book,
           campaign,
         )
       })
-      .then(setDraft)
+      .then((reply) => {
+        if (draftRequest.current !== id) return
+        setDraft(reply)
+      })
       // THE RAIL RETURNS TO REST AND SAYS WHY. Nothing was written, so there is
       // nothing to roll back -- but a silent failure leaves a DM clicking an
       // action that appears to do nothing at all.
@@ -103,31 +149,16 @@ export default function SectionPage() {
         // A DM who has moved on has moved on. Without this, a failure that
         // lands after they opened the write form unmounts it and takes the
         // words they had already typed with it.
-        if (cancelled) return
+        if (draftRequest.current !== id) return
         setMaterial(null)
         setDraftFailed(String(error).replace(/^Error:\s*/, ''))
       })
-      .finally(() => setDrafting(false))
-    return () => {
-      cancelled = true
-    }
-    // `drafting` IS DELIBERATELY NOT A DEPENDENCY, though the guard above
-    // reads it. This effect sets `drafting` to `true` on its own first line,
-    // and if `drafting` were listed, THAT state change would re-fire the
-    // effect on the very next render -- which runs this invocation's cleanup
-    // (`cancelled = true`) before the network has had any chance to answer.
-    // Two things then follow, both confirmed by instrumenting the effect and
-    // watching the actual sequence rather than assuming it: every outcome of
-    // this request lands with `cancelled` already true, so a failure while
-    // the DM is still sitting in draft mode shows nothing at all -- and once
-    // that settled request's unguarded `.finally` resets `drafting` back to
-    // `false`, THAT change re-passes the guard and fires a brand new request
-    // nobody asked for, which repeats the same cycle on its own failure. Left
-    // in, this is not a smaller version of the bug being fixed here -- it is
-    // an uncapped retry loop against a real model endpoint, silent to the DM
-    // for as long as every attempt keeps failing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [material, draft, section, campaign])
+      .finally(() => {
+        if (draftRequest.current !== id) return
+        setDrafting(false)
+      })
+  }
+
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPopout(null)
@@ -253,8 +284,12 @@ export default function SectionPage() {
               campaign={campaign}
               reply={draft}
               anchor={section.section_id}
-              onStored={() => {
-                setKept({ title: draft.title, body: draft.body })
+              // THE WORDS THAT WERE STORED, not the ones the model handed
+              // over. The DM's edits live in the card's own state, so taking
+              // `draft.body` here re-showed the model's untouched prose under
+              // ✎ YOURS while the graph held the rewrite.
+              onStored={(title, body) => {
+                setKept({ title, body })
                 setMaterial(null)
                 setDraft(null)
               }}
@@ -288,11 +323,23 @@ export default function SectionPage() {
             campaign={campaign}
             open={material}
             onOpen={(action) => {
-              // A new choice clears the last one's complaint. Without this the
-              // rail returns to rest after a failed draft and the error outlives
-              // it, sitting beside whatever the DM opens next.
+              // A new choice clears the last one's complaint, and abandons any
+              // draft still in flight. Without this the rail returns to rest
+              // after a failed draft and the error outlives it, sitting beside
+              // whatever the DM opens next.
+              draftRequest.current += 1
               setDraftFailed('')
+              setDrafting(false)
+              // STORING IS NOT A DEAD END. `kept` used to latch: every slot in
+              // the column is guarded on `!kept`, so once anything was stored
+              // the rail's actions opened onto nothing at all. The section is
+              // in the graph; the block was the confirmation of that, and
+              // choosing the next action retires it.
+              setKept(null)
               setMaterial(action)
+              // A draft already in hand is shown again rather than paid for
+              // twice -- toggling the card shut is not discarding it.
+              if (action === 'draft' && !draft) startDraft(section)
             }}
           />
         </aside>

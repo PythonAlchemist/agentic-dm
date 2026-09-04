@@ -2,8 +2,13 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+// THE SECTION THE READER IS ON, movable -- the entity popout pushes to
+// another section on this same route, so the id can change under a mounted
+// component and one test below needs to do exactly that.
+let onSection = 'kftgv:the-thing'
+
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ campaign: 'p1', id: 'kftgv:the-thing' }),
+  useParams: () => ({ campaign: 'p1', id: onSection }),
   useRouter: () => ({ push: vi.fn() }),
 }))
 
@@ -22,6 +27,8 @@ vi.mock('@/lib/api', async (orig) => {
       ...real.labAPI,
       config: vi.fn(),
       generate: vi.fn(),
+      store: vi.fn(),
+      deriveEdges: vi.fn().mockResolvedValue({ written: 0, dropped: {} }),
       section: vi.fn().mockResolvedValue({
         section_id: 'kftgv:the-thing',
         describes: null,
@@ -52,6 +59,7 @@ import { labAPI } from '@/lib/api'
 // calls from every test that ran before it in the same file.
 beforeEach(() => {
   vi.clearAllMocks()
+  onSection = 'kftgv:the-thing'
 })
 
 /**
@@ -266,5 +274,167 @@ describe('a draft failure does not retry itself against the backend', () => {
       await new Promise((resolve) => setTimeout(resolve, 0))
     }
     expect(labAPI.config).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * THE GAP THAT LET THE WORST BUG THROUGH: every test above stops at the
+ * request, and none of them ever rendered a stored block from a real store.
+ * `DraftCard` holds the DM's edits in its own state and stores them, but its
+ * `onStored` carried nothing back -- so the page re-showed the MODEL'S
+ * original prose under `✎ YOURS`, the hue reserved for the DM's own words,
+ * while the graph held the rewrite. That is the one thing `palette.ts` exists
+ * to prevent, and it survived because the store path was only ever asserted
+ * on the request body.
+ */
+describe('storing an edited draft', () => {
+  it('shows the DM\'s edited words in the stored block, not the model\'s', async () => {
+    vi.mocked(labAPI.config).mockResolvedValue({
+      default_model: 'm',
+      defaults: {},
+      books: [{ slug: 'kftgv' }],
+    } as never)
+    vi.mocked(labAPI.generate).mockResolvedValue({
+      kind: 'scene',
+      subject: 'The Thing',
+      title: 'A quiet scene',
+      body: 'the model wrote this',
+      from_canon: [],
+      from_yours: [],
+      from_context: [],
+      invented: [],
+      sources: [],
+      model: 'm',
+    } as never)
+    vi.mocked(labAPI.store).mockResolvedValue({ section_id: 'p1:kept' } as never)
+
+    render(<SectionPage />)
+
+    fireEvent.click(await screen.findByText('draft it for me'))
+
+    const editable = await screen.findByDisplayValue('the model wrote this')
+    fireEvent.change(editable, { target: { value: "the DM's own rewrite" } })
+
+    fireEvent.click(screen.getByText('store as yours'))
+
+    // The draft card is gone and the stored block stands in the slot it
+    // occupied -- carrying the words the DM actually stored, not the ones the
+    // model handed them.
+    await waitFor(() => expect(screen.queryByText('store as yours')).toBeNull())
+    expect(screen.getByText("the DM's own rewrite")).toBeDefined()
+    expect(screen.queryByText('the model wrote this')).toBeNull()
+    expect(screen.getAllByText(/✎ YOURS/).length).toBeGreaterThan(0)
+
+    // And what went to the graph is the same text the screen is showing.
+    expect(vi.mocked(labAPI.store).mock.calls[0][0]).toMatchObject({
+      body: "the DM's own rewrite",
+      generated_body: 'the model wrote this',
+    })
+  })
+})
+
+/**
+ * I3: THE HOLE THE `drafting` GUARD LEFT. Asking for a draft was an effect
+ * that early-returned while `drafting` was true, with `drafting` deliberately
+ * not a dependency. Click, click again (the cleanup cancels), click a third
+ * time and the guard was still set: no request went out, and nothing
+ * afterwards changed a dependency to fire one. The DM sat with the action
+ * selected and no spinner, no draft and no error until they double-toggled.
+ * Starting the request from the click has no guard to strand them behind.
+ */
+describe('toggling draft off and on again mid-flight', () => {
+  it('asks again instead of stranding the DM with nothing at all', async () => {
+    // A request that never settles, so the first one is genuinely in flight.
+    vi.mocked(labAPI.config).mockImplementation(() => new Promise(() => {}) as never)
+
+    render(<SectionPage />)
+
+    const draftButton = await screen.findByText('draft it for me')
+    fireEvent.click(draftButton)
+    await screen.findByText('drafting…')
+    expect(labAPI.config).toHaveBeenCalledTimes(1)
+
+    // Off -- the DM changes their mind while the first request is still out.
+    fireEvent.click(draftButton)
+    expect(screen.queryByText('drafting…')).toBeNull()
+
+    // And on again. A request must go out, and the spinner must come back.
+    fireEvent.click(draftButton)
+    await screen.findByText('drafting…')
+    expect(labAPI.config).toHaveBeenCalledTimes(2)
+  })
+})
+
+/**
+ * I4: THE DM'S MATERIAL MUST NOT FOLLOW THEM TO ANOTHER SCENE. The popout
+ * pushes to a different section on this same route, so React reuses this
+ * component -- and nothing reset when the id changed. A stored block rode
+ * along, and a live draft stored afterwards would have been anchored to the
+ * section the DM had walked to rather than the one they wrote it for.
+ */
+describe('moving to another section', () => {
+  it('leaves the stored block behind with the section it belongs to', async () => {
+    vi.mocked(labAPI.config).mockResolvedValue({
+      default_model: 'm',
+      defaults: {},
+      books: [{ slug: 'kftgv' }],
+    } as never)
+    vi.mocked(labAPI.generate).mockResolvedValue({
+      kind: 'scene',
+      subject: 'The Thing',
+      title: 'A quiet scene',
+      body: 'the model wrote this',
+      from_canon: [],
+      from_yours: [],
+      from_context: [],
+      invented: [],
+      sources: [],
+      model: 'm',
+    } as never)
+    vi.mocked(labAPI.store).mockResolvedValue({ section_id: 'p1:kept' } as never)
+
+    const { rerender } = render(<SectionPage />)
+
+    fireEvent.click(await screen.findByText('draft it for me'))
+    fireEvent.click(await screen.findByText('store as yours'))
+    await waitFor(() => expect(screen.getByText('the model wrote this')).toBeDefined())
+
+    // The DM follows a name in the prose to another section.
+    onSection = 'kftgv:somewhere-else'
+    rerender(<SectionPage />)
+
+    expect(screen.queryByText('the model wrote this')).toBeNull()
+  })
+
+  it('lets the rail open again on the same section after a store', async () => {
+    vi.mocked(labAPI.config).mockResolvedValue({
+      default_model: 'm',
+      defaults: {},
+      books: [{ slug: 'kftgv' }],
+    } as never)
+    vi.mocked(labAPI.generate).mockResolvedValue({
+      kind: 'scene',
+      subject: 'The Thing',
+      title: 'A quiet scene',
+      body: 'the model wrote this',
+      from_canon: [],
+      from_yours: [],
+      from_context: [],
+      invented: [],
+      sources: [],
+      model: 'm',
+    } as never)
+    vi.mocked(labAPI.store).mockResolvedValue({ section_id: 'p1:kept' } as never)
+
+    render(<SectionPage />)
+
+    fireEvent.click(await screen.findByText('draft it for me'))
+    fireEvent.click(await screen.findByText('store as yours'))
+    await waitFor(() => expect(screen.getByText('the model wrote this')).toBeDefined())
+
+    // `kept` used to latch: every slot is guarded on `!kept`, so the rail's
+    // actions opened onto nothing once anything had been stored.
+    fireEvent.click(screen.getByText('write a scene here'))
+    await screen.findByPlaceholderText('your words')
   })
 })

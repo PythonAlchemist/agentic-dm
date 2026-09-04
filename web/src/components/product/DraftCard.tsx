@@ -29,7 +29,12 @@ export function DraftCard({
   campaign: string
   reply: GeneratedReply
   anchor: string
-  onStored: () => void
+  // THE SAME SIGNATURE `WriteBlock` HAS, and for the same reason: the words
+  // that were stored live in this component's own state, so a callback that
+  // carries nothing back leaves the page to guess -- and it guessed `reply.body`,
+  // the model's untouched prose, which then rendered under the hue reserved for
+  // the DM's own material. What went into the graph comes back out here.
+  onStored: (title: string, body: string) => void
   onDiscard: () => void
 }) {
   const [body, setBody] = useState(reply.body)
@@ -46,7 +51,7 @@ export function DraftCard({
         // AFTER THE WRITE, NEVER INSIDE IT. It costs a model call, and what it
         // writes is a guess -- so a failure here must not read as a failed store.
         labAPI.deriveEdges(campaign, stored.section_id).catch(() => undefined)
-        onStored()
+        onStored(reply.title, body)
       })
       .catch((error) => {
         setBusy(false)

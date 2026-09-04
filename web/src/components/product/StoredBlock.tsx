@@ -1,10 +1,17 @@
 import { SOURCE, SOURCE_EDGE, SOURCE_GLYPH, SOURCE_WORD } from '@/lib/palette'
 
 /**
- * What a draft becomes. Rendered in the SLOT THE DRAFT OCCUPIED, so accepting
- * a thing does not move it: the edge goes solid, the glyph changes, and the
- * prose stays where the DM was reading it. The transition is the product's
- * whole point, and it is only visible if nothing jumps.
+ * What the DM's material becomes once it is in the graph. Rendered in the SLOT
+ * THE BLOCK BEFORE IT OCCUPIED, so accepting a thing does not move it: the
+ * prose stays exactly where the DM was reading it.
+ *
+ * THE RE-MARKING IS THE DRAFT PATH'S. Coming from `DraftCard` the dashed rose
+ * edge goes solid amber and ◇ becomes ✎ -- provenance changing in place, which
+ * §8.4 calls the product's whole point made visible, and which is only visible
+ * if nothing jumps. Coming from `WriteBlock` there is nothing to re-mark: it
+ * already wore the solid `yours` edge and this same glyph, because a scene a
+ * person typed was never invented. What changes on that path is the line
+ * beneath the badge -- "not stored yet" becomes the citation.
  */
 export function StoredBlock({ title, body }: { title: string; body: string }) {
   return (
