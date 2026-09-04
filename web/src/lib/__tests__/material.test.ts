@@ -63,6 +63,7 @@ describe('draftedStore', () => {
     const r = reply({
       body: 'the model wrote this',
       from_canon: [{ claim: 'c', cite: 'A Cry for Help' }],
+      from_yours: [{ claim: 'you wrote it', cite: 'This campaign' }],
       from_context: ['said at the table'],
       invented: ['invented one'],
     })
@@ -77,7 +78,7 @@ describe('draftedStore', () => {
     expect(body.from_canon).toEqual([{ claim: 'c', cite: 'A Cry for Help' }])
     expect(body.from_context).toEqual(['said at the table'])
     expect(body.invented).toEqual(['invented one'])
-    expect(body.from_yours).toEqual([])
+    expect(body.from_yours).toEqual([{ claim: 'you wrote it', cite: 'This campaign' }])
     expect(body.model).toBe('m')
   })
 })
