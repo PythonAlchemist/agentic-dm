@@ -57,12 +57,9 @@ export function DraftCard({
   return (
     <div className={`my-6 py-2 pl-4 ${SOURCE_EDGE.invented}`}>
       <p className="label">
-        {/* Glyph and word sit in separate spans, not one run of text: the
-            splitOf section below renders this same source's own heading as
-            "{glyph} {word}" in a single element, and a duplicate literal
-            match there is a false collision, not two real instances. */}
-        <span className={SOURCE.invented}>{SOURCE_GLYPH.invented}</span>{' '}
-        <span className={SOURCE.invented}>{SOURCE_WORD.invented}</span>{' '}
+        <span className={SOURCE.invented}>
+          {SOURCE_GLYPH.invented} {SOURCE_WORD.invented}
+        </span>{' '}
         <span className="text-ink-faint">a draft — nothing is stored</span>
       </p>
 

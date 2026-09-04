@@ -25,7 +25,9 @@ describe('DraftCard', () => {
     render(<DraftCard {...props} />)
     expect(screen.getByText(/§ BOOK/)).toBeDefined()
     expect(screen.getByText(/❝ TABLE/)).toBeDefined()
-    expect(screen.getByText(/◇ INVENTED/)).toBeDefined()
+    // Twice, deliberately: the header badge says the whole card is invented,
+    // and the list heading says which claims are.
+    expect(screen.getAllByText(/◇ INVENTED/)).toHaveLength(2)
     expect(screen.queryByText(/✎ YOURS/)).toBeNull()
   })
 
