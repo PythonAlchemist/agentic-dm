@@ -8,5 +8,13 @@ export default defineConfig({
   // Component tests opt into a DOM per file with `// @vitest-environment jsdom`.
   // The default stays `node`: the decisions in `lib/` are where the tests live,
   // and paying for a DOM to assert on a pure function is a tax on every run.
-  test: { environment: 'node', include: ['src/**/*.test.{ts,tsx}'] },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.{ts,tsx}'],
+    // Not `globals: true`: that would put `afterEach` etc. on every test's
+    // ambient scope, including plain `node` files that never asked for one.
+    // `setupFiles` runs unconditionally instead, and the file inside only
+    // touches the DOM cleanup path -- inert for a test that never rendered.
+    setupFiles: ['./vitest.setup.ts'],
+  },
 })

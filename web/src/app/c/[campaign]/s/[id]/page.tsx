@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { EntityProfile } from '@/components/product/EntityProfile'
+import { MaterialRail, type MaterialAction } from '@/components/product/MaterialRail'
 import { Reveal } from '@/components/product/Reveal'
 import { Shell } from '@/components/product/Shell'
 import { labAPI, type EntityRead, type SectionRead } from '@/lib/api'
@@ -52,6 +53,7 @@ export default function SectionPage() {
   const [section, setSection] = useState<SectionRead | null>(null)
   const [popout, setPopout] = useState<EntityRead | null>(null)
   const [failed, setFailed] = useState('')
+  const [material, setMaterial] = useState<MaterialAction | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -186,13 +188,14 @@ export default function SectionPage() {
             target={section.section_id}
             name={section.heading}
           />
+          <MaterialRail campaign={campaign} open={material} onOpen={setMaterial} />
         </aside>
         </div>
       )}
 
       {popout && (
         <div
-          className="fixed inset-0 z-20 flex items-start justify-center bg-ground/70 p-6 pt-20"
+          className="fixed inset-0 z-20 flex items-start justify-center bg-ink/40 p-6 pt-20"
           onClick={() => setPopout(null)}
         >
           <div
