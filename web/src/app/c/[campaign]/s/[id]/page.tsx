@@ -220,7 +220,9 @@ export default function SectionPage() {
               onDiscard={() => setMaterial(null)}
             />
           )}
-          {!kept && drafting && <p className="my-6 text-ui text-ink-dim">drafting…</p>}
+          {!kept && material === 'draft' && drafting && (
+            <p className="my-6 text-ui text-ink-dim">drafting…</p>
+          )}
           {!kept && draftFailed && <p className="my-6 text-label text-ink-dim">⚠ {draftFailed}</p>}
           {!kept && material === 'draft' && draft && (
             <DraftCard
@@ -258,7 +260,17 @@ export default function SectionPage() {
             target={section.section_id}
             name={section.heading}
           />
-          <MaterialRail campaign={campaign} open={material} onOpen={setMaterial} />
+          <MaterialRail
+            campaign={campaign}
+            open={material}
+            onOpen={(action) => {
+              // A new choice clears the last one's complaint. Without this the
+              // rail returns to rest after a failed draft and the error outlives
+              // it, sitting beside whatever the DM opens next.
+              setDraftFailed('')
+              setMaterial(action)
+            }}
+          />
         </aside>
         </div>
       )}
