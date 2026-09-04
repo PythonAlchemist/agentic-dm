@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
+import { DraftCard } from '@/components/product/DraftCard'
 import { EntityProfile } from '@/components/product/EntityProfile'
 import { MaterialRail, type MaterialAction } from '@/components/product/MaterialRail'
 import { Reveal } from '@/components/product/Reveal'
 import { Shell } from '@/components/product/Shell'
 import { StoredBlock } from '@/components/product/StoredBlock'
 import { WriteBlock } from '@/components/product/WriteBlock'
-import { labAPI, type EntityRead, type SectionRead } from '@/lib/api'
+import { labAPI, type EntityRead, type GeneratedReply, type SectionRead } from '@/lib/api'
 import { EMPHASIS_MARK, readingBlocks, withEmphasis } from '@/lib/reading'
 import {
   SOURCE,
@@ -57,6 +58,9 @@ export default function SectionPage() {
   const [failed, setFailed] = useState('')
   const [material, setMaterial] = useState<MaterialAction | null>(null)
   const [kept, setKept] = useState<{ title: string; body: string } | null>(null)
+  const [draft, setDraft] = useState<GeneratedReply | null>(null)
+  const [drafting, setDrafting] = useState(false)
+  const [draftFailed, setDraftFailed] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -68,6 +72,38 @@ export default function SectionPage() {
       cancelled = true
     }
   }, [sectionId, campaign])
+
+  useEffect(() => {
+    if (material !== 'draft' || draft || drafting || !section) return
+    setDrafting(true)
+    setDraftFailed('')
+    labAPI
+      .config()
+      .then((config) => {
+        // The book this section belongs to, matched rather than assumed: the
+        // section id carries a prefix and the config carries the list, and the
+        // two spellings have disagreed before.
+        const prefix = section.section_id.split(':')[0]
+        const book = config.books.find((b) => b.slug.endsWith(prefix))?.slug ?? prefix
+        return labAPI.generate(
+          'scene',
+          section.heading,
+          config.default_model,
+          config.defaults,
+          book,
+          campaign,
+        )
+      })
+      .then(setDraft)
+      // THE RAIL RETURNS TO REST AND SAYS WHY. Nothing was written, so there is
+      // nothing to roll back -- but a silent failure leaves a DM clicking an
+      // action that appears to do nothing at all.
+      .catch((error) => {
+        setMaterial(null)
+        setDraftFailed(String(error).replace(/^Error:\s*/, ''))
+      })
+      .finally(() => setDrafting(false))
+  }, [material, draft, drafting, section, campaign])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPopout(null)
@@ -182,6 +218,24 @@ export default function SectionPage() {
                 setMaterial(null)
               }}
               onDiscard={() => setMaterial(null)}
+            />
+          )}
+          {!kept && drafting && <p className="my-6 text-ui text-ink-dim">drafting…</p>}
+          {!kept && draftFailed && <p className="my-6 text-label text-ink-dim">⚠ {draftFailed}</p>}
+          {!kept && material === 'draft' && draft && (
+            <DraftCard
+              campaign={campaign}
+              reply={draft}
+              anchor={section.section_id}
+              onStored={() => {
+                setKept({ title: draft.title, body: draft.body })
+                setMaterial(null)
+                setDraft(null)
+              }}
+              onDiscard={() => {
+                setDraft(null)
+                setMaterial(null)
+              }}
             />
           )}
         </article>
