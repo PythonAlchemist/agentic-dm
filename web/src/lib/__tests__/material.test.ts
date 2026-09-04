@@ -22,6 +22,8 @@ describe('splitOf', () => {
       invented: ['the model supplied it'],
     }))
     expect(groups.map((g) => g.source)).toEqual(['book', 'yours', 'table', 'invented'])
+    expect(groups[0].claims).toEqual([{ claim: 'the book said it', cite: 'A Cry for Help' }])
+    expect(groups[1].claims).toEqual([{ claim: 'you wrote it', cite: 'This campaign' }])
     expect(groups[2].claims).toEqual([{ claim: 'somebody said it', cite: '' }])
     expect(groups[3].claims).toEqual([{ claim: 'the model supplied it', cite: '' }])
   })
