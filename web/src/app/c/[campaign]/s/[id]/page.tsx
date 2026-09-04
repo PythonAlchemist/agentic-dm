@@ -75,6 +75,7 @@ export default function SectionPage() {
 
   useEffect(() => {
     if (material !== 'draft' || draft || drafting || !section) return
+    let cancelled = false
     setDrafting(true)
     setDraftFailed('')
     labAPI
@@ -99,11 +100,34 @@ export default function SectionPage() {
       // nothing to roll back -- but a silent failure leaves a DM clicking an
       // action that appears to do nothing at all.
       .catch((error) => {
+        // A DM who has moved on has moved on. Without this, a failure that
+        // lands after they opened the write form unmounts it and takes the
+        // words they had already typed with it.
+        if (cancelled) return
         setMaterial(null)
         setDraftFailed(String(error).replace(/^Error:\s*/, ''))
       })
       .finally(() => setDrafting(false))
-  }, [material, draft, drafting, section, campaign])
+    return () => {
+      cancelled = true
+    }
+    // `drafting` IS DELIBERATELY NOT A DEPENDENCY, though the guard above
+    // reads it. This effect sets `drafting` to `true` on its own first line,
+    // and if `drafting` were listed, THAT state change would re-fire the
+    // effect on the very next render -- which runs this invocation's cleanup
+    // (`cancelled = true`) before the network has had any chance to answer.
+    // Two things then follow, both confirmed by instrumenting the effect and
+    // watching the actual sequence rather than assuming it: every outcome of
+    // this request lands with `cancelled` already true, so a failure while
+    // the DM is still sitting in draft mode shows nothing at all -- and once
+    // that settled request's unguarded `.finally` resets `drafting` back to
+    // `false`, THAT change re-passes the guard and fires a brand new request
+    // nobody asked for, which repeats the same cycle on its own failure. Left
+    // in, this is not a smaller version of the bug being fixed here -- it is
+    // an uncapped retry loop against a real model endpoint, silent to the DM
+    // for as long as every attempt keeps failing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [material, draft, section, campaign])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPopout(null)
