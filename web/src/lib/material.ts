@@ -1,4 +1,5 @@
 import type { GeneratedReply } from '@/lib/api'
+import { labAPI } from '@/lib/api'
 import type { Source } from '@/lib/palette'
 
 export interface SourceClaim {
@@ -37,4 +38,61 @@ export function splitOf(reply: GeneratedReply): SourceGroup[] {
     { source: 'invented', claims: bare(reply.invented) },
   ]
   return groups.filter((g) => g.claims.length > 0)
+}
+
+export type StoreBody = Parameters<typeof labAPI.store>[0]
+
+/**
+ * A SCENE A PERSON TYPED. Every source list is empty and that is the true
+ * answer, not a degenerate one: nothing was drawn from anywhere, because
+ * somebody wrote it. `generated_body: ''` is how a later reader tells this
+ * apart from a draft that was accepted unchanged.
+ */
+export function handWrittenStore(a: {
+  campaign: string
+  title: string
+  body: string
+  anchor: string
+}): StoreBody {
+  return {
+    campaign: a.campaign,
+    kind: 'scene',
+    title: a.title,
+    body: a.body,
+    generated_body: '',
+    from_canon: [],
+    from_yours: [],
+    invented: [],
+    from_context: [],
+    sources: [],
+    anchor: a.anchor,
+    model: '',
+  }
+}
+
+/**
+ * A DRAFT THE DM KEPT. `body` carries their edits; `generated_body` keeps what
+ * the model produced. The pair is the whole record of how much of this is
+ * theirs, and it is why editing by hand does not erase the split.
+ */
+export function draftedStore(a: {
+  campaign: string
+  reply: GeneratedReply
+  body: string
+  anchor: string
+}): StoreBody {
+  return {
+    campaign: a.campaign,
+    kind: a.reply.kind,
+    title: a.reply.title,
+    body: a.body,
+    generated_body: a.reply.body,
+    from_canon: a.reply.from_canon ?? [],
+    from_yours: a.reply.from_yours ?? [],
+    invented: a.reply.invented ?? [],
+    from_context: a.reply.from_context ?? [],
+    sources: a.reply.sources ?? [],
+    anchor: a.anchor,
+    model: a.reply.model,
+  }
 }
