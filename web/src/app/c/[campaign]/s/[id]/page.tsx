@@ -7,6 +7,7 @@ import { EntityProfile } from '@/components/product/EntityProfile'
 import { MaterialRail, type MaterialAction } from '@/components/product/MaterialRail'
 import { Reveal } from '@/components/product/Reveal'
 import { Shell } from '@/components/product/Shell'
+import { StoredBlock } from '@/components/product/StoredBlock'
 import { WriteBlock } from '@/components/product/WriteBlock'
 import { labAPI, type EntityRead, type SectionRead } from '@/lib/api'
 import { EMPHASIS_MARK, readingBlocks, withEmphasis } from '@/lib/reading'
@@ -55,6 +56,7 @@ export default function SectionPage() {
   const [popout, setPopout] = useState<EntityRead | null>(null)
   const [failed, setFailed] = useState('')
   const [material, setMaterial] = useState<MaterialAction | null>(null)
+  const [kept, setKept] = useState<{ title: string; body: string } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -170,11 +172,15 @@ export default function SectionPage() {
             )}
           </div>
 
-          {material === 'write' && (
+          {kept && <StoredBlock title={kept.title} body={kept.body} />}
+          {!kept && material === 'write' && (
             <WriteBlock
               campaign={campaign}
               anchor={section.section_id}
-              onStored={() => setMaterial(null)}
+              onStored={(title, body) => {
+                setKept({ title, body })
+                setMaterial(null)
+              }}
               onDiscard={() => setMaterial(null)}
             />
           )}
